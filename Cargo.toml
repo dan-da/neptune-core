@@ -59,6 +59,7 @@ strum = "0"
 strum_macros = "0"
 
 [dev-dependencies]
+num-format = "0.4"
 pin-project-lite = "0"
 tokio-test = "0"
 

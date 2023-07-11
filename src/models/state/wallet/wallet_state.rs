@@ -719,6 +719,7 @@ impl WalletState {
 
 #[cfg(test)]
 mod tests {
+    use num_format::{Locale, ToFormattedString};
     use tracing_test::traced_test;
 
     use super::*;
@@ -739,6 +740,7 @@ mod tests {
         println!("balance: {balance}");
 
         // let db = wallet_state.wallet_db.lock().await;
+        let mut total_size = 0;
         let wallet_db_lock: tokio::sync::MutexGuard<RustyWalletDatabase> =
             wallet_state.wallet_db.lock().await;
         for i in 0..wallet_db_lock.monitored_utxos.len() {
@@ -749,6 +751,12 @@ mod tests {
 
             let bincode = bincode::serialize(&monitored_utxo).unwrap();
             println!("bincode, length: {}", bincode.len());
+            total_size += bincode.len();
         }
+
+        println!(
+            "Total size of all monitored UTXOs was: {} bytes",
+            total_size.to_formatted_string(&Locale::en)
+        );
     }
 }
