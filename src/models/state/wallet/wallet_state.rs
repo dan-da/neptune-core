@@ -716,3 +716,39 @@ impl WalletState {
         history
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tracing_test::traced_test;
+
+    use super::*;
+    use crate::{config_models::cli_args, models::state::wallet::WalletSecret};
+
+    #[traced_test]
+    #[tokio::test]
+    async fn print_wallet_state_info() {
+        // Wallet secret is irrelevant
+        let wallet_secret = WalletSecret::devnet_wallet();
+        let cli_args: cli_args::Args = Default::default();
+        let data_dir = DataDirectory::get(cli_args.data_dir.clone(), cli_args.network).unwrap();
+        let wallet_dir = data_dir.wallet_directory_path();
+        DataDirectory::create_dir_if_not_exists(&wallet_dir).unwrap();
+        let wallet_state =
+            WalletState::new_from_wallet_secret(Some(&data_dir), wallet_secret, &cli_args).await;
+        let balance = wallet_state.get_balance().await;
+        println!("balance: {balance}");
+
+        // let db = wallet_state.wallet_db.lock().await;
+        let wallet_db_lock: tokio::sync::MutexGuard<RustyWalletDatabase> =
+            wallet_state.wallet_db.lock().await;
+        for i in 0..wallet_db_lock.monitored_utxos.len() {
+            let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+            let mp_count = monitored_utxo.blockhash_to_membership_proof.len();
+            println!("monitored_utxo {i} has {mp_count} membership proofs stored");
+            // println!("utxo: {:?}", monitored_utxo.utxo);
+
+            let bincode = bincode::serialize(&monitored_utxo).unwrap();
+            println!("bincode, length: {}", bincode.len());
+        }
+    }
+}

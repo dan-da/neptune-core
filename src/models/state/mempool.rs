@@ -502,7 +502,7 @@ mod tests {
             },
         },
         tests::shared::{
-            get_mock_global_state, get_mock_wallet_state, make_mock_block,
+            get_in_memory_mock_wallet_state, get_mock_global_state, make_mock_block,
             make_mock_transaction_with_wallet,
         },
         util_types::mutator_set::mutator_set_trait::MutatorSet,
@@ -520,7 +520,7 @@ mod tests {
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_in_memory_mock_wallet_state(None).await;
         let transaction =
             make_mock_transaction_with_wallet(vec![], vec![], Amount::zero(), &wallet_state, None);
         let transaction_digest = &Hash::hash(&transaction);
@@ -544,7 +544,7 @@ mod tests {
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32) -> Mempool {
         let mempool = Mempool::new(ByteSize::gb(1));
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_in_memory_mock_wallet_state(None).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
                 vec![],
@@ -592,7 +592,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_transactions() {
-        let wallet_state = get_mock_wallet_state(None).await;
+        let wallet_state = get_in_memory_mock_wallet_state(None).await;
         let mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),

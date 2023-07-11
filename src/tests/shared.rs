@@ -216,7 +216,7 @@ pub async fn get_mock_global_state(
         chain: blockchain_state,
         cli: cli_args.clone(),
         net: networking_state,
-        wallet_state: get_mock_wallet_state(wallet).await,
+        wallet_state: get_in_memory_mock_wallet_state(wallet).await,
         mempool,
         mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
     }
@@ -1070,7 +1070,9 @@ pub fn make_mock_block_with_invalid_pow(
 
 /// Return a dummy-wallet used for testing. The returned wallet is populated with
 /// whatever UTXOs are present in the genesis block.
-pub async fn get_mock_wallet_state(maybe_wallet_secret: Option<WalletSecret>) -> WalletState {
+pub async fn get_in_memory_mock_wallet_state(
+    maybe_wallet_secret: Option<WalletSecret>,
+) -> WalletState {
     let wallet_secret = match maybe_wallet_secret {
         Some(wallet) => wallet,
         None => WalletSecret::devnet_wallet(),

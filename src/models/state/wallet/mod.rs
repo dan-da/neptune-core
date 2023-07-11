@@ -289,7 +289,7 @@ mod wallet_tests {
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::UtxoReceiverData;
     use crate::tests::shared::{
-        add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
+        add_block, get_in_memory_mock_wallet_state, get_mock_global_state, make_mock_block,
         make_mock_transaction_with_generation_key,
     };
     use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
@@ -312,7 +312,7 @@ mod wallet_tests {
     async fn wallet_state_constructor_with_genesis_block_test() -> Result<()> {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
-        let wallet_state_premine_recipient = get_mock_wallet_state(None).await;
+        let wallet_state_premine_recipient = get_in_memory_mock_wallet_state(None).await;
         let monitored_utxos_premine_wallet =
             get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
@@ -335,7 +335,7 @@ mod wallet_tests {
         );
 
         let random_wallet = WalletSecret::new(generate_secret_key());
-        let wallet_state_other = get_mock_wallet_state(Some(random_wallet)).await;
+        let wallet_state_other = get_in_memory_mock_wallet_state(Some(random_wallet)).await;
         let monitored_utxos_other = get_monitored_utxos(&wallet_state_other).await;
         assert!(
             monitored_utxos_other.is_empty(),
@@ -385,7 +385,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let wallet_state = get_mock_wallet_state(Some(own_wallet_secret.clone())).await;
+        let wallet_state = get_in_memory_mock_wallet_state(Some(own_wallet_secret.clone())).await;
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_recipient_address = other_wallet_secret
             .nth_generation_spending_key(0)
@@ -510,7 +510,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let own_wallet_state = get_in_memory_mock_wallet_state(Some(own_wallet_secret)).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -714,13 +714,13 @@ mod wallet_tests {
         // actually tested.
         // let (archival_state, _peer_databases) = make_unit_test_archival_state(Network::Main).await;
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret)).await;
+        let own_wallet_state = get_in_memory_mock_wallet_state(Some(own_wallet_secret)).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block();
-        let premine_wallet = get_mock_wallet_state(None).await.wallet_secret;
+        let premine_wallet = get_in_memory_mock_wallet_state(None).await.wallet_secret;
         let premine_receiver_global_state =
             get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
         let preminers_original_balance = premine_receiver_global_state
