@@ -1,5 +1,6 @@
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use triton_vm::program::Program;
 
 use super::{compiled_program::CompiledProgram, SupportedClaim, ValidationLogic};
 
@@ -42,7 +43,7 @@ impl CompiledProgram for KernelToTypeScripts {
         todo!()
     }
 
-    fn program() -> triton_opcodes::program::Program {
+    fn program() -> Program {
         todo!()
     }
 

@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
-use triton_opcodes::program::Program;
-use triton_vm::BFieldElement;
+use triton_vm::{program::Program, BFieldElement};
 
 pub trait CompiledProgram {
     fn rust_shadow(

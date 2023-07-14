@@ -20,8 +20,10 @@ use tasm_lib::{
     DIGEST_LENGTH,
 };
 use tracing::{debug, warn};
-use triton_opcodes::program::{self, Program};
-use triton_vm::{BFieldElement, StarkParameters};
+use triton_vm::{
+    program::{self, Program},
+    BFieldElement, StarkParameters,
+};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{

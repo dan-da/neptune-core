@@ -11,8 +11,7 @@ use get_size::GetSize;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
-use triton_opcodes::program::Program;
-use triton_vm::{proof::Proof, Claim};
+use triton_vm::{program::Program, proof::Proof, Claim};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 

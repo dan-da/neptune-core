@@ -3,9 +3,9 @@ use get_size::GetSize;
 use num_traits::Zero;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash as StdHash, Hasher as StdHasher};
-use triton_opcodes::instruction::LabelledInstruction;
-use triton_opcodes::program::Program;
-use triton_opcodes::shortcuts::{halt, read_io};
+use triton_vm::instruction::LabelledInstruction;
+use triton_vm::instruction_shortcuts::*;
+use triton_vm::program::Program;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 
@@ -172,7 +172,7 @@ mod utxo_tests {
         Rng, RngCore,
     };
     use tracing_test::traced_test;
-    use triton_opcodes::instruction::ALL_INSTRUCTION_NAMES;
+    use triton_vm::instruction::ALL_INSTRUCTION_NAMES;
     use twenty_first::shared_math::other::random_elements;
 
     use super::*;

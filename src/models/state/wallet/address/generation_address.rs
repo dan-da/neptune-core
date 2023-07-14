@@ -11,7 +11,7 @@ use rand::thread_rng;
 use rand::Rng;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
-use triton_opcodes::shortcuts::*;
+use triton_vm::instruction_shortcuts::*;
 use twenty_first::shared_math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::{
