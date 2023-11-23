@@ -1,8 +1,11 @@
 use std::sync::{Arc, Mutex};
 
-use rusty_leveldb::{WriteBatch, DB};
+// use rusty_leveldb::{WriteBatch, DB};
 use twenty_first::{
+    leveldb::batch::{Batch, WriteBatch},
+    leveldb::options::WriteOptions,
     shared_math::tip5::Digest,
+    util_types::level_db::DB,
     util_types::storage_schema::{
         DbtSchema, DbtSingleton, DbtVec, RustyKey, RustyReader, RustyValue, StorageSingleton,
         StorageWriter, WriteOperation,
@@ -71,7 +74,7 @@ impl RustyWalletDatabase {
 
 impl StorageWriter<RustyKey, RustyValue> for RustyWalletDatabase {
     fn persist(&mut self) {
-        let mut write_batch = WriteBatch::new();
+        let write_batch = WriteBatch::new();
 
         for table in &self.schema.tables {
             let operations = table
@@ -89,18 +92,20 @@ impl StorageWriter<RustyKey, RustyValue> for RustyWalletDatabase {
         self.db
             .lock()
             .expect("RustyWallet: StorageWriter -- could not get lock on database for writing.")
-            .write(write_batch, true)
+            .write(&WriteOptions::new(), &write_batch)
             .expect("Could not persist to database.");
 
         // Calling `flush` here *seems* to reduce the used disk space, although I cannot quite
         // explain why. See https://github.com/Neptune-Crypto/neptune-core/issues/14 for a
         // discussion. Either way, calling `flush` explicitly here shouldn't incur a huge
         // overhead, so the downside is limited.
-        self.db
-            .lock()
-            .expect("Must be able to acquire DB lock in persist")
-            .flush()
-            .expect("Flushing must succeed in persist");
+        //
+        // flush() is no longer supported.
+        // self.db
+        //     .lock()
+        //     .expect("Must be able to acquire DB lock in persist")
+        //     .flush()
+        //     .expect("Flushing must succeed in persist");
     }
 
     fn restore_or_new(&mut self) {
