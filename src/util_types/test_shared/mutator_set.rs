@@ -5,12 +5,12 @@ use std::sync::{Arc, Mutex};
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{thread_rng, Rng, RngCore, SeedableRng};
-use rusty_leveldb::DB;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use twenty_first::util_types::level_db::DB;
 use twenty_first::util_types::mmr::archival_mmr::ArchivalMmr;
 use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
@@ -78,8 +78,7 @@ pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>() -> (
     const AOCL_KEY: u8 = 0;
     const SWBFI_KEY: u8 = 1;
     const CHUNK_KEY: u8 = 2;
-    let opt: rusty_leveldb::Options = rusty_leveldb::in_memory();
-    let db = DB::open("unit test ams", opt).unwrap();
+    let db = DB::open_new_test_database(true, None).unwrap();
     let db = Arc::new(Mutex::new(db));
     let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
     let swbfi = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");

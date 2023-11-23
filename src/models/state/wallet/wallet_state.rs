@@ -1,7 +1,9 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
-use rusty_leveldb::DB;
+// use rusty_leveldb::DB;
+use twenty_first::util_types::level_db::DB;
+use twenty_first::leveldb::options::Options;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -155,10 +157,15 @@ impl WalletState {
         wallet_secret: WalletSecret,
         cli_args: &Args,
     ) -> Self {
+        std::fs::create_dir_all(data_dir.wallet_database_dir_path()).expect("directory should be created");
+
         // Create or connect to wallet block DB
+        let mut opt = Options::new();
+        opt.create_if_missing = true;
+        // todo: set cache option?
         let wallet_db = DB::open(
-            data_dir.wallet_database_dir_path(),
-            rusty_leveldb::Options::default(),
+            &data_dir.wallet_database_dir_path(),
+            &opt,
         );
         let wallet_db = match wallet_db {
             Ok(wdb) => wdb,
