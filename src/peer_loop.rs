@@ -141,7 +141,26 @@ impl PeerLoopHandler {
                 )))?;
                 bail!("Failed to validate block: invalid block");
             } else {
-                info!("Block with height {} is valid", new_block.header.height);
+                // We just want to convert a UTC timestamp to a
+                // local time string.  I've never seen this be so
+                // unintuitive in any other language or library.
+                // Why on earth is chrono popular?!!
+                //
+                // todo: make a util fn for this.
+                use chrono::{DateTime, Local, NaiveDateTime, Utc};
+                let naive = NaiveDateTime::from_timestamp_millis(
+                    new_block.header.timestamp.value().try_into().unwrap(),
+                )
+                .unwrap();
+                let utc: DateTime<Utc> =
+                    DateTime::from_naive_utc_and_offset(naive, *Utc::now().offset());
+                let local: DateTime<Local> = DateTime::from(utc);
+
+                info!(
+                    "Block with height {} is valid. mined: {}",
+                    new_block.header.height,
+                    local.to_string()
+                );
             }
 
             previous_block = new_block;
