@@ -1,8 +1,6 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
-use twenty_first::util_types::level_db::DB;
-use twenty_first::leveldb::options::Options;
 use serde_derive::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
@@ -14,7 +12,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
+use twenty_first::leveldb::options::Options;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
@@ -156,16 +156,14 @@ impl WalletState {
         wallet_secret: WalletSecret,
         cli_args: &Args,
     ) -> Self {
-        std::fs::create_dir_all(data_dir.wallet_database_dir_path()).expect("directory should be created");
+        std::fs::create_dir_all(data_dir.wallet_database_dir_path())
+            .expect("directory should be created");
 
         // Create or connect to wallet block DB
         let mut opt = Options::new();
         opt.create_if_missing = true;
         // todo: set cache option?
-        let wallet_db = DB::open(
-            &data_dir.wallet_database_dir_path(),
-            &opt,
-        );
+        let wallet_db = DB::open(&data_dir.wallet_database_dir_path(), &opt);
         let wallet_db = match wallet_db {
             Ok(wdb) => wdb,
             Err(err) => {
