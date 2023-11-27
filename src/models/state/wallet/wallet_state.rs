@@ -1,7 +1,6 @@
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use num_traits::Zero;
-// use rusty_leveldb::DB;
 use twenty_first::util_types::level_db::DB;
 use twenty_first::leveldb::options::Options;
 use serde_derive::{Deserialize, Serialize};

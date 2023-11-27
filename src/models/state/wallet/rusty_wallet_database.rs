@@ -18,7 +18,7 @@ pub struct RustyWalletDatabase {
     // pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
     // schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
     schema: DbtSchema<RustyKey, RustyValue, RustyReader>,
-    db: Arc<Mutex<DB>>,
+    db: Arc<DB>,
 
     // active_window_storage: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
     pub monitored_utxos: Arc<Mutex<DbtVec<RustyKey, RustyValue, u64, MonitoredUtxo>>>,
@@ -32,11 +32,11 @@ pub struct RustyWalletDatabase {
 
 impl RustyWalletDatabase {
     pub fn connect(db: DB) -> Self {
-        let db_pointer = Arc::new(Mutex::new(db));
+        let db_pointer = Arc::new(db);
         let reader = RustyReader {
             db: db_pointer.clone(),
         };
-        let reader_pointer = Arc::new(Mutex::new(reader));
+        let reader_pointer = Arc::new(reader);
         let mut schema = DbtSchema::<RustyKey, RustyValue, RustyReader> {
             tables: vec![],
             reader: reader_pointer,
@@ -90,8 +90,6 @@ impl StorageWriter<RustyKey, RustyValue> for RustyWalletDatabase {
         }
 
         self.db
-            .lock()
-            .expect("RustyWallet: StorageWriter -- could not get lock on database for writing.")
             .write(&WriteOptions::new(), &write_batch)
             .expect("Could not persist to database.");
 
