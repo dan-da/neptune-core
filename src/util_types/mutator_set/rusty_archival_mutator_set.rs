@@ -1,11 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use itertools::Itertools;
-use rusty_leveldb::{WriteBatch, DB};
+
 use twenty_first::{
+    leveldb::batch::{Batch, WriteBatch},
+    leveldb::options::{ReadOptions, WriteOptions},
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
+        level_db::DB,
         mmr::archival_mmr::ArchivalMmr,
         storage_schema::{
             DbtSchema, DbtSingleton, DbtVec, RustyKey, StorageReader, StorageSingleton,
@@ -20,19 +23,19 @@ use super::{
 };
 
 struct RamsReader {
-    db: Arc<Mutex<DB>>,
+    db: Arc<DB>,
 }
 
 impl StorageReader<RustyKey, RustyMSValue> for RamsReader {
-    fn get_many(&mut self, keys: &[RustyKey]) -> Vec<Option<RustyMSValue>> {
-        let mut lock = self.db.lock().unwrap();
-        keys.iter()
-            .map(|key| lock.get(&key.0).map(RustyMSValue))
-            .collect_vec()
+    fn get_many(&self, keys: &[RustyKey]) -> Vec<Option<RustyMSValue>> {
+        keys.iter().cloned().map(|key| self.get(key)).collect_vec()
     }
 
-    fn get(&mut self, key: RustyKey) -> Option<RustyMSValue> {
-        self.db.lock().expect("StorageReader for RustyArchivalMutatorSet: could not get database lock for reading (get)").get(&key.0).map(RustyMSValue)
+    fn get(&self, key: RustyKey) -> Option<RustyMSValue> {
+        self.db
+            .get(&ReadOptions::new(), &key.0)
+            .expect("Should get value")
+            .map(RustyMSValue)
     }
 }
 
@@ -137,18 +140,18 @@ where
 {
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
     schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
-    db: Arc<Mutex<DB>>,
+    db: Arc<DB>,
     active_window_storage: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
     sync_label: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Digest>>>,
 }
 
 impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
-        let db_pointer = Arc::new(Mutex::new(db));
+        let db_pointer = Arc::new(db);
         let reader = RamsReader {
             db: db_pointer.clone(),
         };
-        let reader_pointer = Arc::new(Mutex::new(reader));
+        let reader_pointer = Arc::new(reader);
         let mut schema = DbtSchema::<RustyKey, RustyMSValue, RamsReader> {
             tables: vec![],
             reader: reader_pointer,
@@ -188,7 +191,7 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
     for RustyArchivalMutatorSet<H>
 {
     fn persist(&mut self) {
-        let mut write_batch = WriteBatch::new();
+        let write_batch = WriteBatch::new();
 
         self.active_window_storage
             .set(self.ams.kernel.swbf_active.sbf.clone());
@@ -204,8 +207,7 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
         }
 
         self.db
-            .lock().expect("RustyArchivalMutatorSet: StorageWriter -- could not get lock on database for writing.")
-            .write(write_batch, true)
+            .write(&WriteOptions::new(), &write_batch)
             .expect("Could not persist to database.");
     }
 
@@ -248,8 +250,8 @@ mod tests {
         let mut rng = thread_rng();
 
         // let (mut archival_mutator_set, db) = empty_rustyleveldb_ams();
-        let options = rusty_leveldb::in_memory();
-        let db = DB::open("test-database", options.clone()).expect("Could not open database.");
+        let db = DB::open_new_test_database(false, None).unwrap();
+        let db_path = db.path.clone();
         let mut rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(db);
         println!("Connected to database");
@@ -332,15 +334,11 @@ mod tests {
 
         let active_window_before = rusty_mutator_set.ams.kernel.swbf_active.clone();
 
-        rusty_mutator_set
-            .db
-            .lock()
-            .expect("(In test:) Could not get lock on database for closing.")
-            .close()
-            .expect("Could not close database.");
+        drop(rusty_mutator_set); // Drop DB
 
         // new database
-        let new_db = DB::open("test-database", options).expect("Could not open database.");
+        let new_db =
+            DB::open_test_database(&db_path, true, None).expect("should open existing database");
         let mut new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(new_db);
         new_rusty_mutator_set.restore_or_new();

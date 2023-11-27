@@ -1,7 +1,6 @@
 use anyhow::Result;
 use memmap2::MmapOptions;
 use num_traits::Zero;
-use rusty_leveldb::DB;
 use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
@@ -14,6 +13,7 @@ use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
+use twenty_first::util_types::level_db::DB;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
@@ -84,8 +84,9 @@ impl ArchivalState {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
-        let options = rusty_leveldb::Options::default();
-        let db = match DB::open(ms_db_dir_path.clone(), options) {
+        let mut options = twenty_first::leveldb::options::Options::new();
+        options.create_if_missing = true;
+        let db = match DB::open(&ms_db_dir_path.clone(), &options) {
             Ok(db) => db,
             Err(e) => {
                 tracing::error!(

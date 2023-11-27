@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use rand::rngs::StdRng;
@@ -73,13 +73,13 @@ pub fn make_item_and_randomnesses() -> (Digest, Digest, Digest) {
 #[allow(clippy::type_complexity)]
 pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>() -> (
     ArchivalMutatorSet<H, RustyLevelDbVec<Digest>, RustyLevelDbVec<Chunk>>,
-    Arc<Mutex<DB>>,
+    Arc<DB>,
 ) {
     const AOCL_KEY: u8 = 0;
     const SWBFI_KEY: u8 = 1;
     const CHUNK_KEY: u8 = 2;
     let db = DB::open_new_test_database(true, None).unwrap();
-    let db = Arc::new(Mutex::new(db));
+    let db = Arc::new(db);
     let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
     let swbfi = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
     let chunks = RustyLevelDbVec::new(db.clone(), CHUNK_KEY, "chunks");
