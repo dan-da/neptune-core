@@ -3,8 +3,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 use twenty_first::{
-    leveldb::batch::{Batch, WriteBatch},
-    leveldb::options::{ReadOptions, WriteOptions},
+    leveldb::batch::WriteBatch,
     shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
     storage::level_db::DB,
     storage::storage_schema::{
@@ -30,7 +29,7 @@ impl StorageReader<RustyKey, RustyMSValue> for RamsReader {
 
     fn get(&self, key: RustyKey) -> Option<RustyMSValue> {
         self.db
-            .get(&ReadOptions::new(), &key.0)
+            .get(&key.0)
             .expect("Should get value")
             .map(RustyMSValue)
     }
@@ -203,8 +202,10 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
             }
         }
 
+        // Perform a syncronous write, to be on the safe side.
+        // future: evaluate sync vs async writes for mutator set.
         self.db
-            .write(&WriteOptions::new(), &write_batch)
+            .write(&write_batch, true)
             .expect("Could not persist to database.");
     }
 
@@ -247,7 +248,7 @@ mod tests {
         let mut rng = thread_rng();
 
         // let (mut archival_mutator_set, db) = empty_rustyleveldb_ams();
-        let db = DB::open_new_test_database(false, None).unwrap();
+        let db = DB::open_new_test_database(false, None, None, None).unwrap();
         let db_path = db.path().clone();
         let mut rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(db);
@@ -334,8 +335,8 @@ mod tests {
         drop(rusty_mutator_set); // Drop DB
 
         // new database
-        let new_db =
-            DB::open_test_database(&db_path, true, None).expect("should open existing database");
+        let new_db = DB::open_test_database(&db_path, true, None, None, None)
+            .expect("should open existing database");
         let mut new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(new_db);
         new_rusty_mutator_set.restore_or_new();

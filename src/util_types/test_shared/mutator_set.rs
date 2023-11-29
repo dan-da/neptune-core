@@ -78,7 +78,7 @@ pub fn empty_rustyleveldbvec_ams<H: AlgebraicHasher + BFieldCodec>() -> (
     const AOCL_KEY: u8 = 0;
     const SWBFI_KEY: u8 = 1;
     const CHUNK_KEY: u8 = 2;
-    let db = DB::open_new_test_database(true, None).unwrap();
+    let db = DB::open_new_test_database(true, None, None, None).unwrap();
     let db = Arc::new(db);
     let aocl_storage = RustyLevelDbVec::new(db.clone(), AOCL_KEY, "aocl");
     let swbfi = RustyLevelDbVec::new(db.clone(), SWBFI_KEY, "swbfi");
