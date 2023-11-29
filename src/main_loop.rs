@@ -1228,15 +1228,15 @@ impl MainLoopHandler {
             .persist();
 
         // flush block_index database
-        self.global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .block_index_db
-            .lock()
-            .await
-            .flush();
+        // self.global_state
+        //     .chain
+        //     .archival_state
+        //     .as_ref()
+        //     .unwrap()
+        //     .block_index_db
+        //     .lock()
+        //     .await
+        //     .flush();
 
         // persist archival_mutator_set, with sync label
         self.global_state
@@ -1268,15 +1268,17 @@ impl MainLoopHandler {
             .persist();
 
         // flush peer_standings
-        self.global_state
-            .net
-            .peer_databases
-            .as_ref()
-            .lock()
-            .await
-            .peer_standings
-            .flush();
-        debug!("Flushed all databases");
+        // self.global_state
+        //     .net
+        //     .peer_databases
+        //     .as_ref()
+        //     .lock()
+        //     .await
+        //     .peer_standings
+        //     .flush();
+        // debug!("Flushed all databases");
+
+        debug!("Persisted all databases");
 
         Ok(())
     }

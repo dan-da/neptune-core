@@ -31,7 +31,7 @@ num-traits = "0"
 priority-queue = "1"
 rand = "0.8"
 ratatui = "0.23"
-rusty-leveldb = "3"
+#rusty-leveldb = "3"
 semver = "^1.0.20"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
@@ -88,4 +88,4 @@ opt-level = 3
 
 [patch.crates-io]
 # needed until update to 0.36.0
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "fd70858f4507c4c88de487ea952b358f09ae5656" }
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "b890336386c01d3c12d24406206d36579eb3ff9f" }

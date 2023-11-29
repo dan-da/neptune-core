@@ -447,7 +447,7 @@ impl GlobalState {
     }
 
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        let mut peer_databases = self.net.peer_databases.lock().await;
+        let peer_databases = self.net.peer_databases.lock().await;
         peer_databases.peer_standings.get(ip)
     }
 
@@ -481,17 +481,24 @@ impl GlobalState {
     pub async fn clear_all_standings_in_database(&self) {
         let mut peer_databases = self.net.peer_databases.lock().await;
 
-        let mut dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
+        let dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
             peer_databases.peer_standings.new_iter();
 
-        for (ip, _v) in dbiterator.by_ref() {
-            let old_standing = peer_databases.peer_standings.get(ip);
+        // for (ip, _v) in dbiterator {
+        //     let old_standing = peer_databases.peer_standings.get(ip);
+        //     if old_standing.is_some() {
+        //         peer_databases
+        //             .peer_standings
+        //             .put(ip, PeerStanding::default())
+        //     }
+        // }
 
-            if old_standing.is_some() {
-                peer_databases
-                    .peer_standings
-                    .put(ip, PeerStanding::default())
-            }
+        let ip_list: Vec<_> = dbiterator.map(|(k, _v)| k).collect();
+
+        for ip in ip_list.into_iter() {
+            peer_databases
+                .peer_standings
+                .put(ip, PeerStanding::default())
         }
     }
 

@@ -1,6 +1,13 @@
 use super::leveldb::LevelDB;
 use anyhow::Result;
-use rusty_leveldb::{DBIterator, LdbIterator, WriteBatch, DB};
+use twenty_first::leveldb::{
+    batch::WriteBatch,
+    iterator::Iterable,
+    iterator::Iterator as DBIterator,
+    options::{Options, ReadOptions},
+};
+use twenty_first::storage::level_db::DB;
+// use rusty_leveldb::{DBIterator, LdbIterator, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::marker::PhantomData;
@@ -32,8 +39,10 @@ where
     }
 }
 
-pub fn default_options() -> rusty_leveldb::Options {
-    rusty_leveldb::Options::default()
+pub fn default_options() -> Options {
+    let mut opt = Options::new();
+    opt.create_if_missing = true;
+    opt
 }
 
 impl<Key, Value> LevelDB<Key, Value> for RustyLevelDB<Key, Value>
@@ -42,8 +51,8 @@ where
     Value: Serialize + DeserializeOwned,
 {
     /// Open or create a new or existing database
-    fn new(db_path: &Path, options: rusty_leveldb::Options) -> Result<Self> {
-        let database = DB::open(db_path, options)?;
+    fn new(db_path: &Path, options: Options) -> Result<Self> {
+        let database = DB::open(db_path, &options)?;
         let database = Self {
             database,
             _key: PhantomData,
@@ -52,9 +61,9 @@ where
         Ok(database)
     }
 
-    fn get(&mut self, key: Key) -> Option<Value> {
+    fn get(&self, key: Key) -> Option<Value> {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
-        let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes);
+        let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes).unwrap();
         value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap())
     }
 
@@ -65,19 +74,19 @@ where
     }
 
     fn batch_write(&mut self, entries: &[(Key, Value)]) {
-        let mut batch = WriteBatch::new();
+        let batch = WriteBatch::new();
         for (key, value) in entries.iter() {
             let key_bytes: Vec<u8> = bincode::serialize(key).unwrap();
             let value_bytes: Vec<u8> = bincode::serialize(value).unwrap();
             batch.put(&key_bytes, &value_bytes);
         }
 
-        self.database.write(batch, true).unwrap();
+        self.database.write(&batch, true).unwrap();
     }
 
     fn delete(&mut self, key: Key) -> Option<Value> {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap(); // add safety
-        let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes);
+        let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes).unwrap();
         let value_object = value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap());
         let status = self.database.delete(&key_bytes);
 
@@ -91,28 +100,29 @@ where
 impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
     RustyLevelDB<Key, Value>
 {
-    pub fn new_iter(&mut self) -> RustyLevelDBIterator<Key, Value> {
+    pub fn new_iter(&self) -> RustyLevelDBIterator<Key, Value> {
         RustyLevelDBIterator::new(self)
     }
 
-    pub fn flush(&mut self) {
-        self.database
-            .flush()
-            .expect("Database flushing to disk must succeed");
-    }
+    // pub fn flush(&mut self) {
+    //     self.database
+    //         .flush()
+    //         .expect("Database flushing to disk must succeed");
+    // }
 }
 
 pub struct RustyLevelDBIterator<
+    'a,
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned,
 > {
-    iterator: DBIterator,
+    iterator: DBIterator<'a>,
     _key: PhantomData<Key>,
     _value: PhantomData<Value>,
 }
 
 impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Iterator
-    for RustyLevelDBIterator<Key, Value>
+    for RustyLevelDBIterator<'_, Key, Value>
 {
     type Item = (Key, Value);
 
@@ -126,14 +136,11 @@ impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Ite
     }
 }
 
-impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
-    RustyLevelDBIterator<Key, Value>
+impl<'a, Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
+    RustyLevelDBIterator<'a, Key, Value>
 {
-    fn new(database: &mut RustyLevelDB<Key, Value>) -> Self {
-        let iterator = database
-            .database
-            .new_iter()
-            .expect("Iterator should be constructed.");
+    fn new(database: &'a RustyLevelDB<Key, Value>) -> Self {
+        let iterator = database.database.iter(&ReadOptions::new());
         Self {
             iterator,
             _key: PhantomData,
