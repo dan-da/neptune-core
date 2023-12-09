@@ -25,8 +25,8 @@ use tokio::task::JoinHandle;
 use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
+use twenty_first::storage::storage_schema::traits::StorageWriter;
 use twenty_first::util_types::emojihash_trait::Emojihash;
-use twenty_first::util_types::storage_schema::StorageWriter;
 
 use crate::models::channel::{
     MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain, RPCServerToMain,
