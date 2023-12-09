@@ -285,7 +285,7 @@ mod wallet_tests {
     use rand::random;
     use tokio::sync::Mutex;
     use tracing_test::traced_test;
-    use twenty_first::util_types::storage_vec::StorageVec;
+    use twenty_first::storage::storage_vec::traits::*;
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::block_height::BlockHeight;

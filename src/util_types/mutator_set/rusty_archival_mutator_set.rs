@@ -4,12 +4,12 @@ use itertools::Itertools;
 
 use twenty_first::{
     leveldb::batch::WriteBatch,
-    shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec, tip5::Digest},
+    shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     storage::level_db::DB,
     storage::storage_schema::{
-        DbtSchema, DbtSingleton, DbtVec, RustyKey, StorageReader, StorageSingleton, StorageWriter,
-        WriteOperation,
+        traits::*, DbtSchema, DbtSingleton, DbtVec, RustyKey, RustyValue, WriteOperation,
     },
+    sync::AtomicRw,
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::archival_mmr::ArchivalMmr},
 };
 
@@ -22,123 +22,42 @@ struct RamsReader {
     db: Arc<DB>,
 }
 
-impl StorageReader<RustyKey, RustyMSValue> for RamsReader {
-    fn get_many(&self, keys: &[RustyKey]) -> Vec<Option<RustyMSValue>> {
+impl StorageReader for RamsReader {
+    fn get_many(&self, keys: &[RustyKey]) -> Vec<Option<RustyValue>> {
         keys.iter().cloned().map(|key| self.get(key)).collect_vec()
     }
 
-    fn get(&self, key: RustyKey) -> Option<RustyMSValue> {
+    fn get(&self, key: RustyKey) -> Option<RustyValue> {
         self.db
             .get(&key.0)
             .expect("Should get value")
-            .map(RustyMSValue)
+            .map(RustyValue)
     }
 }
 
-#[derive(Debug)]
-pub struct RustyMSValue(Vec<u8>);
-
-impl From<RustyMSValue> for u64 {
-    fn from(value: RustyMSValue) -> Self {
-        u64::from_be_bytes(value.0.try_into().unwrap())
-    }
-}
-impl From<u64> for RustyMSValue {
-    fn from(value: u64) -> Self {
-        RustyMSValue(value.to_be_bytes().to_vec())
-    }
-}
-impl From<RustyMSValue> for Digest {
-    fn from(value: RustyMSValue) -> Self {
-        Digest::new(
-            value
-                .0
-                .chunks(8)
-                .map(|ch| {
-                    u64::from_be_bytes(ch.try_into().expect("Cannot cast RustyMSValue into Digest"))
-                })
-                .map(BFieldElement::new)
-                .collect::<Vec<_>>()
-                .try_into().expect("Can cast RustyMSValue into BFieldElements but number does not match that of Digest."),
-        )
-    }
-}
-impl From<Digest> for RustyMSValue {
-    fn from(value: Digest) -> Self {
-        RustyMSValue(
-            value
-                .values()
-                .map(|b| b.value())
-                .map(u64::to_be_bytes)
-                .concat(),
-        )
-    }
-}
-impl From<RustyMSValue> for Chunk {
-    fn from(value: RustyMSValue) -> Self {
-        Chunk {
-            relative_indices: value
-                .0
-                .chunks(4)
-                .map(|ch| {
-                    u32::from_be_bytes(
-                        ch.try_into()
-                            .expect("Could not convert RustyMSValue into Chunk"),
-                    )
-                })
-                .collect::<Vec<_>>(),
-        }
-    }
-}
-impl From<Chunk> for RustyMSValue {
+impl From<Chunk> for RustyValue {
     fn from(value: Chunk) -> Self {
-        RustyMSValue(
-            value
-                .relative_indices
-                .iter()
-                .map(|i| i.to_be_bytes())
-                .collect::<Vec<_>>()
-                .concat(),
-        )
-    }
-}
-impl From<RustyMSValue> for Vec<u32> {
-    fn from(value: RustyMSValue) -> Self {
-        value
-            .0
-            .chunks(4)
-            .map(|ch| {
-                u32::from_be_bytes(
-                    ch.try_into()
-                        .expect("Cannot unpack RustyMSValue as Vec<u32>s"),
-                )
-            })
-            .collect_vec()
-    }
-}
-impl From<Vec<u32>> for RustyMSValue {
-    fn from(value: Vec<u32>) -> Self {
-        RustyMSValue(
-            value
-                .iter()
-                .map(|&i| i.to_be_bytes())
-                .collect_vec()
-                .concat(),
-        )
+        Self::serialize_into(&value)
     }
 }
 
-type AmsMmrStorage = DbtVec<RustyKey, RustyMSValue, u64, Digest>;
-type AmsChunkStorage = DbtVec<RustyKey, RustyMSValue, u64, Chunk>;
+impl From<RustyValue> for Chunk {
+    fn from(value: RustyValue) -> Self {
+        value.deserialize_from()
+    }
+}
+
+type AmsMmrStorage = DbtVec<Digest>;
+type AmsChunkStorage = DbtVec<Chunk>;
 pub struct RustyArchivalMutatorSet<H>
 where
     H: AlgebraicHasher + BFieldCodec,
 {
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
-    schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
+    schema: DbtSchema<RamsReader>,
     db: Arc<DB>,
-    active_window_storage: DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>,
-    sync_label: DbtSingleton<RustyKey, RustyMSValue, Digest>,
+    active_window_storage: DbtSingleton<Vec<u32>>,
+    sync_label: DbtSingleton<Digest>,
 }
 
 impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
@@ -148,13 +67,13 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
             db: db_pointer.clone(),
         };
         let reader_pointer = Arc::new(reader);
-        let mut schema = DbtSchema::<RustyKey, RustyMSValue, RamsReader> {
-            tables: vec![],
+        let mut schema = DbtSchema::<RamsReader> {
+            tables: AtomicRw::from(vec![]),
             reader: reader_pointer,
         };
-        let aocl_storage = schema.new_vec::<u64, Digest>("aocl");
-        let swbf_inactive_storage = schema.new_vec::<u64, Digest>("swbfi");
-        let chunks = schema.new_vec::<u64, Chunk>("chunks");
+        let aocl_storage = schema.new_vec::<Digest>("aocl");
+        let swbf_inactive_storage = schema.new_vec::<Digest>("swbfi");
+        let chunks = schema.new_vec::<Chunk>("chunks");
         let active_window_storage =
             schema.new_singleton::<Vec<u32>>(RustyKey("active_window".into()));
         let sync_label = schema.new_singleton::<Digest>(RustyKey("sync_label".into()));
@@ -183,24 +102,24 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
-    for RustyArchivalMutatorSet<H>
-{
+impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet<H> {
     fn persist(&mut self) {
         let write_batch = WriteBatch::new();
 
         self.active_window_storage
             .set(self.ams.kernel.swbf_active.sbf.clone());
 
-        for table in self.schema.tables.iter_mut() {
-            let operations = table.pull_queue();
-            for op in operations {
-                match op {
-                    WriteOperation::Write(key, value) => write_batch.put(&key.0, &value.0),
-                    WriteOperation::Delete(key) => write_batch.delete(&key.0),
+        self.schema.tables.with(|tables| {
+            for table in tables.iter() {
+                let operations = table.pull_queue();
+                for op in operations {
+                    match op {
+                        WriteOperation::Write(key, value) => write_batch.put(&key.0, &value.0),
+                        WriteOperation::Delete(key) => write_batch.delete(&key.0),
+                    }
                 }
             }
-        }
+        });
 
         // Perform a syncronous write, to be on the safe side.
         // future: evaluate sync vs async writes for mutator set.
@@ -210,9 +129,11 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter<RustyKey, RustyMSValue>
     }
 
     fn restore_or_new(&mut self) {
-        for table in self.schema.tables.iter_mut() {
-            table.restore_or_new();
-        }
+        self.schema.tables.with(|tables| {
+            for table in tables.iter() {
+                table.restore_or_new();
+            }
+        });
 
         // The field `digests` of ArchivalMMR should always have at
         // least one element (a dummy digest), owing to 1-indexation.

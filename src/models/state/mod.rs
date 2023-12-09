@@ -9,7 +9,7 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
-use twenty_first::util_types::storage_vec::StorageVec;
+use twenty_first::util_types::storage_vec::traits::*;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::digest::Digest;
@@ -633,7 +633,7 @@ impl GlobalState {
         tip_hash: Digest,
     ) -> Result<()> {
         // loop over all monitored utxos
-        let mut monitored_utxos = self
+        let monitored_utxos = self
             .wallet_state
             .wallet_db
             .lock()
@@ -948,7 +948,7 @@ mod global_state_tests {
 
         // Delete everything from monitored UTXO (the premined UTXO)
         {
-            let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
+            let wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             assert!(
                 wallet_db_lock.monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element before emptying it"

@@ -94,14 +94,12 @@ impl MonitoredUtxo {
 
 impl From<RustyValue> for MonitoredUtxo {
     fn from(value: RustyValue) -> Self {
-        bincode::deserialize(&value.0).expect(
-            "failed to deserialize database object to monitored utxo; database seems corrupted",
-        )
+        value.deserialize_from()
     }
 }
 
 impl From<MonitoredUtxo> for RustyValue {
     fn from(value: MonitoredUtxo) -> Self {
-        RustyValue(bincode::serialize(&value).expect("Totally nonsensical that serialize can fail, but that is how the interface has been defined."))
+        Self::serialize_into(&value)
     }
 }

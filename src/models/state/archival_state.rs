@@ -86,6 +86,7 @@ impl ArchivalState {
 
         let mut options = twenty_first::leveldb::options::Options::new();
         options.create_if_missing = true;
+
         let db = match DB::open(&ms_db_dir_path.clone(), &options) {
             Ok(db) => db,
             Err(e) => {
@@ -748,7 +749,7 @@ mod archival_state_tests {
 
     use rand::{random, thread_rng, RngCore};
     use tracing_test::traced_test;
-    use twenty_first::util_types::storage_vec::StorageVec;
+    use twenty_first::util_types::storage_vec::traits::*;
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::LockScript;
@@ -2819,7 +2820,6 @@ mod archival_state_tests {
     fn can_initialize_mutator_set_database() {
         let args: cli_args::Args = cli_args::Args::default();
         let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
-        println!("data dir: {}", data_dir);
         let _rams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
     }
 }

@@ -18,7 +18,7 @@ use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::StorageWriter;
-use twenty_first::util_types::storage_vec::StorageVec;
+use twenty_first::util_types::storage_vec::traits::*;
 
 use twenty_first::shared_math::digest::Digest;
 
