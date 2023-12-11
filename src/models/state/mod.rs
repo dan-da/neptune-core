@@ -484,18 +484,11 @@ impl GlobalState {
         let dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
             peer_databases.peer_standings.new_iter();
 
-        // for (ip, _v) in dbiterator {
-        //     let old_standing = peer_databases.peer_standings.get(ip);
-        //     if old_standing.is_some() {
-        //         peer_databases
-        //             .peer_standings
-        //             .put(ip, PeerStanding::default())
-        //     }
-        // }
+        let ip_with_standing_list = dbiterator
+            .filter_map(|(ip, _v)| peer_databases.peer_standings.get(ip).map(|_| ip))
+            .collect_vec();
 
-        let ip_list: Vec<_> = dbiterator.map(|(k, _v)| k).collect();
-
-        for ip in ip_list.into_iter() {
+        for ip in ip_with_standing_list.into_iter() {
             peer_databases
                 .peer_standings
                 .put(ip, PeerStanding::default())
