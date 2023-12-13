@@ -35,18 +35,6 @@ impl StorageReader for RamsReader {
     }
 }
 
-impl From<Chunk> for RustyValue {
-    fn from(value: Chunk) -> Self {
-        Self::serialize_into(&value)
-    }
-}
-
-impl From<RustyValue> for Chunk {
-    fn from(value: RustyValue) -> Self {
-        value.deserialize_from()
-    }
-}
-
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
 pub struct RustyArchivalMutatorSet<H>

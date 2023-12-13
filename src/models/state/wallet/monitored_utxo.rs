@@ -6,7 +6,7 @@ use crate::{
     Hash,
 };
 use serde::{Deserialize, Serialize};
-use twenty_first::{shared_math::tip5::Digest, util_types::storage_schema::RustyValue};
+use twenty_first::shared_math::tip5::Digest;
 
 use crate::models::blockchain::transaction::utxo::Utxo;
 
@@ -89,17 +89,5 @@ impl MonitoredUtxo {
             }
             None => false,
         }
-    }
-}
-
-impl From<RustyValue> for MonitoredUtxo {
-    fn from(value: RustyValue) -> Self {
-        value.deserialize_from()
-    }
-}
-
-impl From<MonitoredUtxo> for RustyValue {
-    fn from(value: MonitoredUtxo) -> Self {
-        Self::serialize_into(&value)
     }
 }
