@@ -13,7 +13,7 @@ use twenty_first::shared_math::digest::Digest;
 use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use twenty_first::util_types::storage_schema::StorageWriter;
+use twenty_first::util_types::storage_schema::traits::*;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;

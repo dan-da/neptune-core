@@ -210,7 +210,7 @@ impl RPC for NeptuneRPCServer {
             .net
             .peer_map
             .lock(|pm| pm.values().cloned().collect());
-        future::ready(peer_map)
+        peer_map
     }
 
     async fn validate_address(
@@ -357,7 +357,7 @@ impl RPC for NeptuneRPCServer {
 
     // endpoints for changing stuff
 
-    fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
+    async fn clear_all_standings(self, _: context::Context) {
         self.state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(_, peerinfo)| {
                 peerinfo.standing.clear_standing();
@@ -368,7 +368,7 @@ impl RPC for NeptuneRPCServer {
         executor::block_on(self.state.clear_all_standings_in_database());
     }
 
-    fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
+    async fn clear_ip_standing(self, _: context::Context, ip: IpAddr) {
         self.state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(socketaddr, peerinfo)| {
                 if socketaddr.ip() == ip {
