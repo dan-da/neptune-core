@@ -73,7 +73,7 @@ impl StorageWriter for RustyWalletDatabase {
     fn persist(&mut self) {
         let write_batch = WriteBatch::new();
 
-        self.schema.tables.with(|tables| {
+        self.schema.tables.lock(|tables| {
             for table in tables.iter() {
                 let operations = table.pull_queue();
                 for op in operations {
@@ -93,7 +93,7 @@ impl StorageWriter for RustyWalletDatabase {
     }
 
     fn restore_or_new(&mut self) {
-        self.schema.tables.with(|tables| {
+        self.schema.tables.lock(|tables| {
             for table in tables.iter() {
                 table.restore_or_new();
             }

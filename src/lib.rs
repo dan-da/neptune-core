@@ -42,7 +42,7 @@ use models::peer::PeerInfo;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
@@ -105,8 +105,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     .with_context(|| format!("Failed to bind to local TCP port {}:{}. Is an instance of this program already running?", cli_args.listen_addr, cli_args.peer_port))?;
     info!("Now listening for incoming transactions");
 
-    let peer_map: Arc<Mutex<HashMap<SocketAddr, PeerInfo>>> =
-        Arc::new(std::sync::Mutex::new(HashMap::new()));
+    let peer_map: HashMap<SocketAddr, PeerInfo> = HashMap::new();
 
     // Construct the broadcast channel to communicate from the main thread to peer threads
     let (main_to_peer_broadcast_tx, _main_to_peer_broadcast_rx) =

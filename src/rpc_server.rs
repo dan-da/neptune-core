@@ -209,12 +209,8 @@ impl RPC for NeptuneRPCServer {
             .state
             .net
             .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .cloned()
-            .collect();
-        peer_map
+            .lock(|pm| pm.values().cloned().collect());
+        future::ready(peer_map)
     }
 
     async fn validate_address(
@@ -338,10 +334,7 @@ impl RPC for NeptuneRPCServer {
         let mempool_tx_count = self.state.mempool.len();
 
         // Return `None` if we fail to acquire the lock
-        let peer_count = match self.state.net.peer_map.try_lock() {
-            Ok(pm) => Some(pm.len()),
-            Err(_) => None,
-        };
+        let peer_count = Some(self.state.net.peer_map.lock(|pm| pm.len()));
 
         let is_mining = match self.state.mining.read() {
             Ok(is_mining) => Some(is_mining.to_owned()),
@@ -364,32 +357,24 @@ impl RPC for NeptuneRPCServer {
 
     // endpoints for changing stuff
 
-    async fn clear_all_standings(self, _: context::Context) {
-        let mut peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+    fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
+        self.state.net.peer_map.lock_mut(|pm| {
+            pm.iter_mut().for_each(|(_, peerinfo)| {
+                peerinfo.standing.clear_standing();
+            });
+        });
 
         // iterates and modifies standing field for all connected peers
-        peers.iter_mut().for_each(|(_, peerinfo)| {
-            peerinfo.standing.clear_standing();
-        });
         executor::block_on(self.state.clear_all_standings_in_database());
     }
 
-    async fn clear_ip_standing(self, _: context::Context, ip: IpAddr) {
-        let mut peers = self
-            .state
-            .net
-            .peer_map
-            .lock()
-            .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
-        peers.iter_mut().for_each(|(socketaddr, peerinfo)| {
-            if socketaddr.ip() == ip {
-                peerinfo.standing.clear_standing();
-            }
+    fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
+        self.state.net.peer_map.lock_mut(|pm| {
+            pm.iter_mut().for_each(|(socketaddr, peerinfo)| {
+                if socketaddr.ip() == ip {
+                    peerinfo.standing.clear_standing();
+                }
+            });
         });
         //Also clears this IP's standing in database, whether it is connected or not.
         executor::block_on(self.state.clear_ip_standing_in_database(ip));
@@ -555,11 +540,7 @@ mod rpc_server_tests {
     };
     use anyhow::Result;
     use num_traits::Zero;
-    use std::{
-        collections::HashMap,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        sync::MutexGuard,
-    };
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use tracing_test::traced_test;
 
     #[traced_test]
@@ -588,30 +569,14 @@ mod rpc_server_tests {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
             get_test_genesis_setup(Network::Alpha, 2).await?;
-        let peer_address_0 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .connected_address;
-        let peer_address_1 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[1]
-            .connected_address;
+        let peer_address_0 =
+            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address_1 =
+            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[1].connected_address;
 
         // sanction both
         let (standing_0, standing_1) = {
-            let mut peers = state
-                .net
-                .peer_map
-                .lock()
-                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+            let mut peers = state.net.peer_map.lock_guard_mut();
             peers.entry(peer_address_0).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
@@ -670,10 +635,10 @@ mod rpc_server_tests {
 
             // Verify expected resulting conditions in peer map
             let peer_standing_0_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_0].clone();
+                state.net.peer_map.lock_guard()[&peer_address_0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
             let peer_standing_1_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
+                state.net.peer_map.lock_guard()[&peer_address_1].clone();
             assert_ne!(0, peer_standing_1_from_memory.standing.standing);
         }
         Ok(())
@@ -684,30 +649,14 @@ mod rpc_server_tests {
         // Create initial conditions
         let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
             get_test_genesis_setup(Network::Alpha, 2).await?;
-        let peer_address_0 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .connected_address;
-        let peer_address_1 = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[1]
-            .connected_address;
+        let peer_address_0 =
+            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address_1 =
+            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[1].connected_address;
 
         // sanction both peers
         let (standing_0, standing_1) = {
-            let mut peers: MutexGuard<HashMap<SocketAddr, PeerInfo>> = state
-                .net
-                .peer_map
-                .lock()
-                .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e));
+            let mut peers = state.net.peer_map.lock_guard_mut();
 
             peers.entry(peer_address_0).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
@@ -773,13 +722,13 @@ mod rpc_server_tests {
         // Verify expected resulting conditions in peer map
         {
             let peer_standing_0_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_0].clone();
+                state.net.peer_map.lock_guard()[&peer_address_0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
         }
 
         {
             let peer_still_standing_1_from_memory =
-                state.net.peer_map.lock().unwrap()[&peer_address_1].clone();
+                state.net.peer_map.lock_guard()[&peer_address_1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
 

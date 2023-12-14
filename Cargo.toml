@@ -88,4 +88,4 @@ opt-level = 3
 
 [patch.crates-io]
 # needed until update to 0.36.0
-twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "b890336386c01d3c12d24406206d36579eb3ff9f" }
+twenty-first = { git = "https://github.com/Neptune-Crypto/twenty-first.git", rev = "840b708991a6679240a670530ffb710368b428a2" }

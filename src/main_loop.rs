@@ -683,10 +683,11 @@ impl MainLoopHandler {
         &self,
         main_loop_state: &mut MutableMainLoopState,
     ) -> Result<()> {
-        let connected_peers: Vec<PeerInfo> = match self.global_state.net.peer_map.try_lock() {
-            Ok(pm) => pm.values().cloned().collect(),
-            Err(_) => return Ok(()),
-        };
+        let connected_peers: Vec<PeerInfo> = self
+            .global_state
+            .net
+            .peer_map
+            .lock(|pm| pm.values().cloned().collect());
 
         // Check if we are connected to too many peers
         if connected_peers.len() > self.global_state.cli.max_peers as usize {
