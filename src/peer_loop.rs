@@ -535,7 +535,7 @@ impl PeerLoopHandler {
                 // Verify that we are in fact in syncing mode
                 // TODO: Seperate peer messages into those allowed under syncing
                 // and those that are not
-                if !self.state.net.syncing.read().unwrap().to_owned() {
+                if !self.state.net.syncing.lock(|s| *s) {
                     warn!("Received a batch of blocks without being in syncing mode");
                     self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)?;
                     return Ok(false);
@@ -612,7 +612,7 @@ impl PeerLoopHandler {
                     // a fork. If we are reconciling, that is handled later, and the information
                     // about that is stored in `highest_shared_block_height`. If we are syncing
                     // we are also not requesting the block but instead updating the sync state.
-                    if self.state.net.syncing.read().unwrap().to_owned() {
+                    if self.state.net.syncing.lock(|s| *s) {
                         self.to_main_tx
                             .send(PeerThreadToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
@@ -936,7 +936,7 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    let syncing = self.state.net.syncing.read().unwrap().to_owned();
+                                    let syncing = self.state.net.syncing.lock(|s| *s);
                                     if peer_msg.ignore_during_sync() && syncing {
                                         debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;

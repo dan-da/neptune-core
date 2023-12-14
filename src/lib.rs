@@ -117,7 +117,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Create handshake data which is used when connecting to outgoing peers specified in the
     // CLI arguments
-    let syncing = Arc::new(std::sync::RwLock::new(false));
+    let syncing = false;
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
 
     let light_state: LightState = LightState::new(latest_block.clone());

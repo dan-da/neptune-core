@@ -196,7 +196,7 @@ pub async fn get_mock_global_state(
 ) -> GlobalState {
     let (archival_state, peer_db_lock, _data_dir) = make_unit_test_archival_state(network).await;
 
-    let syncing = Arc::new(std::sync::RwLock::new(false));
+    let syncing = false;
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =

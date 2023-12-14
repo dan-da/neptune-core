@@ -138,7 +138,7 @@ async fn mine_block(
         }
 
         // Don't mine if we are syncing (but don't check too often)
-        if counter % 100 == 0 && state.net.syncing.read().unwrap().to_owned() {
+        if counter % 100 == 0 && state.net.syncing.lock(|s| *s) {
             return;
         } else {
             counter += 1;
@@ -310,7 +310,7 @@ pub async fn mine(
     let mut pause_mine = false;
     loop {
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
-        let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.read().unwrap().to_owned() {
+        let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.lock(|s| *s) {
             info!("Not mining because we are syncing");
             *state.mining.write().unwrap() = false;
             None
