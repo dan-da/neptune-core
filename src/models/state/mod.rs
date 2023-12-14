@@ -438,17 +438,25 @@ impl GlobalState {
         ip: IpAddr,
         current_standing: PeerStanding,
     ) {
-        let mut peer_databases = self.net.peer_databases.lock().await;
-        let old_standing = peer_databases.peer_standings.get(ip);
+        self.net
+            .peer_databases
+            .lock_mut(|pd| {
+                let old_standing = pd.peer_standings.get(ip);
 
-        if old_standing.is_none() || old_standing.unwrap().standing > current_standing.standing {
-            peer_databases.peer_standings.put(ip, current_standing)
-        }
+                if old_standing.is_none()
+                    || old_standing.unwrap().standing > current_standing.standing
+                {
+                    pd.peer_standings.put(ip, current_standing)
+                }
+            })
+            .await;
     }
 
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        let peer_databases = self.net.peer_databases.lock().await;
-        peer_databases.peer_standings.get(ip)
+        self.net
+            .peer_databases
+            .lock(|pd| pd.peer_standings.get(ip))
+            .await
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
@@ -467,32 +475,32 @@ impl GlobalState {
     }
 
     pub async fn clear_ip_standing_in_database(&self, ip: IpAddr) {
-        let mut peer_databases = self.net.peer_databases.lock().await;
-
-        let old_standing = peer_databases.peer_standings.get(ip);
-
-        if old_standing.is_some() {
-            peer_databases
-                .peer_standings
-                .put(ip, PeerStanding::default())
-        }
+        self.net
+            .peer_databases
+            .lock_mut(|pd| {
+                if pd.peer_standings.get(ip).is_some() {
+                    pd.peer_standings.put(ip, PeerStanding::default())
+                }
+            })
+            .await;
     }
 
     pub async fn clear_all_standings_in_database(&self) {
-        let mut peer_databases = self.net.peer_databases.lock().await;
+        self.net
+            .peer_databases
+            .lock_mut(|pd| {
+                let dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
+                    pd.peer_standings.new_iter();
 
-        let dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
-            peer_databases.peer_standings.new_iter();
+                let ip_with_standing_list = dbiterator
+                    .filter_map(|(ip, _v)| pd.peer_standings.get(ip).map(|_| ip))
+                    .collect_vec();
 
-        let ip_with_standing_list = dbiterator
-            .filter_map(|(ip, _v)| peer_databases.peer_standings.get(ip).map(|_| ip))
-            .collect_vec();
-
-        for ip in ip_with_standing_list.into_iter() {
-            peer_databases
-                .peer_standings
-                .put(ip, PeerStanding::default())
-        }
+                for ip in ip_with_standing_list.into_iter() {
+                    pd.peer_standings.put(ip, PeerStanding::default())
+                }
+            })
+            .await;
     }
 
     /// In case the wallet database is corrupted or deleted, this method will restore

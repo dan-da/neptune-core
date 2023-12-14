@@ -1013,11 +1013,12 @@ impl PeerLoopHandler {
             .state
             .net
             .peer_databases
-            .lock()
-            .await
-            .peer_standings
-            .get(self.peer_address.ip())
-            .unwrap_or_default();
+            .lock(|p| {
+                p.peer_standings
+                    .get(self.peer_address.ip())
+                    .unwrap_or_default()
+            })
+            .await;
 
         // Add peer to peer map
         let new_peer = PeerInfo {
@@ -1339,11 +1340,8 @@ mod peer_loop_tests {
         let standing = state
             .net
             .peer_databases
-            .lock()
-            .await
-            .peer_standings
-            .get(peer_address.ip())
-            .unwrap();
+            .lock(|p| p.peer_standings.get(peer_address.ip()).unwrap())
+            .await;
         assert!(
             standing.standing < 0,
             "Peer must be sanctioned for sending a bad block"

@@ -104,7 +104,7 @@ pub fn unit_test_databases(
     network: Network,
 ) -> Result<(
     Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
-    Arc<tokio::sync::Mutex<PeerDatabases>>,
+    PeerDatabases,
     DataDirectory,
 )> {
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
@@ -113,9 +113,8 @@ pub fn unit_test_databases(
     let block_db_lock = Arc::new(tokio::sync::Mutex::new(block_db));
 
     let peer_db = NetworkingState::initialize_peer_databases(&data_dir)?;
-    let peer_db_lock = Arc::new(tokio::sync::Mutex::new(peer_db));
 
-    Ok((block_db_lock, peer_db_lock, data_dir))
+    Ok((block_db_lock, peer_db, data_dir))
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
@@ -194,7 +193,7 @@ pub async fn get_mock_global_state(
     peer_count: u8,
     wallet: Option<WalletSecret>,
 ) -> GlobalState {
-    let (archival_state, peer_db_lock, _data_dir) = make_unit_test_archival_state(network).await;
+    let (archival_state, peer_db, _data_dir) = make_unit_test_archival_state(network).await;
 
     let syncing = false;
     let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
@@ -203,7 +202,7 @@ pub async fn get_mock_global_state(
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
-    let networking_state = NetworkingState::new(peer_map, peer_db_lock, syncing);
+    let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
     let (block, _, _) = get_dummy_latest_block(None);
     let light_state: LightState = LightState::new(block);
     let blockchain_state = BlockchainState {
@@ -1039,11 +1038,7 @@ pub async fn get_mock_wallet_state(
 
 pub async fn make_unit_test_archival_state(
     network: Network,
-) -> (
-    ArchivalState,
-    Arc<tokio::sync::Mutex<PeerDatabases>>,
-    DataDirectory,
-) {
+) -> (ArchivalState, PeerDatabases, DataDirectory) {
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
 
     let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();

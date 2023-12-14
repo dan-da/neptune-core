@@ -36,7 +36,6 @@ use futures::future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
 use models::blockchain::shared::Hash;
-use models::database::PeerDatabases;
 use models::peer::PeerInfo;
 use std::collections::HashMap;
 use std::env;
@@ -84,8 +83,6 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         Arc::new(tokio::sync::Mutex::new(block_index_db));
 
     let peer_databases = NetworkingState::initialize_peer_databases(&data_dir)?;
-    let peer_databases: Arc<tokio::sync::Mutex<PeerDatabases>> =
-        Arc::new(tokio::sync::Mutex::new(peer_databases));
 
     let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)?;
     let archival_mutator_set = Arc::new(tokio::sync::Mutex::new(archival_mutator_set));
