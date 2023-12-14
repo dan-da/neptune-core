@@ -97,7 +97,7 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet
         self.active_window_storage
             .set(self.ams.kernel.swbf_active.sbf.clone());
 
-        self.schema.tables.with(|tables| {
+        self.schema.tables.lock(|tables| {
             for table in tables.iter() {
                 let operations = table.pull_queue();
                 for op in operations {
@@ -117,7 +117,7 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet
     }
 
     fn restore_or_new(&mut self) {
-        self.schema.tables.with(|tables| {
+        self.schema.tables.lock(|tables| {
             for table in tables.iter() {
                 table.restore_or_new();
             }

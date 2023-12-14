@@ -93,8 +93,8 @@ use crate::Hash;
 use crate::PEER_CHANNEL_CAPACITY;
 
 /// Return an empty peer map
-pub fn get_peer_map() -> Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> {
-    Arc::new(std::sync::Mutex::new(HashMap::new()))
+pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
+    HashMap::new()
 }
 
 // Return empty database objects, and root directory for this unit test instantiation's
@@ -197,14 +197,11 @@ pub async fn get_mock_global_state(
     let (archival_state, peer_db_lock, _data_dir) = make_unit_test_archival_state(network).await;
 
     let syncing = Arc::new(std::sync::RwLock::new(false));
-    let peer_map: Arc<std::sync::Mutex<HashMap<SocketAddr, PeerInfo>>> = get_peer_map();
+    let mut peer_map: HashMap<SocketAddr, PeerInfo> = get_peer_map();
     for i in 0..peer_count {
         let peer_address =
             std::net::SocketAddr::from_str(&format!("123.123.123.{}:8080", i)).unwrap();
-        peer_map
-            .lock()
-            .unwrap()
-            .insert(peer_address, get_dummy_peer(peer_address));
+        peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db_lock, syncing);
     let (block, _, _) = get_dummy_latest_block(None);

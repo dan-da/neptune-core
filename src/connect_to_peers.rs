@@ -83,18 +83,26 @@ async fn check_if_connection_is_allowed(
         return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding);
     }
 
-    let pm = state.net.peer_map.lock().unwrap();
+    if let Some(status) = state.net.peer_map.lock(|pm| {
+        // Disallow connection if max number of &peers has been attained
+        if (state.cli.max_peers as usize) <= pm.len() {
+            return Some(ConnectionStatus::Refused(
+                ConnectionRefusedReason::MaxPeerNumberExceeded,
+            ));
+        }
 
-    // Disallow connection if max number of &peers has been attained
-    if (state.cli.max_peers as usize) <= pm.len() {
-        return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded);
-    }
-
-    // Disallow connection to already connected peer.
-    if pm.values().any(|peer| {
-        peer.instance_id == other_handshake.instance_id || *peer_address == peer.connected_address
+        // Disallow connection to already connected peer.
+        if pm.values().any(|peer| {
+            peer.instance_id == other_handshake.instance_id
+                || *peer_address == peer.connected_address
+        }) {
+            return Some(ConnectionStatus::Refused(
+                ConnectionRefusedReason::AlreadyConnected,
+            ));
+        }
+        None
     }) {
-        return ConnectionStatus::Refused(ConnectionRefusedReason::AlreadyConnected);
+        return status;
     }
 
     // Disallow connection to self
@@ -407,9 +415,7 @@ pub async fn close_peer_connected_callback(
     let peer_info_writeback = global_state
         .net
         .peer_map
-        .lock()
-        .unwrap_or_else(|e| panic!("Failed to lock peer map: {}", e))
-        .remove(&peer_address);
+        .lock_mut(|pm| pm.remove(&peer_address));
 
     let new_standing = match peer_info_writeback {
         Some(new) => new.standing,
@@ -489,7 +495,7 @@ mod connect_tests {
         .await?;
 
         // Verify that peer map is empty after connection has been closed
-        match state.net.peer_map.lock().unwrap().keys().len() {
+        match state.net.peer_map.lock(|pm| pm.keys().len()) {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
@@ -532,14 +538,8 @@ mod connect_tests {
         state.cli.max_peers = 100;
 
         // Attempt to connect to already connected peer
-        let connected_peer: PeerInfo = state
-            .net
-            .peer_map
-            .lock()
-            .unwrap()
-            .values()
-            .collect::<Vec<_>>()[0]
-            .clone();
+        let connected_peer: PeerInfo =
+            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].clone();
         let mut mutated_other_handshake = other_handshake.clone();
         mutated_other_handshake.instance_id = connected_peer.instance_id;
         status = check_if_connection_is_allowed(
@@ -633,7 +633,7 @@ mod connect_tests {
         .await?;
 
         // Verify that peer map is empty after connection has been closed
-        match state.net.peer_map.lock().unwrap().keys().len() {
+        match state.net.peer_map.lock_guard().keys().len() {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
@@ -863,7 +863,7 @@ mod connect_tests {
         );
 
         // Verify that peer map is empty after connection has been refused
-        match state.net.peer_map.lock().unwrap().keys().len() {
+        match state.net.peer_map.lock_guard().keys().len() {
             3 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };

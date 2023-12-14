@@ -3,11 +3,12 @@ use crate::database::leveldb::LevelDB;
 use crate::database::rusty::{default_options, RustyLevelDB};
 use crate::models::database::PeerDatabases;
 use crate::models::peer::{self, PeerStanding};
+// use crate::util_types::sync::tokio as sync_tokio;
 use anyhow::Result;
 use std::net::IpAddr;
-use std::sync::Mutex as StdMutex;
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex as TokioMutex;
+use twenty_first::sync;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
@@ -19,7 +20,7 @@ type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 pub struct NetworkingState {
     // Stores info about the peers that the client is connected to
     // Peer threads may update their own entries into this map.
-    pub peer_map: Arc<StdMutex<PeerMap>>,
+    pub peer_map: sync::AtomicRw<PeerMap>,
 
     // Since this is a database, we use the tokio Mutex here.
     // `peer_databases` are used to persist IPs with their standing.
@@ -37,12 +38,12 @@ pub struct NetworkingState {
 
 impl NetworkingState {
     pub fn new(
-        peer_map: Arc<StdMutex<PeerMap>>,
+        peer_map: PeerMap,
         peer_databases: Arc<TokioMutex<PeerDatabases>>,
         syncing: Arc<std::sync::RwLock<bool>>,
     ) -> Self {
         Self {
-            peer_map,
+            peer_map: sync::AtomicRw::from(peer_map),
             peer_databases,
             syncing,
             instance_id: rand::random(),
