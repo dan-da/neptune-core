@@ -30,7 +30,7 @@ pub struct NetworkingState {
     // This value is only true if instance is running an archival node
     // that is currently downloading blocks to catch up.
     // Only the main thread may update this flag
-    pub syncing: Arc<std::sync::RwLock<bool>>,
+    pub syncing: sync::AtomicRw<bool>,
 
     // Read-only value set during startup
     pub instance_id: u128,
@@ -40,12 +40,12 @@ impl NetworkingState {
     pub fn new(
         peer_map: PeerMap,
         peer_databases: Arc<TokioMutex<PeerDatabases>>,
-        syncing: Arc<std::sync::RwLock<bool>>,
+        syncing: bool,
     ) -> Self {
         Self {
             peer_map: sync::AtomicRw::from(peer_map),
             peer_databases,
-            syncing,
+            syncing: sync::AtomicRw::from(syncing),
             instance_id: rand::random(),
         }
     }

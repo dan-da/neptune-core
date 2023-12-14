@@ -493,7 +493,7 @@ impl MainLoopHandler {
                     }
 
                     // Get out of sync mode if needed
-                    if self.global_state.net.syncing.read().unwrap().to_owned() {
+                    if self.global_state.net.syncing.lock(|s| *s) {
                         let stay_in_sync_mode = stay_in_sync_mode(
                             last_block.header.clone(),
                             &main_loop_state.sync_state,
@@ -501,7 +501,7 @@ impl MainLoopHandler {
                         );
                         if !stay_in_sync_mode {
                             info!("Exiting sync mode");
-                            *self.global_state.net.syncing.write().unwrap() = false;
+                            self.global_state.net.syncing.lock_mut(|s| *s = false);
                         }
                     }
 
@@ -591,7 +591,7 @@ impl MainLoopHandler {
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
-                    *self.global_state.net.syncing.write().unwrap() = true;
+                    self.global_state.net.syncing.lock_mut(|s| *s = true);
                 }
             }
             PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -614,7 +614,7 @@ impl MainLoopHandler {
                     .get_latest_block_header()
                     .await;
 
-                if self.global_state.net.syncing.read().unwrap().to_owned() {
+                if self.global_state.net.syncing.lock(|s| *s) {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         tip_header,
                         &main_loop_state.sync_state,
@@ -622,7 +622,7 @@ impl MainLoopHandler {
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
-                        *self.global_state.net.syncing.write().unwrap() = false;
+                        self.global_state.net.syncing.lock_mut(|s| *s = false);
                     }
                 }
             }
@@ -850,7 +850,7 @@ impl MainLoopHandler {
     /// Logic for requesting the batch-download of blocks from peers
     async fn block_sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         // Check if we are in sync mode
-        if !self.global_state.net.syncing.read().unwrap().to_owned() {
+        if !self.global_state.net.syncing.lock(|s| *s) {
             return Ok(());
         }
 
@@ -1136,7 +1136,7 @@ impl MainLoopHandler {
     async fn resync_membership_proofs(&self) -> Result<()> {
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
-        if *self.global_state.net.syncing.read().unwrap() {
+        if self.global_state.net.syncing.lock(|s| *s) {
             debug!("Not syncing MS membership proofs because we are syncing");
             return Ok(());
         }
