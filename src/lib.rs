@@ -18,8 +18,7 @@ use crate::config_models::data_directory::DataDirectory;
 use crate::connect_to_peers::call_peer_wrapper;
 use crate::main_loop::MainLoopHandler;
 use crate::models::channel::RPCServerToMain;
-use crate::models::database::BlockIndexKey;
-use crate::models::database::BlockIndexValue;
+
 use crate::models::state::archival_state::ArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
@@ -31,7 +30,7 @@ use crate::models::state::GlobalState;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
-use database::rusty::RustyLevelDB;
+
 use futures::future;
 use futures::StreamExt;
 use models::blockchain::block::Block;
@@ -78,9 +77,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     info!("Got wallet state.");
 
     // Connect to or create databases for block index, peers, mutator set, block sync
-    let block_index_db = ArchivalState::initialize_block_index_database(&data_dir)?;
-    let block_index_db: Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>> =
-        Arc::new(tokio::sync::Mutex::new(block_index_db));
+    let block_index_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
 
     let peer_databases = NetworkingState::initialize_peer_databases(&data_dir)?;
 

@@ -6,7 +6,6 @@ use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
@@ -14,11 +13,11 @@ use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
+// use twenty_first::sync;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::leveldb::LevelDB;
-use crate::database::rusty::{default_options, RustyLevelDB};
+use crate::database::rusty::{default_options, RustyLevelDbAsync};
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::blockchain::shared::Hash;
@@ -29,6 +28,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
+use tokio::sync::Mutex as TokioMutex;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -38,7 +38,7 @@ pub struct ArchivalState {
     data_dir: DataDirectory,
 
     // Since this is a database, we use the tokio Mutex here.
-    pub block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
+    pub block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker thread.
@@ -63,16 +63,17 @@ impl core::fmt::Debug for ArchivalState {
 
 impl ArchivalState {
     /// Create databases for block persistence
-    pub fn initialize_block_index_database(
+    pub async fn initialize_block_index_database(
         data_dir: &DataDirectory,
-    ) -> Result<RustyLevelDB<BlockIndexKey, BlockIndexValue>> {
+    ) -> Result<RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>> {
         let block_index_db_dir_path = data_dir.block_index_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&block_index_db_dir_path)?;
 
-        let block_index = RustyLevelDB::<BlockIndexKey, BlockIndexValue>::new(
+        let block_index = RustyLevelDbAsync::<BlockIndexKey, BlockIndexValue>::new(
             &block_index_db_dir_path,
             default_options(),
-        )?;
+        )
+        .await?;
 
         Ok(block_index)
     }
@@ -113,11 +114,10 @@ impl ArchivalState {
     /// of steps. So this function returns two lists: the list of
     /// down steps and the list of up steps. Caller must provide block
     /// DB lock.
-    pub fn find_path_with_lock(
+    pub async fn find_path(
         &self,
         start: Digest,
         stop: Digest,
-        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
     ) -> (Vec<Digest>, Digest, Vec<Digest>) {
         // We build two lists, initially populated with the start
         // and stop of the walk. We extend the lists downwards by
@@ -125,30 +125,26 @@ impl ArchivalState {
         let mut leaving = vec![start];
         let mut arriving = vec![stop];
 
-        // Get DB lock and hold it until this function call is completed.
-        // This is done to avoid having to take and release the lock a lot of times.
         let mut leaving_deepest_block_header = self
-            .get_block_header_with_lock(block_db_lock, *leaving.last().unwrap())
+            .get_block_header(*leaving.last().unwrap())
+            .await
             .unwrap();
         let mut arriving_deepest_block_header = self
-            .get_block_header_with_lock(block_db_lock, *arriving.last().unwrap())
+            .get_block_header(*arriving.last().unwrap())
+            .await
             .unwrap();
         while leaving_deepest_block_header.height != arriving_deepest_block_header.height {
             if leaving_deepest_block_header.height < arriving_deepest_block_header.height {
                 arriving.push(arriving_deepest_block_header.prev_block_digest);
                 arriving_deepest_block_header = self
-                    .get_block_header_with_lock(
-                        block_db_lock,
-                        arriving_deepest_block_header.prev_block_digest,
-                    )
+                    .get_block_header(arriving_deepest_block_header.prev_block_digest)
+                    .await
                     .unwrap();
             } else {
                 leaving.push(leaving_deepest_block_header.prev_block_digest);
                 leaving_deepest_block_header = self
-                    .get_block_header_with_lock(
-                        block_db_lock,
-                        leaving_deepest_block_header.prev_block_digest,
-                    )
+                    .get_block_header(leaving_deepest_block_header.prev_block_digest)
+                    .await
                     .unwrap();
             }
         }
@@ -156,12 +152,14 @@ impl ArchivalState {
         // Extend both lists until their deepest blocks match.
         while leaving.last().unwrap() != arriving.last().unwrap() {
             let leaving_predecessor = self
-                .get_block_header_with_lock(block_db_lock, *leaving.last().unwrap())
+                .get_block_header(*leaving.last().unwrap())
+                .await
                 .unwrap()
                 .prev_block_digest;
             leaving.push(leaving_predecessor);
             let arriving_predecessor = self
-                .get_block_header_with_lock(block_db_lock, *arriving.last().unwrap())
+                .get_block_header(*arriving.last().unwrap())
+                .await
                 .unwrap()
                 .prev_block_digest;
             arriving.push(arriving_predecessor);
@@ -175,22 +173,9 @@ impl ArchivalState {
         (leaving, luca, arriving)
     }
 
-    /// Find the path connecting two blocks. Every path involves
-    /// going down some number of steps and then going up some number
-    /// of steps. So this function returns two lists: the list of
-    /// down steps and the list of up steps.
-    pub async fn find_path(
-        &self,
-        start: Digest,
-        stop: Digest,
-    ) -> (Vec<Digest>, Digest, Vec<Digest>) {
-        let mut block_db_lock = self.block_index_db.lock().await;
-        self.find_path_with_lock(start, stop, &mut block_db_lock)
-    }
-
     pub async fn new(
         data_dir: DataDirectory,
-        block_index_db: Arc<TokioMutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
+        block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
         archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
@@ -222,17 +207,18 @@ impl ArchivalState {
 
     /// Write a newly found block to database and to disk. A lock should be held over light state
     /// while this function call is executed.
-    pub fn write_block(
+    pub async fn write_block(
         &self,
         new_block: Box<Block>,
-        db_lock: &mut tokio::sync::MutexGuard<'_, RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
         current_max_pow_family: Option<U32s<PROOF_OF_WORK_COUNT_U32_SIZE>>,
     ) -> Result<()> {
         // Fetch last file record to find disk location to store block.
         // This record must exist in the DB already, unless this is the first block
         // stored on disk.
-        let mut last_rec: LastFileRecord = match db_lock
+        let mut last_rec: LastFileRecord = match self
+            .block_index_db
             .get(BlockIndexKey::LastFile)
+            .await
             .map(|x| x.as_last_file_record())
         {
             Some(rec) => rec,
@@ -257,8 +243,10 @@ impl ArchivalState {
         debug!("Writing block to: {}", block_file_path.display());
         // Get associated file record from database, otherwise create it
         let file_record_key: BlockIndexKey = BlockIndexKey::File(last_rec.last_file);
-        let file_record_value: Option<FileRecord> = db_lock
+        let file_record_value: Option<FileRecord> = self
+            .block_index_db
             .get(file_record_key.clone())
+            .await
             .map(|x| x.as_file_record());
         let file_record_value: FileRecord = match file_record_value {
             Some(record) => record.add(serialized_block_size, &new_block.header),
@@ -287,10 +275,11 @@ impl ArchivalState {
         );
 
         let height_record_key = BlockIndexKey::Height(new_block.header.height);
-        let mut blocks_at_same_height: Vec<Digest> = match db_lock.get(height_record_key.clone()) {
-            Some(rec) => rec.as_height_record(),
-            None => vec![],
-        };
+        let mut blocks_at_same_height: Vec<Digest> =
+            match self.block_index_db.get(height_record_key.clone()).await {
+                Some(rec) => rec.as_height_record(),
+                None => vec![],
+            };
 
         // Write to file with mmap, only map relevant part of file into memory
         let mmap = unsafe {
@@ -334,7 +323,7 @@ impl ArchivalState {
             ));
         }
 
-        db_lock.batch_write(block_index_entries);
+        self.block_index_db.batch_write(block_index_entries).await;
 
         Ok(())
     }
@@ -365,18 +354,17 @@ impl ArchivalState {
     }
 
     /// Given a mutex lock on the database, return the latest block
-    fn get_latest_block_from_disk(
-        &self,
-        block_index_db: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
-    ) -> Result<Option<Block>> {
-        let tip_digest = block_index_db.get(BlockIndexKey::BlockTipDigest);
+    async fn get_latest_block_from_disk(&self) -> Result<Option<Block>> {
+        let tip_digest = self.block_index_db.get(BlockIndexKey::BlockTipDigest).await;
         let tip_digest: Digest = match tip_digest {
             Some(digest) => digest.as_tip_digest(),
             None => return Ok(None),
         };
 
-        let tip_block_record: BlockRecord = block_index_db
+        let tip_block_record: BlockRecord = self
+            .block_index_db
             .get(BlockIndexKey::Block(tip_digest))
+            .await
             .unwrap()
             .as_block_record();
 
@@ -388,9 +376,9 @@ impl ArchivalState {
     /// Return latest block from database, or genesis block if no other block
     /// is known.
     pub async fn get_latest_block(&self) -> Block {
-        let mut dbs = self.block_index_db.lock().await;
         let lookup_res_info: Option<Block> = self
-            .get_latest_block_from_disk(&mut dbs)
+            .get_latest_block_from_disk()
+            .await
             .expect("Failed to read block from disk");
 
         match lookup_res_info {
@@ -399,29 +387,11 @@ impl ArchivalState {
         }
     }
 
-    fn get_block_header_with_lock(
-        &self,
-        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
-        block_digest: Digest,
-    ) -> Option<BlockHeader> {
-        let mut ret = block_db_lock
-            .get(BlockIndexKey::Block(block_digest))
-            .map(|x| x.as_block_record().block_header);
-
-        // If no block was found, check if digest is genesis digest
-        if ret.is_none() && block_digest == self.genesis_block.hash {
-            ret = Some(self.genesis_block.header.clone());
-        }
-
-        ret
-    }
-
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
         let mut ret = self
             .block_index_db
-            .lock()
-            .await
             .get(BlockIndexKey::Block(block_digest))
+            .await
             .map(|x| x.as_block_record().block_header);
 
         // If no block was found, check if digest is genesis digest
@@ -430,44 +400,14 @@ impl ArchivalState {
         }
 
         ret
-    }
-
-    // Return the block with a given block digest, iff it's available in state somewhere
-    // Takes a lock on the block databases as argument.
-    fn get_block_with_lock(
-        &self,
-        block_db_lock: &mut tokio::sync::MutexGuard<RustyLevelDB<BlockIndexKey, BlockIndexValue>>,
-        block_digest: Digest,
-    ) -> Option<Block> {
-        let maybe_record: Option<BlockRecord> = block_db_lock
-            .get(BlockIndexKey::Block(block_digest))
-            .map(|x| x.as_block_record());
-        let record: BlockRecord = match maybe_record {
-            Some(rec) => rec,
-            None => {
-                if self.genesis_block.hash == block_digest {
-                    return Some(*self.genesis_block.clone());
-                } else {
-                    return None;
-                }
-            }
-        };
-
-        // Fetch block from disk
-        let block = self
-            .get_block_from_block_record(record)
-            .expect("Fetching from disk must succeed");
-
-        Some(block)
     }
 
     // Return the block with a given block digest, iff it's available in state somewhere
     pub async fn get_block(&self, block_digest: Digest) -> Result<Option<Block>> {
         let maybe_record: Option<BlockRecord> = self
             .block_index_db
-            .lock()
-            .await
             .get(BlockIndexKey::Block(block_digest))
+            .await
             .map(|x| x.as_block_record());
         let record: BlockRecord = match maybe_record {
             Some(rec) => rec,
@@ -490,9 +430,8 @@ impl ArchivalState {
     async fn block_height_to_block_count(&self, height: BlockHeight) -> usize {
         match self
             .block_index_db
-            .lock()
-            .await
             .get(BlockIndexKey::Height(height))
+            .await
             .map(|x| x.as_height_record())
         {
             Some(rec) => rec.len(),
@@ -507,9 +446,8 @@ impl ArchivalState {
     ) -> Vec<BlockHeader> {
         let maybe_digests = self
             .block_index_db
-            .lock()
-            .await
             .get(BlockIndexKey::Height(block_height))
+            .await
             .map(|x| x.as_height_record());
 
         // Note that if you do not assign the `maybe_digests` value but use the RHS expression instead,
@@ -520,9 +458,8 @@ impl ArchivalState {
                 for block_digest in block_digests {
                     let block_header = self
                         .block_index_db
-                        .lock()
-                        .await
                         .get(BlockIndexKey::Block(block_digest))
+                        .await
                         .map(|x| x.as_block_record())
                         .unwrap();
                     block_headers.push(block_header.block_header);
@@ -624,12 +561,8 @@ impl ArchivalState {
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip. All blocks
     /// stored in the database are assumed to be valid.
-    pub fn update_mutator_set<'a>(
+    pub async fn update_mutator_set<'a>(
         &self,
-        block_db_lock: &mut tokio::sync::MutexGuard<
-            'a,
-            RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-        >,
         ams_lock: &mut tokio::sync::MutexGuard<'a, RustyArchivalMutatorSet<Hash>>,
         new_block: &Block,
     ) -> Result<()> {
@@ -644,19 +577,18 @@ impl ArchivalState {
                 (vec![], ms_block_sync_digest, vec![])
             } else {
                 // Non-trivial path from current mutator set sync digest to new block
-                self.find_path_with_lock(
-                    ms_block_sync_digest,
-                    new_block.header.prev_block_digest,
-                    block_db_lock,
-                )
+                self.find_path(ms_block_sync_digest, new_block.header.prev_block_digest)
+                    .await
             };
         let forwards = [forwards, vec![new_block.hash]].concat();
 
         for digest in backwards {
             // Roll back mutator set
             let roll_back_block = self
-                .get_block_with_lock(block_db_lock, digest)
-                .expect("Fetching block must succeed");
+                .get_block(digest)
+                .await
+                .expect("Fetching block must succeed")
+                .unwrap();
 
             debug!(
                 "Updating mutator set: rolling back block with height {}",
@@ -683,8 +615,10 @@ impl ArchivalState {
             let apply_forward_block = if digest == new_block.hash {
                 new_block.to_owned()
             } else {
-                self.get_block_with_lock(block_db_lock, digest)
+                self.get_block(digest)
+                    .await
                     .expect("Fetching block must succeed")
+                    .unwrap()
             };
             debug!(
                 "Updating mutator set: adding block with height {}",
@@ -756,8 +690,6 @@ mod archival_state_tests {
     use crate::models::blockchain::transaction::PubScript;
     use crate::models::blockchain::transaction::{amount::Amount, utxo::Utxo};
     use crate::models::state::archival_state::ArchivalState;
-    use crate::models::state::blockchain_state::BlockchainState;
-    use crate::models::state::light_state::LightState;
     use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::UtxoReceiverData;
@@ -767,12 +699,12 @@ mod archival_state_tests {
     };
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
-        let (block_index_db_lock, _peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
+        let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
 
         let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
         let ams_lock = Arc::new(TokioMutex::new(ams));
 
-        ArchivalState::new(data_dir, block_index_db_lock, ams_lock).await
+        ArchivalState::new(data_dir, block_index_db, ams_lock).await
     }
 
     #[traced_test]
@@ -783,26 +715,13 @@ mod archival_state_tests {
             let network = Network::Alpha;
 
             let archival_state0 = make_test_archival_state(network).await;
-            let archival_state1 = make_test_archival_state(network).await;
-            let archival_state2 = make_test_archival_state(network).await;
 
             let b = Block::genesis_block();
-            let blockchain_state = BlockchainState {
-                archival_state: Some(archival_state2),
-                light_state: LightState::new(*archival_state1.genesis_block),
-            };
             let some_wallet_secret = WalletSecret::new(random());
             let some_spending_key = some_wallet_secret.nth_generation_spending_key(0);
             let some_receiving_address = some_spending_key.to_address();
 
             let (block_1, _, _) = make_mock_block_with_valid_pow(&b, None, some_receiving_address);
-            let lock0 = blockchain_state
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             add_block_to_archival_state(&archival_state0, block_1.clone())
                 .await
                 .unwrap();
@@ -811,7 +730,6 @@ mod archival_state_tests {
                 .await
                 .unwrap()
                 .unwrap();
-            drop(lock0);
         })
         .await?;
 
@@ -866,11 +784,11 @@ mod archival_state_tests {
                 .to_address(),
         );
         {
-            let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
 
             archival_state
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)
+                .update_mutator_set(&mut ams_lock, &mock_block_1)
+                .await
                 .unwrap();
         }
 
@@ -920,14 +838,6 @@ mod archival_state_tests {
 
         {
             add_block(&genesis_receiver_global_state, mock_block_1.clone()).await?;
-            let mut block_db_lock = genesis_receiver_global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             let mut ams_lock = genesis_receiver_global_state
                 .chain
                 .archival_state
@@ -941,7 +851,8 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1)
+                .update_mutator_set(&mut ams_lock, &mock_block_1)
+                .await
                 .unwrap();
             genesis_receiver_global_state
                 .wallet_state
@@ -983,14 +894,6 @@ mod archival_state_tests {
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
             add_block(&genesis_receiver_global_state, mock_block_2.clone()).await?;
-            let mut block_db_lock = genesis_receiver_global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             let mut ams_lock = genesis_receiver_global_state
                 .chain
                 .archival_state
@@ -1005,7 +908,8 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_2)
+                .update_mutator_set(&mut ams_lock, &mock_block_2)
+                .await
                 .unwrap();
 
             assert_ne!(0, ams_lock.ams.kernel.swbf_active.sbf.len());
@@ -1020,7 +924,6 @@ mod archival_state_tests {
         let network = Network::Alpha;
         let (archival_state, _peer_db_lock, _data_dir) =
             make_unit_test_archival_state(network).await;
-        let mut block_db_lock = archival_state.block_index_db.lock().await;
         let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let own_wallet = WalletSecret::new(random());
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
@@ -1031,15 +934,17 @@ mod archival_state_tests {
             None,
             own_receiving_address,
         );
-        archival_state.write_block(
-            Box::new(mock_block_1a.clone()),
-            &mut block_db_lock,
-            Some(mock_block_1a.header.proof_of_work_family),
-        )?;
+        archival_state
+            .write_block(
+                Box::new(mock_block_1a.clone()),
+                Some(mock_block_1a.header.proof_of_work_family),
+            )
+            .await?;
 
         // 2. Update mutator set with this
         archival_state
-            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1a)
+            .update_mutator_set(&mut ams_lock, &mock_block_1a)
+            .await
             .unwrap();
 
         // 3. Create competing block 1 and store it to DB
@@ -1048,15 +953,17 @@ mod archival_state_tests {
             None,
             own_receiving_address,
         );
-        archival_state.write_block(
-            Box::new(mock_block_1a.clone()),
-            &mut block_db_lock,
-            Some(mock_block_1b.header.proof_of_work_family),
-        )?;
+        archival_state
+            .write_block(
+                Box::new(mock_block_1a.clone()),
+                Some(mock_block_1b.header.proof_of_work_family),
+            )
+            .await?;
 
         // 4. Update mutator set with that
         archival_state
-            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)
+            .update_mutator_set(&mut ams_lock, &mock_block_1b)
+            .await
             .unwrap();
 
         // 5. Experience rollback
@@ -1119,19 +1026,19 @@ mod archival_state_tests {
         assert!(block_1a.is_valid(&genesis_block));
 
         {
-            let mut block_db_lock = archival_state.block_index_db.lock().await;
             let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             archival_state
                 .write_block(
                     Box::new(block_1a.clone()),
-                    &mut block_db_lock,
                     Some(block_1a.header.proof_of_work_family),
                 )
+                .await
                 .unwrap();
 
             // 2. Update mutator set with this
             archival_state
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &block_1a)
+                .update_mutator_set(&mut ams_lock, &block_1a)
+                .await
                 .unwrap();
 
             // 3. Create competing block 1 and store it to DB
@@ -1143,14 +1050,15 @@ mod archival_state_tests {
             archival_state
                 .write_block(
                     Box::new(block_1a.clone()),
-                    &mut block_db_lock,
                     Some(mock_block_1b.header.proof_of_work_family),
                 )
+                .await
                 .unwrap();
 
             // 4. Update mutator set with that and verify rollback
             archival_state
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)
+                .update_mutator_set(&mut ams_lock, &mock_block_1b)
+                .await
                 .unwrap();
         }
 
@@ -1251,14 +1159,6 @@ mod archival_state_tests {
 
             // Store the produced block
             {
-                let mut block_db_lock = global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_index_db
-                    .lock()
-                    .await;
                 let mut ams_lock = global_state
                     .chain
                     .archival_state
@@ -1274,9 +1174,9 @@ mod archival_state_tests {
                     .unwrap()
                     .write_block(
                         Box::new(next_block.clone()),
-                        &mut block_db_lock,
                         Some(next_block.header.proof_of_work_family),
-                    )?;
+                    )
+                    .await?;
                 *global_state.chain.light_state.latest_block.lock().await = next_block.clone();
 
                 // 2. Update mutator set with produced block
@@ -1285,7 +1185,8 @@ mod archival_state_tests {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .update_mutator_set(&mut block_db_lock, &mut ams_lock, &next_block)
+                    .update_mutator_set(&mut ams_lock, &next_block)
+                    .await
                     .unwrap();
 
                 // 3. Update wallet state so we can continue making transactions
@@ -1314,14 +1215,6 @@ mod archival_state_tests {
             // 3. Create competing block 1 and store it to DB
             let (mock_block_1b, _, _) =
                 make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address);
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             let mut ams_lock = global_state
                 .chain
                 .archival_state
@@ -1337,9 +1230,9 @@ mod archival_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(mock_block_1b.clone()),
-                    &mut block_db_lock,
                     Some(mock_block_1b.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
 
             // 4. Update mutator set with that and verify rollback
             global_state
@@ -1347,7 +1240,8 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut block_db_lock, &mut ams_lock, &mock_block_1b)
+                .update_mutator_set(&mut ams_lock, &mock_block_1b)
+                .await
                 .unwrap();
         }
 
@@ -1536,19 +1430,12 @@ mod archival_state_tests {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await,
-                    &mut state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
                         .archival_mutator_set
                         .lock()
                         .await,
                     &block_1,
                 )
+                .await
                 .unwrap();
         }
 
@@ -1734,19 +1621,12 @@ mod archival_state_tests {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await,
-                    &mut state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
                         .archival_mutator_set
                         .lock()
                         .await,
                     &block_2,
                 )
+                .await
                 .unwrap();
         }
 
@@ -1872,13 +1752,11 @@ mod archival_state_tests {
         let network = Network::Alpha;
         let archival_state: ArchivalState = make_test_archival_state(network).await;
 
-        let mut db_lock_0 = archival_state.block_index_db.lock().await;
-        let ret = archival_state.get_latest_block_from_disk(&mut db_lock_0)?;
+        let ret = archival_state.get_latest_block_from_disk().await?;
         assert!(
             ret.is_none(),
             "Must return None when no block is stored in DB"
         );
-        drop(db_lock_0);
 
         // Add a block to archival state and verify that this is returned
         let own_wallet = WalletSecret::new(random());
@@ -1888,8 +1766,7 @@ mod archival_state_tests {
             make_mock_block_with_valid_pow(&genesis, None, own_receiving_address);
         add_block_to_archival_state(&archival_state, mock_block_1.clone()).await?;
 
-        let mut db_lock_1 = archival_state.block_index_db.lock().await;
-        let ret1 = archival_state.get_latest_block_from_disk(&mut db_lock_1)?;
+        let ret1 = archival_state.get_latest_block_from_disk().await?;
         assert!(
             ret1.is_some(),
             "Must return a block when one is stored to DB"
@@ -1899,14 +1776,12 @@ mod archival_state_tests {
             ret1.unwrap(),
             "Returned block must match the one inserted"
         );
-        drop(db_lock_1);
 
         // Add a 2nd block and verify that this new block is now returned
         let (mock_block_2, _, _) =
             make_mock_block_with_valid_pow(&mock_block_1, None, own_receiving_address);
         add_block_to_archival_state(&archival_state, mock_block_2.clone()).await?;
-        let mut db_lock_2 = archival_state.block_index_db.lock().await;
-        let ret2 = archival_state.get_latest_block_from_disk(&mut db_lock_2)?;
+        let ret2 = archival_state.get_latest_block_from_disk().await?;
         assert!(
             ret2.is_some(),
             "Must return a block when one is stored to DB"
@@ -2597,16 +2472,18 @@ mod archival_state_tests {
 
         let (mock_block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis.clone(), None, own_receiving_address);
-        let mut db_lock = archival_state.block_index_db.lock().await;
-        archival_state.write_block(
-            Box::new(mock_block_1.clone()),
-            &mut db_lock,
-            Some(genesis.header.proof_of_work_family),
-        )?;
+        archival_state
+            .write_block(
+                Box::new(mock_block_1.clone()),
+                Some(genesis.header.proof_of_work_family),
+            )
+            .await?;
 
         // Verify that `LastFile` value is stored correctly
-        let read_last_file: LastFileRecord = db_lock
+        let read_last_file: LastFileRecord = archival_state
+            .block_index_db
             .get(BlockIndexKey::LastFile)
+            .await
             .unwrap()
             .as_last_file_record();
 
@@ -2615,8 +2492,10 @@ mod archival_state_tests {
         // Verify that `Height` value is stored correctly
         {
             let expected_height: u64 = 1;
-            let blocks_with_height_1: Vec<Digest> = db_lock
+            let blocks_with_height_1: Vec<Digest> = archival_state
+                .block_index_db
                 .get(BlockIndexKey::Height(expected_height.into()))
+                .await
                 .unwrap()
                 .as_height_record();
 
@@ -2626,8 +2505,10 @@ mod archival_state_tests {
 
         // Verify that `File` value is stored correctly
         let expected_file: u32 = read_last_file.last_file;
-        let last_file_record_1: FileRecord = db_lock
+        let last_file_record_1: FileRecord = archival_state
+            .block_index_db
             .get(BlockIndexKey::File(expected_file))
+            .await
             .unwrap()
             .as_file_record();
 
@@ -2645,16 +2526,20 @@ mod archival_state_tests {
         );
 
         // Verify that `BlockTipDigest` is stored correctly
-        let tip_digest: Digest = db_lock
+        let tip_digest: Digest = archival_state
+            .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
+            .await
             .unwrap()
             .as_tip_digest();
 
         assert_eq!(mock_block_1.hash, tip_digest);
 
         // Verify that `Block` is stored correctly
-        let actual_block: BlockRecord = db_lock
+        let actual_block: BlockRecord = archival_state
+            .block_index_db
             .get(BlockIndexKey::Block(mock_block_1.hash))
+            .await
             .unwrap()
             .as_block_record();
 
@@ -2675,23 +2560,28 @@ mod archival_state_tests {
         // Store another block and verify that this block is appended to disk
         let (mock_block_2, _, _) =
             make_mock_block_with_valid_pow(&mock_block_1.clone(), None, own_receiving_address);
-        archival_state.write_block(
-            Box::new(mock_block_2.clone()),
-            &mut db_lock,
-            Some(mock_block_1.header.proof_of_work_family),
-        )?;
+        archival_state
+            .write_block(
+                Box::new(mock_block_2.clone()),
+                Some(mock_block_1.header.proof_of_work_family),
+            )
+            .await?;
 
         // Verify that `LastFile` value is updated correctly, unchanged
-        let read_last_file_2: LastFileRecord = db_lock
+        let read_last_file_2: LastFileRecord = archival_state
+            .block_index_db
             .get(BlockIndexKey::LastFile)
+            .await
             .unwrap()
             .as_last_file_record();
         assert_eq!(0, read_last_file.last_file);
 
         // Verify that `Height` value is updated correctly
         {
-            let blocks_with_height_1: Vec<Digest> = db_lock
+            let blocks_with_height_1: Vec<Digest> = archival_state
+                .block_index_db
                 .get(BlockIndexKey::Height(1.into()))
+                .await
                 .unwrap()
                 .as_height_record();
             assert_eq!(1, blocks_with_height_1.len());
@@ -2699,8 +2589,10 @@ mod archival_state_tests {
         }
 
         {
-            let blocks_with_height_2: Vec<Digest> = db_lock
+            let blocks_with_height_2: Vec<Digest> = archival_state
+                .block_index_db
                 .get(BlockIndexKey::Height(2.into()))
+                .await
                 .unwrap()
                 .as_height_record();
             assert_eq!(1, blocks_with_height_2.len());
@@ -2708,8 +2600,10 @@ mod archival_state_tests {
         }
         // Verify that `File` value is updated correctly
         let expected_file_2: u32 = read_last_file.last_file;
-        let last_file_record_2: FileRecord = db_lock
+        let last_file_record_2: FileRecord = archival_state
+            .block_index_db
             .get(BlockIndexKey::File(expected_file_2))
+            .await
             .unwrap()
             .as_file_record();
         assert_eq!(2, last_file_record_2.blocks_in_file_count);
@@ -2728,15 +2622,19 @@ mod archival_state_tests {
         );
 
         // Verify that `BlockTipDigest` is updated correctly
-        let tip_digest_2: Digest = db_lock
+        let tip_digest_2: Digest = archival_state
+            .block_index_db
             .get(BlockIndexKey::BlockTipDigest)
+            .await
             .unwrap()
             .as_tip_digest();
         assert_eq!(mock_block_2.hash, tip_digest_2);
 
         // Verify that `Block` is stored correctly
-        let actual_block_record_2: BlockRecord = db_lock
+        let actual_block_record_2: BlockRecord = archival_state
+            .block_index_db
             .get(BlockIndexKey::Block(mock_block_2.hash))
+            .await
             .unwrap()
             .as_block_record();
 
@@ -2755,9 +2653,7 @@ mod archival_state_tests {
         );
 
         // Test `get_latest_block_from_disk`
-        let read_latest_block = archival_state
-            .get_latest_block_from_disk(&mut db_lock)?
-            .unwrap();
+        let read_latest_block = archival_state.get_latest_block_from_disk().await?.unwrap();
         assert_eq!(mock_block_2, read_latest_block);
 
         // Test `get_block_from_block_record`
@@ -2768,24 +2664,22 @@ mod archival_state_tests {
         assert_eq!(mock_block_2.hash, block_from_block_record.hash);
 
         // Test `get_block_header`
-        drop(db_lock);
         let block_header_2 = archival_state
             .get_block_header(mock_block_2.hash)
             .await
             .unwrap();
         assert_eq!(mock_block_2.header, block_header_2);
 
-        // Test `get_block_header_with_lock`
+        // Test `get_block_header`
         {
-            let mut db_lock_local = archival_state.block_index_db.lock().await;
             let block_header_2_from_lock_method = archival_state
-                .get_block_header_with_lock(&mut db_lock_local, mock_block_2.hash)
+                .get_block_header(mock_block_2.hash)
+                .await
                 .unwrap();
             assert_eq!(mock_block_2.header, block_header_2_from_lock_method);
 
-            let genesis_header_from_lock_method = archival_state
-                .get_block_header_with_lock(&mut db_lock_local, genesis.hash)
-                .unwrap();
+            let genesis_header_from_lock_method =
+                archival_state.get_block_header(genesis.hash).await.unwrap();
             assert_eq!(genesis.header, genesis_header_from_lock_method);
         }
 

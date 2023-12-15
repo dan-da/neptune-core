@@ -893,16 +893,9 @@ mod tests {
                 .unwrap()
                 .write_block(
                     Box::new(new_block.clone()),
-                    &mut own_global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await,
                     Some(latest_block.header.proof_of_work_family),
                 )
+                .await
                 .unwrap();
             *own_global_state.chain.light_state.latest_block.lock().await = new_block.clone();
             latest_block = new_block;
@@ -953,16 +946,9 @@ mod tests {
             .unwrap()
             .write_block(
                 Box::new(block_3a.clone()),
-                &mut own_global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_index_db
-                    .lock()
-                    .await,
                 Some(latest_block.header.proof_of_work_family),
             )
+            .await
             .unwrap();
         *own_global_state.chain.light_state.latest_block.lock().await = block_3a.clone();
         assert!(
@@ -1011,16 +997,9 @@ mod tests {
             .unwrap()
             .write_block(
                 Box::new(block_3b.clone()),
-                &mut own_global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_index_db
-                    .lock()
-                    .await,
                 Some(latest_block.header.proof_of_work_family),
             )
+            .await
             .unwrap();
         *own_global_state.chain.light_state.latest_block.lock().await = block_3b.clone();
         assert!(
@@ -1070,16 +1049,9 @@ mod tests {
                 .unwrap()
                 .write_block(
                     Box::new(new_block.clone()),
-                    &mut own_global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await,
                     Some(latest_block.header.proof_of_work_family),
                 )
+                .await
                 .unwrap();
             *own_global_state.chain.light_state.latest_block.lock().await = new_block.clone();
             latest_block = new_block;
@@ -1129,16 +1101,9 @@ mod tests {
             .unwrap()
             .write_block(
                 Box::new(block_12.clone()),
-                &mut own_global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .block_index_db
-                    .lock()
-                    .await,
                 Some(latest_block.header.proof_of_work_family),
             )
+            .await
             .unwrap();
         *own_global_state.chain.light_state.latest_block.lock().await = block_12.clone();
         assert!(

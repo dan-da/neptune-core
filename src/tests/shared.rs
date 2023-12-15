@@ -40,8 +40,7 @@ use twenty_first::shared_math::other::random_elements_array;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
-use crate::database::leveldb::LevelDB;
-use crate::database::rusty::RustyLevelDB;
+use crate::database::rusty::RustyLevelDbAsync;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::TARGET_BLOCK_INTERVAL;
@@ -103,18 +102,24 @@ pub fn get_peer_map() -> HashMap<SocketAddr, PeerInfo> {
 pub fn unit_test_databases(
     network: Network,
 ) -> Result<(
-    Arc<tokio::sync::Mutex<RustyLevelDB<BlockIndexKey, BlockIndexValue>>>,
+    RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
     PeerDatabases,
     DataDirectory,
 )> {
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
+    let data_dir_copy = data_dir.clone();
 
-    let block_db = ArchivalState::initialize_block_index_database(&data_dir)?;
-    let block_db_lock = Arc::new(tokio::sync::Mutex::new(block_db));
+    // temporary hack.  todo: make this fn async.
+    let handle = std::thread::spawn(move || {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            ArchivalState::initialize_block_index_database(&data_dir_copy).await
+        })
+    });
+    let block_db = handle.join().unwrap()?;
 
     let peer_db = NetworkingState::initialize_peer_databases(&data_dir)?;
 
-    Ok((block_db_lock, peer_db, data_dir))
+    Ok((block_db, peer_db, data_dir))
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
@@ -271,26 +276,34 @@ pub async fn add_block_to_archival_state(
     archival_state: &ArchivalState,
     new_block: Block,
 ) -> Result<()> {
-    let mut db_lock = archival_state.block_index_db.lock().await;
-    let tip_digest: Option<Digest> = db_lock
+    let tip_digest: Option<Digest> = archival_state
+        .block_index_db
         .get(BlockIndexKey::BlockTipDigest)
+        .await
         .map(|x| x.as_tip_digest());
-    let tip_header: Option<BlockHeader> = tip_digest.map(|digest| {
-        db_lock
-            .get(BlockIndexKey::Block(digest))
-            .unwrap()
-            .as_block_record()
-            .block_header
-    });
-    archival_state.write_block(
-        Box::new(new_block.clone()),
-        &mut db_lock,
-        tip_header.map(|x| x.proof_of_work_family),
-    )?;
+    let tip_header: Option<BlockHeader> = match tip_digest {
+        Some(digest) => Some(
+            archival_state
+                .block_index_db
+                .get(BlockIndexKey::Block(digest))
+                .await
+                .unwrap()
+                .as_block_record()
+                .block_header,
+        ),
+        None => None,
+    };
+    archival_state
+        .write_block(
+            Box::new(new_block.clone()),
+            tip_header.map(|x| x.proof_of_work_family),
+        )
+        .await?;
 
     let mut ams_lock = archival_state.archival_mutator_set.lock().await;
     archival_state
-        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
+        .update_mutator_set(&mut ams_lock, &new_block)
+        .await
         .unwrap();
 
     Ok(())
@@ -312,23 +325,17 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 
 /// Helper function for tests to update state with a new block
 pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
-    let mut db_lock = state
-        .chain
-        .archival_state
-        .as_ref()
-        .unwrap()
-        .block_index_db
-        .lock()
-        .await;
     let mut light_state_locked: tokio::sync::MutexGuard<Block> =
         state.chain.light_state.latest_block.lock().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
-    state.chain.archival_state.as_ref().unwrap().write_block(
-        Box::new(new_block.clone()),
-        &mut db_lock,
-        Some(previous_pow_family),
-    )?;
+    state
+        .chain
+        .archival_state
+        .as_ref()
+        .unwrap()
+        .write_block(Box::new(new_block.clone()), Some(previous_pow_family))
+        .await?;
     if previous_pow_family < new_block.header.proof_of_work_family {
         *light_state_locked = new_block;
     }

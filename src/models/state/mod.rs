@@ -1006,14 +1006,6 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block();
         let (mock_block_1a, _, _) = make_mock_block(&genesis_block, None, other_receiver_address);
         {
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1021,9 +1013,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(mock_block_1a.clone()),
-                    &mut block_db_lock,
                     Some(mock_block_1a.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
         }
 
         // Verify that wallet has a monitored UTXO (from genesis)
@@ -1088,14 +1080,6 @@ mod global_state_tests {
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
             make_mock_block(&genesis_block, None, own_receiving_address);
         {
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1103,9 +1087,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(mock_block_1a.clone()),
-                    &mut block_db_lock,
                     Some(mock_block_1a.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state
@@ -1140,14 +1124,6 @@ mod global_state_tests {
         let mut parent_block = genesis_block;
         for _ in 0..5 {
             let (next_block, _, _) = make_mock_block(&parent_block, None, other_receiving_address);
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1155,9 +1131,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(next_block.clone()),
-                    &mut block_db_lock,
                     Some(next_block.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state
@@ -1231,14 +1207,6 @@ mod global_state_tests {
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
             make_mock_block(&genesis_block, None, own_receiving_address);
         {
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1246,9 +1214,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(mock_block_1a.clone()),
-                    &mut block_db_lock,
                     Some(mock_block_1a.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
             global_state
                 .wallet_state
                 .expected_utxos
@@ -1279,14 +1247,6 @@ mod global_state_tests {
         for _ in 0..100 {
             let (next_a_block, _, _) =
                 make_mock_block(&fork_a_block, None, other_receiving_address);
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1294,9 +1254,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(next_a_block.clone()),
-                    &mut block_db_lock,
                     Some(next_a_block.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state
@@ -1318,14 +1278,6 @@ mod global_state_tests {
         for _ in 0..100 {
             let (next_b_block, _, _) =
                 make_mock_block(&fork_b_block, None, other_receiving_address);
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1333,9 +1285,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(next_b_block.clone()),
-                    &mut block_db_lock,
                     Some(next_b_block.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state
@@ -1382,14 +1334,6 @@ mod global_state_tests {
         for _ in 0..100 {
             let (next_c_block, _, _) =
                 make_mock_block(&fork_c_block, None, other_receiving_address);
-            let mut block_db_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .block_index_db
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1397,9 +1341,9 @@ mod global_state_tests {
                 .unwrap()
                 .write_block(
                     Box::new(next_c_block.clone()),
-                    &mut block_db_lock,
                     Some(next_c_block.header.proof_of_work_family),
-                )?;
+                )
+                .await?;
             let mut wallet_db_lock = global_state.wallet_state.wallet_db.lock().await;
             global_state
                 .wallet_state
