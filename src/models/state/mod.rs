@@ -510,6 +510,8 @@ impl GlobalState {
     /// are not synced with a valid mutator set membership proof. And this corruption
     /// can only happen if the wallet database is deleted or corrupted.
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&self) -> Result<()> {
+        // todo: refactor to use closure style locks, once wallet_state uses AtomicRw.
+
         // Grab locks in canonical order to avoid deadlocks
         let mut wallet_db = self.wallet_state.wallet_db.lock().await;
         let ams_lock = self
@@ -518,7 +520,7 @@ impl GlobalState {
             .as_ref()
             .unwrap()
             .archival_mutator_set
-            .lock()
+            .lock_guard()
             .await;
         let tip = self.chain.light_state.latest_block.lock().await;
         assert_eq!(
