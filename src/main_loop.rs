@@ -1,9 +1,9 @@
 use crate::connect_to_peers::{answer_peer_wrapper, call_peer_wrapper};
-use crate::database::rusty::RustyLevelDB;
+
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::Block;
-use crate::models::database::{BlockIndexKey, BlockIndexValue};
+
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
@@ -314,17 +314,6 @@ impl MainLoopHandler {
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
                         self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut db_lock: tokio::sync::MutexGuard<
-                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-                    > = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await;
                     let mut ams_lock = self
                         .global_state
                         .chain
@@ -341,12 +330,6 @@ impl MainLoopHandler {
                         .latest_block
                         .lock()
                         .await;
-                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                        .global_state
-                        .mempool
-                        .internal
-                        .write()
-                        .expect("Locking mempool for write must succeed");
 
                     // If we received a new block from a peer and updated the global state before this message from the miner was handled,
                     // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
@@ -367,9 +350,9 @@ impl MainLoopHandler {
                         .unwrap()
                         .write_block(
                             new_block.clone(),
-                            &mut db_lock,
                             Some(light_state_locked.header.proof_of_work_family),
-                        )?;
+                        )
+                        .await?;
 
                     // update the mutator set with the UTXOs from this block
                     self.global_state
@@ -377,7 +360,8 @@ impl MainLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .update_mutator_set(&mut db_lock, &mut ams_lock, &new_block)
+                        .update_mutator_set(&mut ams_lock, &new_block)
+                        .await
                         .expect("Updating mutator set must succeed");
 
                     // Notify wallet to expect the coinbase UTXO, as we mined this block
@@ -398,6 +382,13 @@ impl MainLoopHandler {
                     self.global_state
                         .wallet_state
                         .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+
+                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
+                        .global_state
+                        .mempool
+                        .internal
+                        .write()
+                        .expect("Locking mempool for write must succeed");
 
                     // Update mempool with UTXOs from this block. This is done by removing all transaction
                     // that became invalid/was mined by this block.
@@ -440,17 +431,6 @@ impl MainLoopHandler {
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
                         self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut block_db_lock: tokio::sync::MutexGuard<
-                        RustyLevelDB<BlockIndexKey, BlockIndexValue>,
-                    > = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .block_index_db
-                        .lock()
-                        .await;
                     let mut ams_lock = self
                         .global_state
                         .chain
@@ -467,12 +447,6 @@ impl MainLoopHandler {
                         .latest_block
                         .lock()
                         .await;
-                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                        .global_state
-                        .mempool
-                        .internal
-                        .write()
-                        .expect("Locking mempool for write must succeed");
 
                     // The peer threads also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
@@ -518,9 +492,9 @@ impl MainLoopHandler {
                             .unwrap()
                             .write_block(
                                 Box::new(new_block.clone()),
-                                &mut block_db_lock,
                                 Some(light_state_locked.header.proof_of_work_family),
-                            )?;
+                            )
+                            .await?;
 
                         // update the mutator set with the UTXOs from this block
                         self.global_state
@@ -528,12 +502,20 @@ impl MainLoopHandler {
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .update_mutator_set(&mut block_db_lock, &mut ams_lock, &new_block)?;
+                            .update_mutator_set(&mut ams_lock, &new_block)
+                            .await?;
 
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
                             .wallet_state
                             .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+
+                        let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
+                            self.global_state
+                                .mempool
+                                .internal
+                                .write()
+                                .expect("Locking mempool for write must succeed");
 
                         // Update mempool with UTXOs from this block. This is done by removing all transaction
                         // that became invalid/was mined by this block.
