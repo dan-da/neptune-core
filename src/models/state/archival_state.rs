@@ -334,7 +334,7 @@ impl ArchivalState {
             ));
         }
 
-        db_lock.batch_write(&block_index_entries);
+        db_lock.batch_write(block_index_entries);
 
         Ok(())
     }
