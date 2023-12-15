@@ -16,12 +16,18 @@ use tokio::sync::{Mutex, MutexGuard};
 /// atomic_car.lock_mut(|mut c| c.year = 2023).await;
 /// # })
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct AtomicMutex<T>(Arc<Mutex<T>>);
 impl<T> From<T> for AtomicMutex<T> {
     #[inline]
     fn from(t: T) -> Self {
         Self(Arc::new(Mutex::new(t)))
+    }
+}
+
+impl<T> Clone for AtomicMutex<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
     }
 }
 
@@ -58,6 +64,26 @@ impl<T> From<AtomicMutex<T>> for Arc<Mutex<T>> {
 // note: we impl the Atomic trait methods here also so they
 // can be used without caller having to use the trait.
 impl<T> AtomicMutex<T> {
+    /// Acquire lock and return a `MutexGuard`
+    ///
+    /// This method is the same as `lock_guard_mut`.  It is
+    /// here for compatibility with AtomicRw.
+    ///
+    /// # Examples
+    /// ```
+    /// # use neptune_core::util_types::sync::tokio::AtomicMutex;
+    /// struct Car {
+    ///     year: u16,
+    /// };
+    /// # tokio_test::block_on(async {
+    ///     let atomic_car = AtomicMutex::from(Car{year: 2016});
+    ///     atomic_car.lock_guard_mut().await.year = 2022;
+    /// # })
+    /// ```
+    pub async fn lock_guard(&self) -> MutexGuard<T> {
+        self.0.lock().await
+    }
+
     /// Acquire lock and return a `MutexGuard`
     ///
     /// # Examples

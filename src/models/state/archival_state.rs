@@ -5,7 +5,6 @@ use std::fs;
 use std::io::{Seek, SeekFrom, Write};
 use std::ops::DerefMut;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tracing::debug;
 use twenty_first::amount::u32s::U32s;
 use twenty_first::shared_math::digest::Digest;
@@ -13,7 +12,6 @@ use twenty_first::storage::level_db::DB;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::StorageWriter;
-// use twenty_first::sync;
 
 use super::shared::new_block_file_is_needed;
 use crate::config_models::data_directory::DataDirectory;
@@ -28,7 +26,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-use tokio::sync::Mutex as TokioMutex;
+use crate::util_types::sync::tokio as sync_tokio;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -46,7 +44,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
+    pub archival_mutator_set: sync_tokio::AtomicMutex<RustyArchivalMutatorSet<Hash>>,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -176,7 +174,7 @@ impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
-        archival_mutator_set: Arc<TokioMutex<RustyArchivalMutatorSet<Hash>>>,
+        mut archival_mutator_set: RustyArchivalMutatorSet<Hash>,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
 
@@ -185,23 +183,25 @@ impl ArchivalState {
         // We could have populated the archival mutator set with the genesis block UTXOs earlier in
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
-        {
-            let mut rams_lock = archival_mutator_set.lock().await;
-            let ams_is_empty = rams_lock.ams.kernel.aocl.count_leaves().is_zero();
-            if ams_is_empty {
-                for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
-                    rams_lock.ams.add(addition_record);
-                }
-                rams_lock.set_sync_label(genesis_block.hash);
-                rams_lock.persist();
+        let ams_is_empty = archival_mutator_set
+            .ams
+            .kernel
+            .aocl
+            .count_leaves()
+            .is_zero();
+        if ams_is_empty {
+            for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
+                archival_mutator_set.ams.add(addition_record);
             }
+            archival_mutator_set.set_sync_label(genesis_block.hash);
+            archival_mutator_set.persist();
         }
 
         Self {
             data_dir,
             block_index_db,
             genesis_block,
-            archival_mutator_set,
+            archival_mutator_set: sync_tokio::AtomicMutex::from(archival_mutator_set),
         }
     }
 
@@ -561,11 +561,11 @@ impl ArchivalState {
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip. All blocks
     /// stored in the database are assumed to be valid.
-    pub async fn update_mutator_set<'a>(
-        &self,
-        ams_lock: &mut tokio::sync::MutexGuard<'a, RustyArchivalMutatorSet<Hash>>,
-        new_block: &Block,
-    ) -> Result<()> {
+    pub async fn update_mutator_set(&self, new_block: &Block) -> Result<()> {
+        // todo: use closure style locking, if possible.
+
+        let mut ams_lock = self.archival_mutator_set.lock_guard_mut().await;
+
         // Get the block digest that the mutator set was most recently synced to
         let ms_block_sync_digest = ams_lock.get_sync_label();
 
@@ -681,10 +681,6 @@ impl ArchivalState {
 mod archival_state_tests {
     use super::*;
 
-    use rand::{random, thread_rng, RngCore};
-    use tracing_test::traced_test;
-    use twenty_first::util_types::storage_vec::traits::*;
-
     use crate::config_models::network::Network;
     use crate::models::blockchain::transaction::utxo::LockScript;
     use crate::models::blockchain::transaction::PubScript;
@@ -697,14 +693,16 @@ mod archival_state_tests {
         add_block, add_block_to_archival_state, get_mock_global_state, get_mock_wallet_state,
         make_mock_block_with_valid_pow, make_unit_test_archival_state, unit_test_databases,
     };
+    use rand::{random, thread_rng, RngCore};
+    use tracing_test::traced_test;
+    use twenty_first::util_types::storage_vec::traits::*;
 
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
 
         let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
-        let ams_lock = Arc::new(TokioMutex::new(ams));
 
-        ArchivalState::new(data_dir, block_index_db, ams_lock).await
+        ArchivalState::new(data_dir, block_index_db, ams).await
     }
 
     #[traced_test]
@@ -746,7 +744,7 @@ mod archival_state_tests {
             Block::genesis_block().body.transaction.kernel.outputs.len() as u64,
             archival_state
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .ams
                 .kernel
@@ -759,7 +757,7 @@ mod archival_state_tests {
             Block::genesis_block().hash,
             archival_state
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .get_sync_label(),
             "AMS must be synced to genesis block after initialization from genesis block"
@@ -783,29 +781,28 @@ mod archival_state_tests {
                 .nth_generation_spending_key(0)
                 .to_address(),
         );
-        {
-            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-
-            archival_state
-                .update_mutator_set(&mut ams_lock, &mock_block_1)
-                .await
-                .unwrap();
-        }
+        archival_state
+            .update_mutator_set(&mock_block_1)
+            .await
+            .unwrap();
 
         // Create a new archival MS that should be synced to block 1, not the genesis block
-        let restored_archival_state = ArchivalState::new(
-            archival_state.data_dir.clone(),
-            archival_state.block_index_db.clone(),
-            archival_state.archival_mutator_set.clone(),
-        )
-        .await;
+        let restored_archival_state = archival_state.clone();
         drop(archival_state);
+
+        // let restored_archival_state = ArchivalState::new(
+        //     archival_state.data_dir.clone(),
+        //     archival_state.block_index_db.clone(),
+        //     archival_state.archival_mutator_set.lock(|ams| (*ams).clone()).await,
+        // )
+        // .await;
+        // drop(archival_state);
 
         assert_eq!(
             mock_block_1.hash,
             restored_archival_state
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .get_sync_label(),
             "sync_label of restored archival mutator set must be digest of latest block"
@@ -838,20 +835,12 @@ mod archival_state_tests {
 
         {
             add_block(&genesis_receiver_global_state, mock_block_1.clone()).await?;
-            let mut ams_lock = genesis_receiver_global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .archival_mutator_set
-                .lock()
-                .await;
             genesis_receiver_global_state
                 .chain
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut ams_lock, &mock_block_1)
+                .update_mutator_set(&mock_block_1)
                 .await
                 .unwrap();
             genesis_receiver_global_state
@@ -866,6 +855,14 @@ mod archival_state_tests {
                 )
                 .unwrap();
 
+            let ams_lock = genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .archival_mutator_set
+                .lock_guard()
+                .await;
             assert_ne!(0, ams_lock.ams.kernel.aocl.count_leaves());
         }
 
@@ -894,24 +891,23 @@ mod archival_state_tests {
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
             add_block(&genesis_receiver_global_state, mock_block_2.clone()).await?;
-            let mut ams_lock = genesis_receiver_global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .archival_mutator_set
-                .lock()
-                .await;
-
             genesis_receiver_global_state
                 .chain
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut ams_lock, &mock_block_2)
+                .update_mutator_set(&mock_block_2)
                 .await
                 .unwrap();
 
+            let ams_lock = genesis_receiver_global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .archival_mutator_set
+                .lock_guard()
+                .await;
             assert_ne!(0, ams_lock.ams.kernel.swbf_active.sbf.len());
         }
 
@@ -924,7 +920,6 @@ mod archival_state_tests {
         let network = Network::Alpha;
         let (archival_state, _peer_db_lock, _data_dir) =
             make_unit_test_archival_state(network).await;
-        let mut ams_lock = archival_state.archival_mutator_set.lock().await;
         let own_wallet = WalletSecret::new(random());
         let own_receiving_address = own_wallet.nth_generation_spending_key(0).to_address();
 
@@ -943,7 +938,7 @@ mod archival_state_tests {
 
         // 2. Update mutator set with this
         archival_state
-            .update_mutator_set(&mut ams_lock, &mock_block_1a)
+            .update_mutator_set(&mock_block_1a)
             .await
             .unwrap();
 
@@ -962,7 +957,7 @@ mod archival_state_tests {
 
         // 4. Update mutator set with that
         archival_state
-            .update_mutator_set(&mut ams_lock, &mock_block_1b)
+            .update_mutator_set(&mock_block_1b)
             .await
             .unwrap();
 
@@ -1026,7 +1021,6 @@ mod archival_state_tests {
         assert!(block_1a.is_valid(&genesis_block));
 
         {
-            let mut ams_lock = archival_state.archival_mutator_set.lock().await;
             archival_state
                 .write_block(
                     Box::new(block_1a.clone()),
@@ -1036,10 +1030,7 @@ mod archival_state_tests {
                 .unwrap();
 
             // 2. Update mutator set with this
-            archival_state
-                .update_mutator_set(&mut ams_lock, &block_1a)
-                .await
-                .unwrap();
+            archival_state.update_mutator_set(&block_1a).await.unwrap();
 
             // 3. Create competing block 1 and store it to DB
             let (mock_block_1b, _, _) = make_mock_block_with_valid_pow(
@@ -1057,7 +1048,7 @@ mod archival_state_tests {
 
             // 4. Update mutator set with that and verify rollback
             archival_state
-                .update_mutator_set(&mut ams_lock, &mock_block_1b)
+                .update_mutator_set(&mock_block_1b)
                 .await
                 .unwrap();
         }
@@ -1069,7 +1060,7 @@ mod archival_state_tests {
         assert!(
             archival_state
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .ams
                 .kernel
@@ -1083,7 +1074,7 @@ mod archival_state_tests {
             2,
             archival_state
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .ams
                 .kernel
@@ -1159,14 +1150,6 @@ mod archival_state_tests {
 
             // Store the produced block
             {
-                let mut ams_lock = global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .archival_mutator_set
-                    .lock()
-                    .await;
                 global_state
                     .chain
                     .archival_state
@@ -1185,7 +1168,7 @@ mod archival_state_tests {
                     .archival_state
                     .as_ref()
                     .unwrap()
-                    .update_mutator_set(&mut ams_lock, &next_block)
+                    .update_mutator_set(&next_block)
                     .await
                     .unwrap();
 
@@ -1215,14 +1198,6 @@ mod archival_state_tests {
             // 3. Create competing block 1 and store it to DB
             let (mock_block_1b, _, _) =
                 make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address);
-            let mut ams_lock = global_state
-                .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
-                .archival_mutator_set
-                .lock()
-                .await;
             global_state
                 .chain
                 .archival_state
@@ -1240,7 +1215,7 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(&mut ams_lock, &mock_block_1b)
+                .update_mutator_set(&mock_block_1b)
                 .await
                 .unwrap();
         }
@@ -1256,7 +1231,7 @@ mod archival_state_tests {
                 .as_ref()
                 .unwrap()
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .ams
                 .kernel
@@ -1274,7 +1249,7 @@ mod archival_state_tests {
                 .as_ref()
                 .unwrap()
                 .archival_mutator_set
-                .lock()
+                .lock_guard()
                 .await
                 .ams
                 .kernel
@@ -1424,17 +1399,7 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(
-                    &mut state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .archival_mutator_set
-                        .lock()
-                        .await,
-                    &block_1,
-                )
+                .update_mutator_set(&block_1)
                 .await
                 .unwrap();
         }
@@ -1615,17 +1580,7 @@ mod archival_state_tests {
                 .archival_state
                 .as_ref()
                 .unwrap()
-                .update_mutator_set(
-                    &mut state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .archival_mutator_set
-                        .lock()
-                        .await,
-                    &block_2,
-                )
+                .update_mutator_set(&block_2)
                 .await
                 .unwrap();
         }
@@ -1727,7 +1682,7 @@ mod archival_state_tests {
                     .as_ref()
                     .unwrap()
                     .archival_mutator_set
-                    .lock()
+                    .lock_guard()
                     .await
                     .ams
                     .accumulator(),

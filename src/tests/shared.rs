@@ -300,11 +300,7 @@ pub async fn add_block_to_archival_state(
         )
         .await?;
 
-    let mut ams_lock = archival_state.archival_mutator_set.lock().await;
-    archival_state
-        .update_mutator_set(&mut ams_lock, &new_block)
-        .await
-        .unwrap();
+    archival_state.update_mutator_set(&new_block).await.unwrap();
 
     Ok(())
 }
@@ -1049,9 +1045,8 @@ pub async fn make_unit_test_archival_state(
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
 
     let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
-    let ams_lock = Arc::new(tokio::sync::Mutex::new(ams));
 
-    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams_lock).await;
+    let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams).await;
 
     (archival_state, peer_db, data_dir)
 }

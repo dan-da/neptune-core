@@ -314,15 +314,6 @@ impl MainLoopHandler {
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
                         self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut ams_lock = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .archival_mutator_set
-                        .lock()
-                        .await;
                     let mut light_state_locked = self
                         .global_state
                         .chain
@@ -360,7 +351,7 @@ impl MainLoopHandler {
                         .archival_state
                         .as_ref()
                         .unwrap()
-                        .update_mutator_set(&mut ams_lock, &new_block)
+                        .update_mutator_set(&new_block)
                         .await
                         .expect("Updating mutator set must succeed");
 
@@ -431,15 +422,6 @@ impl MainLoopHandler {
                 {
                     let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
                         self.global_state.wallet_state.wallet_db.lock().await;
-                    let mut ams_lock = self
-                        .global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .archival_mutator_set
-                        .lock()
-                        .await;
                     let mut light_state_locked: tokio::sync::MutexGuard<Block> = self
                         .global_state
                         .chain
@@ -502,7 +484,7 @@ impl MainLoopHandler {
                             .archival_state
                             .as_ref()
                             .unwrap()
-                            .update_mutator_set(&mut ams_lock, &new_block)
+                            .update_mutator_set(&new_block)
                             .await?;
 
                         // update wallet state with relevant UTXOs from this block
@@ -1221,6 +1203,16 @@ impl MainLoopHandler {
         //     .await
         //     .flush();
 
+        let hash = self
+            .global_state
+            .chain
+            .archival_state
+            .as_ref()
+            .unwrap()
+            .get_latest_block()
+            .await
+            .hash;
+
         // persist archival_mutator_set, with sync label
         self.global_state
             .chain
@@ -1228,27 +1220,11 @@ impl MainLoopHandler {
             .as_ref()
             .unwrap()
             .archival_mutator_set
-            .lock()
-            .await
-            .set_sync_label(
-                self.global_state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .get_latest_block()
-                    .await
-                    .hash,
-            );
-        self.global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .archival_mutator_set
-            .lock()
-            .await
-            .persist();
+            .lock_mut(|ams| {
+                ams.set_sync_label(hash);
+                ams.persist();
+            })
+            .await;
 
         // flush peer_standings
         // self.global_state
