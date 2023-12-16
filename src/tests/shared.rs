@@ -216,14 +216,15 @@ pub async fn get_mock_global_state(
     };
     let mempool = Mempool::new(ByteSize::gb(1));
     let cli_args: cli_args::Args = Default::default();
-    GlobalState {
-        chain: blockchain_state,
-        cli: cli_args.clone(),
-        net: networking_state,
-        wallet_state: get_mock_wallet_state(wallet, network).await,
+
+    GlobalState::new(
+        get_mock_wallet_state(wallet, network).await,
+        blockchain_state,
+        networking_state,
+        cli_args.clone(),
         mempool,
-        mining: Arc::new(std::sync::RwLock::new(cli_args.mine)),
-    }
+        cli_args.mine,
+    )
 }
 
 /// Return a setup with empty databases, and with the genesis block in the

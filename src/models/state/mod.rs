@@ -13,6 +13,7 @@ use twenty_first::util_types::storage_vec::traits::*;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::digest::Digest;
+use twenty_first::sync;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;
@@ -73,7 +74,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     // Only the mining thread should write to this, anyone can read.
-    pub mining: std::sync::Arc<std::sync::RwLock<bool>>,
+    pub mining: sync::AtomicRw<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +87,24 @@ pub struct UtxoReceiverData {
 }
 
 impl GlobalState {
+    pub fn new(
+        wallet_state: WalletState,
+        chain: BlockchainState,
+        net: NetworkingState,
+        cli: cli_args::Args,
+        mempool: Mempool,
+        mining: bool,
+    ) -> Self {
+        Self {
+            wallet_state,
+            chain,
+            net,
+            cli,
+            mempool,
+            mining: sync::AtomicRw::from(mining),
+        }
+    }
+
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let block_lock = self.chain.light_state.latest_block.lock_guard().await;
         self.wallet_state
