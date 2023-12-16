@@ -658,7 +658,7 @@ mod tests {
             .chain
             .light_state
             .latest_block
-            .lock()
+            .lock_guard_mut()
             .await = block_1.clone();
         other_global_state
             .wallet_state
@@ -679,7 +679,7 @@ mod tests {
             .chain
             .light_state
             .latest_block
-            .lock()
+            .lock_guard_mut()
             .await = block_1.clone();
 
         // Create a transaction that's valid to be included in block 2

@@ -584,9 +584,9 @@ impl PeerLoopHandler {
                     .chain
                     .light_state
                     .latest_block
-                    .lock()
-                    .await
-                    .to_owned();
+                    .lock(|lb| lb.to_owned())
+                    .await;
+
                 peer.send(PeerMessage::BlockNotification(block_header.into()))
                     .await?;
 

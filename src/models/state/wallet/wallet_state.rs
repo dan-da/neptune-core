@@ -902,7 +902,12 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            *own_global_state.chain.light_state.latest_block.lock().await = new_block.clone();
+            *own_global_state
+                .chain
+                .light_state
+                .latest_block
+                .lock_guard_mut()
+                .await = new_block.clone();
             latest_block = new_block;
         }
         assert!(
@@ -952,7 +957,12 @@ mod tests {
             )
             .await
             .unwrap();
-        *own_global_state.chain.light_state.latest_block.lock().await = block_3a.clone();
+        *own_global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock_guard_mut()
+            .await = block_3a.clone();
         assert!(
             own_global_state
                 .wallet_state
@@ -1001,7 +1011,12 @@ mod tests {
             )
             .await
             .unwrap();
-        *own_global_state.chain.light_state.latest_block.lock().await = block_3b.clone();
+        *own_global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock_guard_mut()
+            .await = block_3b.clone();
         assert!(
             own_global_state
             .wallet_state
@@ -1050,7 +1065,12 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            *own_global_state.chain.light_state.latest_block.lock().await = new_block.clone();
+            *own_global_state
+                .chain
+                .light_state
+                .latest_block
+                .lock_guard_mut()
+                .await = new_block.clone();
             latest_block = new_block;
         }
 
@@ -1099,7 +1119,12 @@ mod tests {
             )
             .await
             .unwrap();
-        *own_global_state.chain.light_state.latest_block.lock().await = block_12.clone();
+        *own_global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock_guard_mut()
+            .await = block_12.clone();
         assert!(
             own_global_state
                 .wallet_state

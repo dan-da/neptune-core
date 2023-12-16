@@ -87,8 +87,7 @@ pub struct UtxoReceiverData {
 
 impl GlobalState {
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
-        // Grab locks in canonical order, hold over execution of request to wallet
-        let block_lock = self.chain.light_state.latest_block.lock().await;
+        let block_lock = self.chain.light_state.latest_block.lock_guard().await;
         self.wallet_state
             .get_wallet_status_from_lock(&block_lock)
             .await
@@ -238,7 +237,12 @@ impl GlobalState {
         fee: Amount,
     ) -> Result<Transaction> {
         // Get the block tip as the transaction is made relative to it
-        let bc_tip = self.chain.light_state.latest_block.lock().await.to_owned();
+        let bc_tip = self
+            .chain
+            .light_state
+            .latest_block
+            .lock(|lb| lb.to_owned())
+            .await;
 
         // Get the UTXOs required for this transaction
         let total_spend: Amount = receiver_data
@@ -531,7 +535,7 @@ impl GlobalState {
             .archival_mutator_set
             .lock_guard()
             .await;
-        let tip = self.chain.light_state.latest_block.lock().await;
+        let tip = self.chain.light_state.latest_block.lock_guard().await;
         assert_eq!(
             tip.hash,
             ams_lock.get_sync_label(),

@@ -392,9 +392,13 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
-        let block_height = executor::block_on(self.state.chain.light_state.latest_block.lock())
-            .header
-            .height;
+        let block_height = executor::block_on(
+            self.state
+                .chain
+                .light_state
+                .latest_block
+                .lock(|lb| lb.header.height),
+        );
         let receiver_privacy_digest = address.privacy_digest;
         let sender_randomness = self
             .state
