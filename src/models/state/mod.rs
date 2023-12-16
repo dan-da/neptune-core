@@ -315,14 +315,14 @@ impl GlobalState {
             let _change_addition_record = self
                 .wallet_state
                 .expected_utxos
-                .write()
-                .unwrap()
-                .add_expected_utxo(
-                    change_utxo,
-                    change_sender_randomness,
-                    receiver_preimage,
-                    UtxoNotifier::Myself,
-                )
+                .lock_mut(|e| {
+                    e.add_expected_utxo(
+                        change_utxo,
+                        change_sender_randomness,
+                        receiver_preimage,
+                        UtxoNotifier::Myself,
+                    )
+                })
                 .expect("Adding change UTXO to UTXO notification pool must succeed");
         }
 
@@ -1108,8 +1108,7 @@ mod global_state_tests {
             global_state
                 .wallet_state
                 .expected_utxos
-                .write()
-                .unwrap()
+                .lock_guard_mut()
                 .add_expected_utxo(
                     coinbase_utxo,
                     coinbase_output_randomness,
@@ -1235,8 +1234,7 @@ mod global_state_tests {
             global_state
                 .wallet_state
                 .expected_utxos
-                .write()
-                .unwrap()
+                .lock_guard_mut()
                 .add_expected_utxo(
                     coinbase_utxo_1a,
                     cb_utxo_output_randomness_1a,
