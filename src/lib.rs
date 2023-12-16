@@ -40,7 +40,6 @@ use models::peer::PeerInfo;
 use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tarpc::server;
 use tarpc::server::incoming::Incoming;
 use tarpc::server::Channel;
@@ -49,6 +48,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::info;
+use twenty_first::sync;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -125,7 +125,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         net: networking_state,
         wallet_state,
         mempool,
-        mining: Arc::new(std::sync::RwLock::new(false)),
+        mining: sync::AtomicRw::from(false),
     };
     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
     info!(

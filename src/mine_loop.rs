@@ -312,11 +312,11 @@ pub async fn mine(
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
         let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.lock(|s| *s) {
             info!("Not mining because we are syncing");
-            *state.mining.write().unwrap() = false;
+            state.mining.lock_mut(|m| *m = false);
             None
         } else if pause_mine {
             info!("Not mining because mining was paused");
-            *state.mining.write().unwrap() = false;
+            state.mining.lock_mut(|m| *m = false);
             None
         } else {
             // Build the block template and spawn the worker thread to mine on it
@@ -330,7 +330,7 @@ pub async fn mine(
                 coinbase_utxo_info,
                 latest_block.header.difficulty,
             );
-            *state.mining.write().unwrap() = true;
+            state.mining.lock_mut(|m| *m = true);
             Some(tokio::spawn(miner_task))
         };
 
