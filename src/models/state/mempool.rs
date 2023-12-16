@@ -663,8 +663,7 @@ mod tests {
         other_global_state
             .wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
+            .lock_guard_mut()
             .add_expected_utxo(
                 coinbase_utxo_1,
                 cb_sender_randomness_1,

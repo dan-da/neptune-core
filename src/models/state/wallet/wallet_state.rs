@@ -9,12 +9,12 @@ use std::fmt::Debug;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, LineWriter, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 use twenty_first::leveldb::options::Options;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::storage::level_db::DB;
+use twenty_first::sync;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::storage_schema::traits::*;
@@ -51,7 +51,7 @@ pub struct WalletState {
     pub number_of_mps_per_utxo: usize,
 
     // Any thread may read from expected_utxos, only main thread may write
-    pub expected_utxos: Arc<std::sync::RwLock<UtxoNotificationPool>>,
+    pub expected_utxos: sync::AtomicRw<UtxoNotificationPool>,
 
     /// Path to directory containing wallet files
     wallet_directory_path: PathBuf,
@@ -134,6 +134,8 @@ impl WalletState {
 
     /// Read recovery-information for mutator set membership proof of a UTXO. Returns all lines in the files,
     /// where each line represents an incoming UTXO.
+    ///
+    /// Locking: acquires write lock for `expected_utxos`
     pub(crate) fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
         let incoming_secrets_file = OpenOptions::new()
             .read(true)
@@ -182,10 +184,10 @@ impl WalletState {
             wallet_db: rusty_wallet_database.clone(),
             wallet_secret,
             number_of_mps_per_utxo: cli_args.number_of_mps_per_utxo,
-            expected_utxos: Arc::new(RwLock::new(UtxoNotificationPool::new(
+            expected_utxos: sync::AtomicRw::from(UtxoNotificationPool::new(
                 cli_args.max_utxo_notification_size,
                 cli_args.max_unconfirmed_utxo_notification_count_per_peer,
-            ))),
+            )),
             wallet_directory_path: data_dir.wallet_directory_path(),
         };
 
@@ -207,14 +209,14 @@ impl WalletState {
                     let utxo = Utxo::new(lock_script, coins);
 
                     ret.expected_utxos
-                        .write()
-                        .unwrap()
-                        .add_expected_utxo(
-                            utxo,
-                            Digest::default(),
-                            own_spending_key.privacy_preimage,
-                            UtxoNotifier::Premine,
-                        )
+                        .lock_mut(|e| {
+                            e.add_expected_utxo(
+                                utxo,
+                                Digest::default(),
+                                own_spending_key.privacy_preimage,
+                                UtxoNotifier::Premine,
+                            )
+                        })
                         .unwrap();
                 }
             }
@@ -362,7 +364,9 @@ impl WalletState {
     /// Update wallet state with new block. Assumes the given block
     /// is valid and that the wallet state is not up to date yet.
     ///
-    /// Locking: acquires wallet_db read lock and write lock.
+    /// Locking:
+    ///  acquires `wallet_db`` read lock and write lock.
+    ///  acquires `expected_utxos` read lock and write lock.
     pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
         let transaction: Transaction = block.body.transaction.clone();
 
@@ -378,9 +382,7 @@ impl WalletState {
         );
         let expected_utxos_in_this_block = self
             .expected_utxos
-            .read()
-            .unwrap()
-            .scan_for_expected_utxos(&transaction);
+            .lock(|e| e.scan_for_expected_utxos(&transaction));
         received_outputs.append(&mut expected_utxos_in_this_block.clone());
         debug!("received total outputs: = {}", received_outputs.len());
 
@@ -664,16 +666,15 @@ impl WalletState {
             .await;
 
         // Mark all expected UTXOs that were received in this block as received
-        {
-            let mut expected_utxo_writer = self.expected_utxos.write().unwrap();
+        self.expected_utxos.lock_mut(|writer| {
             expected_utxos_in_this_block
                 .into_iter()
                 .for_each(|(addition_rec, _, _, _)| {
-                    expected_utxo_writer
+                    writer
                         .mark_as_received(addition_rec, block.hash)
                         .expect("Expected UTXO must be present when marking it as received")
                 });
-        }
+        });
 
         Ok(())
     }
@@ -927,8 +928,7 @@ mod tests {
         own_global_state
             .wallet_state
             .expected_utxos
-            .write()
-            .unwrap()
+            .lock_guard_mut()
             .add_expected_utxo(
                 block_3a_coinbase_utxo.clone(),
                 block_3a_coinbase_sender_randomness,

@@ -357,14 +357,14 @@ impl MainLoopHandler {
                     self.global_state
                         .wallet_state
                         .expected_utxos
-                        .write()
-                        .unwrap()
-                        .add_expected_utxo(
-                            new_block_info.coinbase_utxo_info.utxo,
-                            new_block_info.coinbase_utxo_info.sender_randomness,
-                            new_block_info.coinbase_utxo_info.receiver_preimage,
-                            UtxoNotifier::OwnMiner,
-                        )
+                        .lock_mut(|e| {
+                            e.add_expected_utxo(
+                                new_block_info.coinbase_utxo_info.utxo,
+                                new_block_info.coinbase_utxo_info.sender_randomness,
+                                new_block_info.coinbase_utxo_info.receiver_preimage,
+                                UtxoNotifier::OwnMiner,
+                            )
+                        })
                         .expect("UTXO notification from miner must be accepted");
 
                     // update wallet state with relevant UTXOs from this block
@@ -1073,7 +1073,7 @@ impl MainLoopHandler {
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
                     debug!("Timer: UTXO notification pool cleanup job");
-                    self.global_state.wallet_state.expected_utxos.write().unwrap().prune_stale_utxo_notifications();
+                    self.global_state.wallet_state.expected_utxos.lock_mut(|e| e.prune_stale_utxo_notifications());
 
                     utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
                 }
