@@ -259,8 +259,7 @@ pub async fn get_test_genesis_setup(
 }
 
 pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block) -> Result<()> {
-    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
-        light_state.latest_block.lock().await;
+    let mut light_state_locked = light_state.latest_block.lock_guard_mut().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
     if previous_pow_family < new_block.header.proof_of_work_family {
@@ -321,8 +320,7 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 
 /// Helper function for tests to update state with a new block
 pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
-    let mut light_state_locked: tokio::sync::MutexGuard<Block> =
-        state.chain.light_state.latest_block.lock().await;
+    let mut light_state_locked = state.chain.light_state.latest_block.lock_guard_mut().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
     state

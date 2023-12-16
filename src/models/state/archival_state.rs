@@ -1154,7 +1154,12 @@ mod archival_state_tests {
                         Some(next_block.header.proof_of_work_family),
                     )
                     .await?;
-                *global_state.chain.light_state.latest_block.lock().await = next_block.clone();
+                *global_state
+                    .chain
+                    .light_state
+                    .latest_block
+                    .lock_guard_mut()
+                    .await = next_block.clone();
 
                 // 2. Update mutator set with produced block
                 global_state

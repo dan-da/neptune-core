@@ -2,7 +2,6 @@ use crate::connect_to_peers::{answer_peer_wrapper, call_peer_wrapper};
 
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
-use crate::models::blockchain::block::Block;
 
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
@@ -310,22 +309,22 @@ impl MainLoopHandler {
                 info!("Miner found new block: {}", new_block.header.height);
 
                 // Store block in database
-                // Acquire all locks before updating
+                // Acquire latest_block read lock
                 {
-                    let mut light_state_locked = self
+                    let latest_block_lock = self
                         .global_state
                         .chain
                         .light_state
                         .latest_block
-                        .lock()
+                        .lock_guard()
                         .await;
 
                     // If we received a new block from a peer and updated the global state before this message from the miner was handled,
                     // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
                     // node considered the most canonical block.
-                    let block_is_new = light_state_locked.header.proof_of_work_family
+                    let block_is_new = latest_block_lock.header.proof_of_work_family
                         < new_block.header.proof_of_work_family
-                        && new_block.header.prev_block_digest == light_state_locked.hash;
+                        && new_block.header.prev_block_digest == latest_block_lock.hash;
                     if !block_is_new {
                         warn!("Got new block from miner thread that was not child of tip. Discarding.");
                         return Ok(());
@@ -339,7 +338,7 @@ impl MainLoopHandler {
                         .unwrap()
                         .write_block(
                             new_block.clone(),
-                            Some(light_state_locked.header.proof_of_work_family),
+                            Some(latest_block_lock.header.proof_of_work_family),
                         )
                         .await?;
 
@@ -373,20 +372,29 @@ impl MainLoopHandler {
                         .update_wallet_state_with_new_block(&new_block)
                         .await?;
 
-                    let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
-                        .global_state
-                        .mempool
-                        .internal
-                        .write()
-                        .expect("Locking mempool for write must succeed");
+                    {
+                        let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
+                            self.global_state
+                                .mempool
+                                .internal
+                                .write()
+                                .expect("Locking mempool for write must succeed");
 
-                    // Update mempool with UTXOs from this block. This is done by removing all transaction
-                    // that became invalid/was mined by this block.
+                        // Update mempool with UTXOs from this block. This is done by removing all transaction
+                        // that became invalid/was mined by this block.
+                        self.global_state
+                            .mempool
+                            .update_with_block(&new_block, &mut mempool_write_lock);
+                    }
+
+                    drop(latest_block_lock); // release read lock
+
                     self.global_state
-                        .mempool
-                        .update_with_block(&new_block, &mut mempool_write_lock);
-
-                    *light_state_locked = *new_block.clone();
+                        .chain
+                        .light_state
+                        .latest_block
+                        .lock_mut(|lb| *lb = *new_block.clone())
+                        .await;
                 }
 
                 // Flush databases
@@ -419,12 +427,13 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    let mut light_state_locked: tokio::sync::MutexGuard<Block> = self
+                    // acquire latest_block read lock
+                    let latest_block_lock = self
                         .global_state
                         .chain
                         .light_state
                         .latest_block
-                        .lock()
+                        .lock_guard()
                         .await;
 
                     // The peer threads also check this condition, if block is more canonical than current
@@ -434,7 +443,7 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let block_is_new = light_state_locked.header.proof_of_work_family
+                    let block_is_new = latest_block_lock.header.proof_of_work_family
                         < last_block.header.proof_of_work_family;
                     if !block_is_new {
                         warn!("Blocks were not new. Not storing blocks.");
@@ -471,7 +480,7 @@ impl MainLoopHandler {
                             .unwrap()
                             .write_block(
                                 Box::new(new_block.clone()),
-                                Some(light_state_locked.header.proof_of_work_family),
+                                Some(latest_block_lock.header.proof_of_work_family),
                             )
                             .await?;
 
@@ -504,8 +513,16 @@ impl MainLoopHandler {
                             .update_with_block(&new_block, &mut mempool_write_lock);
                     }
 
+                    drop(latest_block_lock); // release read lock.
+
+                    // acquire light_state write lock (briefly)
                     // Update information about latest block
-                    *light_state_locked = last_block.clone();
+                    self.global_state
+                        .chain
+                        .light_state
+                        .latest_block
+                        .lock_mut(|lb| *lb = last_block.clone())
+                        .await;
                 }
 
                 // Flush databases
@@ -613,9 +630,8 @@ impl MainLoopHandler {
                         .chain
                         .light_state
                         .latest_block
-                        .lock()
+                        .lock(|lb| lb.hash)
                         .await
-                        .hash
                 {
                     warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                     return Ok(());
@@ -819,16 +835,13 @@ impl MainLoopHandler {
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let current_block = match self.global_state.chain.light_state.latest_block.try_lock() {
-            Ok(lock) => lock.to_owned(),
-
-            // If we can't acquire lock on latest block header, don't block. Just exit and try again next
-            // time.
-            Err(_) => {
-                warn!("Could not read current block. Aborting block synchronization");
-                return Ok(());
-            }
-        };
+        let current_block = self
+            .global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock(|lb| lb.to_owned())
+            .await;
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
@@ -1109,9 +1122,8 @@ impl MainLoopHandler {
             .chain
             .light_state
             .latest_block
-            .lock()
-            .await
-            .hash;
+            .lock(|lb| lb.hash)
+            .await;
         if self
             .global_state
             .wallet_state
