@@ -15,14 +15,13 @@ use bytesize::ByteSize;
 use get_size::GetSize;
 use num_traits::Zero;
 use priority_queue::{double_priority_queue::iterators::IntoSortedIter, DoublePriorityQueue};
-use std::sync::RwLock as StdRwLock;
 use std::{
     collections::{hash_map::RandomState, HashMap, HashSet},
     iter::Rev,
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use twenty_first::shared_math::digest::Digest;
+use twenty_first::sync;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::models::blockchain::block::Block;
@@ -64,96 +63,84 @@ fn now() -> Duration {
 
 #[derive(Debug, Clone)]
 pub struct Mempool {
-    pub internal: Arc<StdRwLock<MempoolInternal>>,
+    pub internal: sync::AtomicRw<MempoolInternal>,
 }
 
 impl Mempool {
     pub fn new(max_total_size: ByteSize) -> Self {
         let mempool_internal = MempoolInternal::new(max_total_size);
-        let internal = Arc::new(StdRwLock::new(mempool_internal));
-        Mempool { internal }
+        Mempool {
+            internal: sync::AtomicRw::from(mempool_internal),
+        }
     }
 
     pub fn get_size(&self) -> usize {
-        self.internal.get_size()
+        self.internal.lock(|i| i.get_size())
     }
 
     /// Computes in O(1) from HashMap
     pub fn contains(&self, transaction_id: Digest) -> bool {
-        let lock = self.internal.read().unwrap();
-        lock.contains(transaction_id)
+        self.internal.lock(|i| i.contains(transaction_id))
     }
 
     /// Computes in O(1) from HashMap
     pub fn get(&self, transaction_id: Digest) -> Option<Transaction> {
-        let lock = self.internal.read().unwrap();
-        lock.get(transaction_id).cloned()
+        self.internal.lock(|i| i.get(transaction_id).cloned())
     }
 
     /// Returns `None` if transaction was not already in the mempool and did
     /// not conflict with other transactions. Otherwise returns `Some(Digest)`.
     pub fn insert(&self, transaction: &Transaction) -> Option<Digest> {
-        let mut lock = self.internal.write().unwrap();
-        lock.insert(transaction)
+        self.internal.lock_mut(|i| i.insert(transaction))
     }
 
     /// The operation is performed in Ο(log(N)) time (worst case).
     /// Computes in θ(lg N)
     pub fn remove(&self, transaction_id: Digest) -> Option<Transaction> {
-        let mut lock = self.internal.write().unwrap();
-        lock.remove(transaction_id)
+        self.internal.lock_mut(|i| i.remove(transaction_id))
     }
 
     /// Return the number of transactions currently stored in the Mempool.
     /// Computes in O(1)
     pub fn len(&self) -> usize {
-        let lock = self.internal.read().unwrap();
-        lock.len()
+        self.internal.lock(|i| i.len())
     }
 
     /// Computes in O(1)
     pub fn is_empty(&self) -> bool {
-        let lock = self.internal.read().unwrap();
-        lock.is_empty()
+        self.internal.lock(|i| i.is_empty())
     }
 
     /// Return a vector with copies of the transactions, in descending order, with
     /// the highest fee density not using more than `remaining_storage` bytes.
     /// Typically a block is about 0MB, meaning that the return value of this function is also less than 1MB.
     pub fn get_transactions_for_block(&self, remaining_storage: usize) -> Vec<Transaction> {
-        let lock = self.internal.read().unwrap();
-        lock.get_transactions_for_block(remaining_storage)
+        self.internal
+            .lock(|i| i.get_transactions_for_block(remaining_storage))
     }
 
     /// Prune based on `Transaction.timestamp`
     /// Computes in O(n)
     pub fn prune_stale_transactions(&self) {
-        let mut lock = self.internal.write().unwrap();
-        lock.prune_stale_transactions()
+        self.internal.lock_mut(|i| i.prune_stale_transactions())
     }
 
     /// Remove any transaction from the mempool that are invalid due to the latest block
     /// containing a new transaction.
-    pub fn update_with_block(
-        &self,
-        block: &Block,
-        lock: &mut std::sync::RwLockWriteGuard<MempoolInternal>,
-    ) {
-        lock.update_with_block(block)
+    pub fn update_with_block(&self, block: &Block) {
+        self.internal.lock_mut(|i| i.update_with_block(block))
     }
 
     /// Shrink the memory pool to the value of its `max_size` field.
     /// Likely computes in O(n)
     pub fn shrink_to_max_size(&self) {
-        let mut lock = self.internal.write().unwrap();
-        lock.shrink_to_max_size()
+        self.internal.lock_mut(|i| i.shrink_to_max_size())
     }
 
     /// Shrinks internal data structures as much as possible.
     /// Computes in O(n) (Likely)
     pub fn shrink_to_fit(&self) {
-        let mut lock = self.internal.write().unwrap();
-        lock.shrink_to_fit()
+        self.internal.lock_mut(|i| i.shrink_to_fit())
     }
 
     /// Produce a sorted iterator over a snapshot of the Double-Ended Priority Queue.
@@ -177,8 +164,7 @@ impl Mempool {
     /// users (miner or transaction merger) will likely only care about the most valuable transactions
     /// Computes in O(N lg N)
     pub fn get_sorted_iter(&self) -> Rev<IntoSortedIter<Digest, FeeDensity, RandomState>> {
-        let lock = self.internal.read().unwrap();
-        lock.get_sorted_iter()
+        self.internal.lock(|i| i.get_sorted_iter())
     }
 }
 
@@ -735,7 +721,7 @@ mod tests {
 
         // Update the mempool with block 2 and verify that the mempool now only contains one tx
         assert_eq!(2, mempool.len());
-        mempool.update_with_block(&block_2, &mut mempool.internal.write().unwrap());
+        mempool.update_with_block(&block_2);
         assert_eq!(1, mempool.len());
 
         // Create a new block to verify that the non-mined transaction still contains
@@ -780,7 +766,7 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) = make_mock_block(&previous_block, None, other_receiver_address);
-            mempool.update_with_block(&next_block, &mut mempool.internal.write().unwrap());
+            mempool.update_with_block(&next_block);
             previous_block = next_block;
         }
 
@@ -793,7 +779,7 @@ mod tests {
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
-        mempool.update_with_block(&block_14, &mut mempool.internal.write().unwrap());
+        mempool.update_with_block(&block_14);
 
         assert!(
             mempool.is_empty(),
@@ -881,7 +867,7 @@ mod tests {
         let mempool_small = setup(10, Network::Alpha).await;
         let size_gs_small = mempool_small.get_size();
         let size_serialized_small =
-            bincode::serialize(&mempool_small.internal.read().unwrap().tx_dictionary)
+            bincode::serialize(&mempool_small.internal.lock_guard().tx_dictionary)
                 .unwrap()
                 .len();
         assert!(size_gs_small >= size_serialized_small);
@@ -898,7 +884,7 @@ mod tests {
         let mempool_big = setup(tx_count_big, Network::Alpha).await;
         let size_gs_big = mempool_big.get_size();
         let size_serialized_big =
-            bincode::serialize(&mempool_big.internal.read().unwrap().tx_dictionary)
+            bincode::serialize(&mempool_big.internal.lock_guard().tx_dictionary)
                 .unwrap()
                 .len();
         assert!(size_gs_big >= size_serialized_big);

@@ -6,7 +6,6 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
-use crate::models::state::mempool::MempoolInternal;
 
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalState;
@@ -373,18 +372,9 @@ impl MainLoopHandler {
                         .await?;
 
                     {
-                        let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
-                            self.global_state
-                                .mempool
-                                .internal
-                                .write()
-                                .expect("Locking mempool for write must succeed");
-
                         // Update mempool with UTXOs from this block. This is done by removing all transaction
                         // that became invalid/was mined by this block.
-                        self.global_state
-                            .mempool
-                            .update_with_block(&new_block, &mut mempool_write_lock);
+                        self.global_state.mempool.update_with_block(&new_block);
                     }
 
                     drop(latest_block_lock); // release read lock
@@ -499,18 +489,9 @@ impl MainLoopHandler {
                             .update_wallet_state_with_new_block(&new_block)
                             .await?;
 
-                        let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
-                            self.global_state
-                                .mempool
-                                .internal
-                                .write()
-                                .expect("Locking mempool for write must succeed");
-
                         // Update mempool with UTXOs from this block. This is done by removing all transaction
                         // that became invalid/was mined by this block.
-                        self.global_state
-                            .mempool
-                            .update_with_block(&new_block, &mut mempool_write_lock);
+                        self.global_state.mempool.update_with_block(&new_block);
                     }
 
                     drop(latest_block_lock); // release read lock.
