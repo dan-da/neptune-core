@@ -652,14 +652,8 @@ mod tests {
         // Update both states with block 1
         premine_receiver_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut premine_receiver_global_state
-                    .wallet_state
-                    .wallet_db
-                    .lock()
-                    .await,
-            )?;
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
         *premine_receiver_global_state
             .chain
             .light_state
@@ -680,10 +674,8 @@ mod tests {
             .expect("UTXO notification from miner must be accepted");
         other_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut other_global_state.wallet_state.wallet_db.lock().await,
-            )?;
+            .update_wallet_state_with_new_block(&block_1)
+            .await?;
         *other_global_state
             .chain
             .light_state

@@ -845,14 +845,8 @@ mod archival_state_tests {
                 .unwrap();
             genesis_receiver_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &mock_block_1,
-                    &mut genesis_receiver_global_state
-                        .wallet_state
-                        .wallet_db
-                        .lock()
-                        .await,
-                )
+                .update_wallet_state_with_new_block(&mock_block_1)
+                .await
                 .unwrap();
 
             let ams_lock = genesis_receiver_global_state
@@ -1175,10 +1169,8 @@ mod archival_state_tests {
                 // 3. Update wallet state so we can continue making transactions
                 global_state
                     .wallet_state
-                    .update_wallet_state_with_new_block(
-                        &next_block,
-                        &mut global_state.wallet_state.wallet_db.lock().await,
-                    )
+                    .update_wallet_state_with_new_block(&next_block)
+                    .await
                     .unwrap();
             }
 
@@ -1419,17 +1411,15 @@ mod archival_state_tests {
             .unwrap();
         genesis_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut genesis_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_1)
+            .await
             .unwrap();
         assert_eq!(
             3,
             genesis_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
@@ -1451,10 +1441,8 @@ mod archival_state_tests {
         }
         alice_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut alice_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_1)
+            .await
             .unwrap();
 
         for rec_data in receiver_data_for_bob {
@@ -1473,10 +1461,8 @@ mod archival_state_tests {
         }
         bob_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_1,
-                &mut bob_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_1)
+            .await
             .unwrap();
 
         // Now Alice should have a balance of 100 and Bob a balance of 200
@@ -1588,17 +1574,13 @@ mod archival_state_tests {
         // Update wallets and verify that Alice and Bob's balances are zero
         alice_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_2,
-                &mut alice_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_2)
+            .await
             .unwrap();
         bob_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_2,
-                &mut bob_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_2)
+            .await
             .unwrap();
         assert!(alice_state
             .get_wallet_status_for_tip()
@@ -1654,10 +1636,8 @@ mod archival_state_tests {
             .unwrap();
         genesis_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_2,
-                &mut genesis_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_2)
+            .await
             .unwrap();
 
         // Verify that states and wallets can be updated successfully
@@ -1666,7 +1646,7 @@ mod archival_state_tests {
             genesis_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .len(), "Genesis receiver must have 9 UTXOs after block 2: 3 after block 1, and 6 added by block 2"

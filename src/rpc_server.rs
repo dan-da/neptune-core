@@ -490,27 +490,23 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
-    async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
-        let prune_count_res = {
-            // Hold lock on wallet_db
-            let mut wallet_db_lock = executor::block_on(self.state.wallet_state.wallet_db.lock());
-            let tip_block_header =
-                executor::block_on(self.state.chain.light_state.get_latest_block_header());
+    async fn prune_abandoned_monitored_utxos(
+        self,
+        _context: tarpc::context::Context,
+    ) -> usize {
+        let prune_count_res = executor::block_on(async move {
+            let tip_block_header = self.state.chain.light_state.get_latest_block_header().await;
             const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
-            let prune_count_res = executor::block_on(
-                self.state
-                    .wallet_state
-                    .prune_abandoned_monitored_utxos_with_lock(
-                        DEFAULT_MUTXO_PRUNE_DEPTH,
-                        &mut wallet_db_lock,
-                        &tip_block_header,
-                        &self.state.chain.archival_state.unwrap(),
-                    ),
-            );
-
-            prune_count_res
-        };
+            self.state
+                .wallet_state
+                .prune_abandoned_monitored_utxos_with_lock(
+                    DEFAULT_MUTXO_PRUNE_DEPTH,
+                    &tip_block_header,
+                    &self.state.chain.archival_state.unwrap(),
+                )
+                .await
+        });
 
         match prune_count_res {
             Ok(prune_count) => {
