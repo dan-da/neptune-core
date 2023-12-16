@@ -2,6 +2,8 @@ use crate::connect_to_peers::{answer_peer_wrapper, call_peer_wrapper};
 
 use crate::models::blockchain::block::block_header::{BlockHeader, PROOF_OF_WORK_COUNT_U32_SIZE};
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::channel::NewBlockFound;
+use crate::Block;
 
 use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
@@ -276,7 +278,7 @@ fn enter_sync_mode(
 
 /// Return a boolean indicating if synchronization mode should be left
 fn stay_in_sync_mode(
-    own_block_tip_header: BlockHeader,
+    own_block_tip_header: &BlockHeader,
     sync_state: &SyncState,
     max_number_of_blocks_before_syncing: usize,
 ) -> bool {
@@ -297,113 +299,26 @@ fn stay_in_sync_mode(
     }
 }
 
+enum BlockToProcess {
+    SelfMined(NewBlockFound),
+    Received(Box<Block>), // Box to reduce size.  Block is 1584 bytes at present.
+}
+
 impl MainLoopHandler {
-    async fn handle_miner_thread_message(&self, msg: MinerToMain) -> Result<()> {
+    async fn handle_miner_thread_message(
+        &self,
+        msg: MinerToMain,
+        main_loop_state: &mut MutableMainLoopState,
+    ) -> Result<()> {
         match msg {
             MinerToMain::NewBlockFound(new_block_info) => {
-                // When receiving a block from the miner thread, we assume it is valid
-                // and we assume it is the longest chain even though we could have received
-                // a block from a peer thread before this event is triggered.
-                let new_block = new_block_info.block;
-                info!("Miner found new block: {}", new_block.header.height);
-
-                // Store block in database
-                // Acquire latest_block read lock
-                {
-                    let latest_block_lock = self
-                        .global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock_guard()
-                        .await;
-
-                    // If we received a new block from a peer and updated the global state before this message from the miner was handled,
-                    // we abort and do not store the newly found block. The newly found block has to be the direct descendant of what this
-                    // node considered the most canonical block.
-                    let block_is_new = latest_block_lock.header.proof_of_work_family
-                        < new_block.header.proof_of_work_family
-                        && new_block.header.prev_block_digest == latest_block_lock.hash;
-                    if !block_is_new {
-                        warn!("Got new block from miner thread that was not child of tip. Discarding.");
-                        return Ok(());
-                    }
-
-                    // Apply the updates
-                    self.global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .write_block(
-                            new_block.clone(),
-                            Some(latest_block_lock.header.proof_of_work_family),
-                        )
-                        .await?;
-
-                    // update the mutator set with the UTXOs from this block
-                    self.global_state
-                        .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
-                        .update_mutator_set(&new_block)
-                        .await
-                        .expect("Updating mutator set must succeed");
-
-                    // Notify wallet to expect the coinbase UTXO, as we mined this block
-                    self.global_state
-                        .wallet_state
-                        .expected_utxos
-                        .lock_mut(|e| {
-                            e.add_expected_utxo(
-                                new_block_info.coinbase_utxo_info.utxo,
-                                new_block_info.coinbase_utxo_info.sender_randomness,
-                                new_block_info.coinbase_utxo_info.receiver_preimage,
-                                UtxoNotifier::OwnMiner,
-                            )
-                        })
-                        .expect("UTXO notification from miner must be accepted");
-
-                    // update wallet state with relevant UTXOs from this block
-                    self.global_state
-                        .wallet_state
-                        .update_wallet_state_with_new_block(&new_block)
-                        .await?;
-
-                    {
-                        // Update mempool with UTXOs from this block. This is done by removing all transaction
-                        // that became invalid/was mined by this block.
-                        self.global_state.mempool.update_with_block(&new_block);
-                    }
-
-                    drop(latest_block_lock); // release read lock
-
-                    self.global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock_mut(|lb| *lb = *new_block.clone())
-                        .await;
-                }
-
-                // Flush databases
-                self.flush_databases().await?;
-
-                // Inform miner that mempool has been updated and that it is safe
-                // to mine the next block
-                self.main_to_miner_tx
-                    .send(MainToMiner::ReadyToMineNextBlock)?;
-
-                // Share block with peers
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Block(new_block.clone()))
-                    .expect(
-                        "Peer handler broadcast channel prematurely closed. This should never happen.",
-                    );
+                self.process_new_blocks(
+                    main_loop_state,
+                    vec![BlockToProcess::SelfMined(new_block_info)],
+                )
+                .await?
             }
         }
-
         Ok(())
     }
 
@@ -415,110 +330,14 @@ impl MainLoopHandler {
         debug!("Received {} from a peer thread", msg.get_type());
         match msg {
             PeerThreadToMain::NewBlocks(blocks) => {
-                let last_block = blocks.last().unwrap().to_owned();
-                {
-                    // acquire latest_block read lock
-                    let latest_block_lock = self
-                        .global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock_guard()
-                        .await;
-
-                    // The peer threads also check this condition, if block is more canonical than current
-                    // tip, but we have to check it again since the block update might have already been applied
-                    // through a message from another peer.
-                    // TODO: Is this check right? We might still want to store the blocks even though
-                    // they are not more canonical than what we currently have, in the case of deep reorganizations
-                    // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
-                    // or should deep reorganizations simply be fixed by clearing the database?
-                    let block_is_new = latest_block_lock.header.proof_of_work_family
-                        < last_block.header.proof_of_work_family;
-                    if !block_is_new {
-                        warn!("Blocks were not new. Not storing blocks.");
-
-                        // TODO: Consider fixing deep reorganization problem described above.
-                        // Alternatively set the `max_number_of_blocks_before_syncing` value higher
-                        // if this problem is encountered.
-                        return Ok(());
-                    }
-
-                    // Get out of sync mode if needed
-                    if self.global_state.net.syncing.lock(|s| *s) {
-                        let stay_in_sync_mode = stay_in_sync_mode(
-                            last_block.header.clone(),
-                            &main_loop_state.sync_state,
-                            self.global_state.cli.max_number_of_blocks_before_syncing,
-                        );
-                        if !stay_in_sync_mode {
-                            info!("Exiting sync mode");
-                            self.global_state.net.syncing.lock_mut(|s| *s = false);
-                        }
-                    }
-
-                    for new_block in blocks {
-                        debug!(
-                            "Storing block {} in database. Height: {}",
-                            new_block.hash.emojihash(),
-                            new_block.header.height
-                        );
-                        self.global_state
-                            .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
-                            .write_block(
-                                Box::new(new_block.clone()),
-                                Some(latest_block_lock.header.proof_of_work_family),
-                            )
-                            .await?;
-
-                        // update the mutator set with the UTXOs from this block
-                        self.global_state
-                            .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
-                            .update_mutator_set(&new_block)
-                            .await?;
-
-                        // update wallet state with relevant UTXOs from this block
-                        self.global_state
-                            .wallet_state
-                            .update_wallet_state_with_new_block(&new_block)
-                            .await?;
-
-                        // Update mempool with UTXOs from this block. This is done by removing all transaction
-                        // that became invalid/was mined by this block.
-                        self.global_state.mempool.update_with_block(&new_block);
-                    }
-
-                    drop(latest_block_lock); // release read lock.
-
-                    // acquire light_state write lock (briefly)
-                    // Update information about latest block
-                    self.global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock_mut(|lb| *lb = last_block.clone())
-                        .await;
-                }
-
-                // Flush databases
-                self.flush_databases().await?;
-
-                // Inform miner to work on a new block
-                if self.global_state.cli.mine {
-                    self.main_to_miner_tx
-                        .send(MainToMiner::NewBlock(Box::new(last_block.clone())))?;
-                }
-
-                // Inform all peers about new block
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerThread::Block(Box::new(last_block)))
-                    .expect("Peer handler broadcast was closed. This should never happen");
+                self.process_new_blocks(
+                    main_loop_state,
+                    blocks
+                        .into_iter()
+                        .map(|b| BlockToProcess::Received(Box::new(b)))
+                        .collect(),
+                )
+                .await?
             }
             PeerThreadToMain::AddPeerMaxBlockHeight((
                 socket_addr,
@@ -576,7 +395,7 @@ impl MainLoopHandler {
 
                 if self.global_state.net.syncing.lock(|s| *s) {
                     let stay_in_sync_mode = stay_in_sync_mode(
-                        tip_header,
+                        &tip_header,
                         &main_loop_state.sync_state,
                         self.global_state.cli.max_number_of_blocks_before_syncing,
                     );
@@ -632,6 +451,164 @@ impl MainLoopHandler {
                     ))?;
             }
         }
+
+        Ok(())
+    }
+
+    // common logic for processing new blocks. Called by handlers for:
+    //   PeerThreadToMain::NewBlocks
+    //   MinerToMain::NewBlockFound
+    async fn process_new_blocks(
+        &self,
+        main_loop_state: &mut MutableMainLoopState,
+        blocks: Vec<BlockToProcess>,
+    ) -> Result<()> {
+        // TODO: can we avoid some (or all) of these clone() calls?
+
+        let first_block_header = match blocks.first().unwrap() {
+            BlockToProcess::SelfMined(b) => b.block.header.clone(),
+            BlockToProcess::Received(b) => b.header.clone(),
+        };
+
+        let last_block = match blocks.last().unwrap() {
+            BlockToProcess::SelfMined(b) => b.block.clone(),
+            BlockToProcess::Received(b) => b.clone(),
+        };
+
+        let (tip_hash, tip_proof_of_work_family) = self
+            .global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock(|lb| (lb.hash, lb.header.proof_of_work_family))
+            .await;
+
+        // The peer threads also check this condition, if block is more canonical than current
+        // tip, but we have to check it again since the block update might have already been applied
+        // through a message from another peer.
+        // TODO: Is this check right? We might still want to store the blocks even though
+        // they are not more canonical than what we currently have, in the case of deep reorganizations
+        // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
+        // or should deep reorganizations simply be fixed by clearing the database?
+        //
+        // danda: 2023-12-15.  I changed this check to look at first_block instead of last_block
+        //        and verify the prev block digest matches tip, which seems stricter.
+        //
+        //        I *think* this check should be moved inside the for loop, to verify each
+        //        block as we process. But then it seems there must be a lot of verifications
+        //        for new blocks, so this isn't really the place for that.
+        //        TODO:  discuss and resolve.
+        let block_is_new = tip_proof_of_work_family < first_block_header.proof_of_work_family
+            && first_block_header.prev_block_digest == tip_hash;
+
+        if !block_is_new {
+            warn!("Blocks were not new. Not storing blocks.");
+
+            // TODO: Consider fixing deep reorganization problem described above.
+            // Alternatively set the `max_number_of_blocks_before_syncing` value higher
+            // if this problem is encountered.
+            return Ok(());
+        }
+
+        // Get out of sync mode if needed
+        if self.global_state.net.syncing.lock(|s| *s) {
+            let stay_in_sync_mode = stay_in_sync_mode(
+                &last_block.header,
+                &main_loop_state.sync_state,
+                self.global_state.cli.max_number_of_blocks_before_syncing,
+            );
+            if !stay_in_sync_mode {
+                info!("Exiting sync mode");
+                self.global_state.net.syncing.lock_mut(|s| *s = false);
+            }
+        }
+
+        for new_block_to_process in blocks.into_iter() {
+            let new_block = match new_block_to_process {
+                BlockToProcess::SelfMined(new_block_info) => {
+                    info!(
+                        "Miner found new block: {}",
+                        new_block_info.block.header.height
+                    );
+
+                    // Notify wallet to expect the coinbase UTXO, as we mined this block
+                    self.global_state
+                        .wallet_state
+                        .expected_utxos
+                        .lock_mut(|e| {
+                            e.add_expected_utxo(
+                                new_block_info.coinbase_utxo_info.utxo,
+                                new_block_info.coinbase_utxo_info.sender_randomness,
+                                new_block_info.coinbase_utxo_info.receiver_preimage,
+                                UtxoNotifier::OwnMiner,
+                            )
+                        })
+                        .expect("UTXO notification from miner must be accepted");
+
+                    *new_block_info.block
+                }
+                BlockToProcess::Received(b) => *b,
+            };
+
+            debug!(
+                "Storing block {} in database. Height: {}",
+                new_block.hash.emojihash(),
+                new_block.header.height
+            );
+
+            // update the mutator set with the UTXOs from this block
+            self.global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .update_mutator_set(&new_block)
+                .await?;
+
+            // update wallet state with relevant UTXOs from this block
+            self.global_state
+                .wallet_state
+                .update_wallet_state_with_new_block(&new_block)
+                .await?;
+
+            // Update mempool with UTXOs from this block. This is done by removing all transaction
+            // that became invalid/was mined by this block.
+            self.global_state.mempool.update_with_block(&new_block);
+
+            self.global_state
+                .chain
+                .archival_state
+                .as_ref()
+                .unwrap()
+                .write_block(Box::new(new_block), Some(tip_proof_of_work_family))
+                .await?;
+        }
+
+        // acquire light_state write lock (briefly)
+        // Update information about latest block
+        // TODO: shouldn't this be inside above loop, so that latest_block is in sync
+        //       with other data stores for each loop iteration?   else reading threads
+        //       may see inconsistencies, is that ok for this?
+        self.global_state
+            .chain
+            .light_state
+            .latest_block
+            .lock_mut(|lb| *lb = *last_block.clone())
+            .await;
+
+        // Flush databases
+        self.flush_databases().await?;
+
+        // Inform miner to work on a new block
+        if self.global_state.cli.mine {
+            self.main_to_miner_tx
+                .send(MainToMiner::NewBlock(last_block.clone()))?;
+        }
+
+        // Inform all peers about new block
+        self.main_to_peer_broadcast_tx
+            .send(MainToPeerThread::Block(last_block))
+            .expect("Peer handler broadcast was closed. This should never happen");
 
         Ok(())
     }
@@ -1024,7 +1001,7 @@ impl MainLoopHandler {
 
                 // Handle messages from miner thread
                 Some(main_message) = miner_to_main_rx.recv() => {
-                    self.handle_miner_thread_message(main_message).await?
+                    self.handle_miner_thread_message(main_message, &mut main_loop_state).await?
                 }
 
                 // Handle messages from rpc server thread
