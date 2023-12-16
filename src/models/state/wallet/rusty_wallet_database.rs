@@ -15,11 +15,9 @@ use super::monitored_utxo::MonitoredUtxo;
 
 pub struct RustyWalletDatabase {
     // pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
-    // schema: DbtSchema<RustyKey, RustyMSValue, RamsReader>,
     schema: DbtSchema<RustyReader>,
-    // db: Arc<DB>,
 
-    // active_window_storage: Arc<Mutex<DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>>>,
+    // active_window_storage: DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>,
     pub monitored_utxos: DbtVec<MonitoredUtxo>,
 
     // records which block the database is synced to

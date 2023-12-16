@@ -8,7 +8,7 @@ use crate::models::peer::{
     HandshakeData, PeerInfo, PeerSynchronizationState, TransactionNotification,
 };
 use crate::models::state::mempool::MempoolInternal;
-use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
+
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalState;
 use anyhow::Result;
@@ -312,8 +312,6 @@ impl MainLoopHandler {
                 // Store block in database
                 // Acquire all locks before updating
                 {
-                    let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
-                        self.global_state.wallet_state.wallet_db.lock().await;
                     let mut light_state_locked = self
                         .global_state
                         .chain
@@ -372,7 +370,8 @@ impl MainLoopHandler {
                     // update wallet state with relevant UTXOs from this block
                     self.global_state
                         .wallet_state
-                        .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+                        .update_wallet_state_with_new_block(&new_block)
+                        .await?;
 
                     let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> = self
                         .global_state
@@ -420,8 +419,6 @@ impl MainLoopHandler {
             PeerThreadToMain::NewBlocks(blocks) => {
                 let last_block = blocks.last().unwrap().to_owned();
                 {
-                    let mut wallet_state_db: tokio::sync::MutexGuard<RustyWalletDatabase> =
-                        self.global_state.wallet_state.wallet_db.lock().await;
                     let mut light_state_locked: tokio::sync::MutexGuard<Block> = self
                         .global_state
                         .chain
@@ -490,7 +487,8 @@ impl MainLoopHandler {
                         // update wallet state with relevant UTXOs from this block
                         self.global_state
                             .wallet_state
-                            .update_wallet_state_with_new_block(&new_block, &mut wallet_state_db)?;
+                            .update_wallet_state_with_new_block(&new_block)
+                            .await?;
 
                         let mut mempool_write_lock: std::sync::RwLockWriteGuard<MempoolInternal> =
                             self.global_state
@@ -1187,10 +1185,8 @@ impl MainLoopHandler {
         self.global_state
             .wallet_state
             .wallet_db
-            .as_ref()
-            .lock()
-            .await
-            .persist();
+            .lock_mut(|db| db.persist())
+            .await;
 
         // flush block_index database
         // self.global_state

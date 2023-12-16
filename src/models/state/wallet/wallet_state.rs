@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use futures::FutureExt;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde_derive::{Deserialize, Serialize};
@@ -10,7 +11,6 @@ use std::io::{BufRead, BufReader, LineWriter, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
-use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error, info, warn};
 use twenty_first::leveldb::options::Options;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
@@ -41,11 +41,12 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
+use crate::util_types::sync::tokio as sync_tokio;
 use crate::Hash;
 
 #[derive(Clone)]
 pub struct WalletState {
-    pub wallet_db: Arc<TokioMutex<RustyWalletDatabase>>,
+    pub wallet_db: sync_tokio::AtomicRw<RustyWalletDatabase>,
     pub wallet_secret: WalletSecret,
     pub number_of_mps_per_utxo: usize,
 
@@ -175,7 +176,7 @@ impl WalletState {
         let mut rusty_wallet_database = RustyWalletDatabase::connect(wallet_db);
         rusty_wallet_database.restore_or_new();
 
-        let rusty_wallet_database = Arc::new(TokioMutex::new(rusty_wallet_database));
+        let rusty_wallet_database = sync_tokio::AtomicRw::from(rusty_wallet_database);
 
         let ret = Self {
             wallet_db: rusty_wallet_database.clone(),
@@ -193,46 +194,43 @@ impl WalletState {
         // This also ensures that any premine outputs are added to the file containing the
         // incoming randomness such that a wallet-DB recovery will include genesis block
         // outputs.
-        {
-            let mut wallet_db_lock = rusty_wallet_database.lock().await;
-            if wallet_db_lock.get_sync_label() == Digest::default() {
-                // Check if we are premine recipients
-                let own_spending_key = ret.wallet_secret.nth_generation_spending_key(0);
-                let own_receiving_address = own_spending_key.to_address();
-                for (premine_receiving_address, amount) in Block::premine_distribution() {
-                    if premine_receiving_address == own_receiving_address {
-                        let coins = amount.to_native_coins();
-                        let lock_script = own_receiving_address.lock_script();
-                        let utxo = Utxo::new(lock_script, coins);
+        let sync_label = rusty_wallet_database.lock(|db| db.get_sync_label()).await;
 
-                        ret.expected_utxos
-                            .write()
-                            .unwrap()
-                            .add_expected_utxo(
-                                utxo,
-                                Digest::default(),
-                                own_spending_key.privacy_preimage,
-                                UtxoNotifier::Premine,
-                            )
-                            .unwrap();
-                    }
+        if sync_label == Digest::default() {
+            // Check if we are premine recipients
+            let own_spending_key = ret.wallet_secret.nth_generation_spending_key(0);
+            let own_receiving_address = own_spending_key.to_address();
+            for (premine_receiving_address, amount) in Block::premine_distribution() {
+                if premine_receiving_address == own_receiving_address {
+                    let coins = amount.to_native_coins();
+                    let lock_script = own_receiving_address.lock_script();
+                    let utxo = Utxo::new(lock_script, coins);
+
+                    ret.expected_utxos
+                        .write()
+                        .unwrap()
+                        .add_expected_utxo(
+                            utxo,
+                            Digest::default(),
+                            own_spending_key.privacy_preimage,
+                            UtxoNotifier::Premine,
+                        )
+                        .unwrap();
                 }
-
-                ret.update_wallet_state_with_new_block(
-                    &Block::genesis_block(),
-                    &mut wallet_db_lock,
-                )
-                .expect("Updating wallet state with genesis block must succeed");
             }
+
+            ret.update_wallet_state_with_new_block(&Block::genesis_block())
+                .await
+                .expect("Updating wallet state with genesis block must succeed");
         }
 
         ret
     }
 
-    fn scan_for_spent_utxos(
+    /// Locking: acquires wallet_db read lock.
+    async fn scan_for_spent_utxos(
         &self,
         transaction: &Transaction,
-        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
     ) -> Vec<(Utxo, AbsoluteIndexSet, u64)> {
         let confirmed_absolute_index_sets = transaction
             .kernel
@@ -241,9 +239,11 @@ impl WalletState {
             .map(|rr| rr.absolute_indices.clone())
             .collect_vec();
 
+        let wallet_db = self.wallet_db.lock_guard().await;
+
         let mut spent_own_utxos = vec![];
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+        for i in 0..wallet_db.monitored_utxos.len() {
+            let monitored_utxo = wallet_db.monitored_utxos.get(i);
             let utxo = monitored_utxo.utxo.clone();
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
                 Some(msmp) => msmp.1.compute_indices(Hash::hash(&utxo)),
@@ -291,13 +291,16 @@ impl WalletState {
     /// `block_depth_threshhold`. Use `prune_mutxos_of_unknown_depth = true` to remove MUTXOs from
     /// abandoned chains of unknown depth.
     /// Returns the number of monitored UTXOs removed from the database.
+    ///
+    /// Locking: acquires wallet_db read lock.
     pub async fn prune_abandoned_monitored_utxos_with_lock<'a>(
         &self,
         block_depth_threshhold: usize,
-        wallet_db_lock: &mut tokio::sync::MutexGuard<'a, RustyWalletDatabase>,
         current_tip: &BlockHeader,
         archival_state: &ArchivalState,
     ) -> Result<usize> {
+        let wallet_db = self.wallet_db.lock_guard().await;
+
         const MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING: usize = 10;
         if block_depth_threshhold < MIN_BLOCK_DEPTH_FOR_MUTXO_PRUNING {
             bail!(
@@ -312,10 +315,10 @@ impl WalletState {
             Duration::from_millis(current_tip.timestamp.value()),
             current_tip.height,
         );
-        let mutxo_count = wallet_db_lock.monitored_utxos.len();
+        let mutxo_count = wallet_db.monitored_utxos.len();
         let mut removed_count = 0;
         for i in 0..mutxo_count {
-            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(i);
+            let mut monitored_utxo = wallet_db.monitored_utxos.get(i);
 
             // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             // once the spending block is buried sufficiently deep
@@ -347,7 +350,7 @@ impl WalletState {
 
             if mark_as_abandoned {
                 monitored_utxo.abandoned_at = Some(current_tip_info);
-                wallet_db_lock.monitored_utxos.set(i, monitored_utxo);
+                wallet_db.monitored_utxos.set(i, monitored_utxo);
                 removed_count += 1;
             }
         }
@@ -358,15 +361,13 @@ impl WalletState {
 
     /// Update wallet state with new block. Assumes the given block
     /// is valid and that the wallet state is not up to date yet.
-    pub fn update_wallet_state_with_new_block(
-        &self,
-        block: &Block,
-        wallet_db_lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
-    ) -> Result<()> {
+    ///
+    /// Locking: acquires wallet_db read lock and write lock.
+    pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
         let transaction: Transaction = block.body.transaction.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
-            self.scan_for_spent_utxos(&transaction, wallet_db_lock);
+            self.scan_for_spent_utxos(&transaction).await;
 
         // utxo, sender randomness, receiver preimage, addition record
         let mut received_outputs: Vec<(AdditionRecord, Utxo, Digest, Digest)> = vec![];
@@ -393,11 +394,13 @@ impl WalletState {
         // the process update existing membership proofs with
         // updates from this block
 
+        let wallet_db = self.wallet_db.lock_guard().await;
+
         // return early if there are no monitored utxos and this
         // block does not affect our balance
         if spent_inputs.is_empty()
             && addition_record_to_utxo_info.is_empty()
-            && wallet_db_lock.monitored_utxos.is_empty()
+            && wallet_db.monitored_utxos.is_empty()
         {
             return Ok(());
         }
@@ -408,8 +411,8 @@ impl WalletState {
             StrongUtxoKey,
             (MsMembershipProof<Hash>, u64),
         > = HashMap::default();
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let monitored_utxo: MonitoredUtxo = wallet_db_lock.monitored_utxos.get(i);
+        for i in 0..wallet_db.monitored_utxos.len() {
+            let monitored_utxo: MonitoredUtxo = wallet_db.monitored_utxos.get(i);
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
 
             match monitored_utxo.get_membership_proof_for_block(block.header.prev_block_digest) {
@@ -518,10 +521,7 @@ impl WalletState {
                         utxo_digest,
                         new_own_membership_proof.auth_path_aocl.leaf_index,
                     ),
-                    (
-                        new_own_membership_proof,
-                        wallet_db_lock.monitored_utxos.len(),
-                    ),
+                    (new_own_membership_proof, wallet_db.monitored_utxos.len()),
                 );
 
                 // Add the new UTXO to the list of monitored UTXOs
@@ -531,7 +531,7 @@ impl WalletState {
                     Duration::from_millis(block.header.timestamp.value()),
                     block.header.height,
                 ));
-                wallet_db_lock.monitored_utxos.push(mutxo);
+                wallet_db.monitored_utxos.push(mutxo);
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
@@ -540,8 +540,8 @@ impl WalletState {
 
         // sanity checks
         let mut mutxo_with_valid_mps = 0;
-        for i in 0..wallet_db_lock.monitored_utxos.len() {
-            let mutxo = wallet_db_lock.monitored_utxos.get(i);
+        for i in 0..wallet_db.monitored_utxos.len() {
+            let mutxo = wallet_db.monitored_utxos.get(i);
             if mutxo.is_synced_to(block.header.prev_block_digest)
                 || mutxo.blockhash_to_membership_proof.is_empty()
             {
@@ -595,13 +595,13 @@ impl WalletState {
                         i
                     );
 
-                    let mut spent_mutxo = wallet_db_lock.monitored_utxos.get(*mutxo_list_index);
+                    let mut spent_mutxo = wallet_db.monitored_utxos.get(*mutxo_list_index);
                     spent_mutxo.spent_in_block = Some((
                         block.hash,
                         Duration::from_millis(block.header.timestamp.value()),
                         block.header.height,
                     ));
-                    wallet_db_lock
+                    wallet_db
                         .monitored_utxos
                         .set(*mutxo_list_index, spent_mutxo);
                 }
@@ -622,15 +622,10 @@ impl WalletState {
         changed_mps.dedup();
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
 
-        let num_monitored_utxos_after_block = wallet_db_lock.monitored_utxos.len();
+        let num_monitored_utxos_after_block = wallet_db.monitored_utxos.len();
         let mut num_unspent_utxos = 0;
         for j in 0..num_monitored_utxos_after_block {
-            if wallet_db_lock
-                .monitored_utxos
-                .get(j)
-                .spent_in_block
-                .is_none()
-            {
+            if wallet_db.monitored_utxos.get(j).spent_in_block.is_none() {
                 num_unspent_utxos += 1;
             }
         }
@@ -640,7 +635,7 @@ impl WalletState {
             valid_membership_proofs_and_own_utxo_count.iter()
         {
             let StrongUtxoKey { utxo_digest, .. } = strong_utxo_key;
-            let mut monitored_utxo = wallet_db_lock.monitored_utxos.get(*own_utxo_index);
+            let mut monitored_utxo = wallet_db.monitored_utxos.get(*own_utxo_index);
             monitored_utxo.add_membership_proof_for_tip(block.hash, updated_ms_mp.to_owned());
 
             // Sanity check that membership proofs of non-spent transactions are still valid
@@ -649,7 +644,7 @@ impl WalletState {
                     || msa_state.verify(utxo_digest, updated_ms_mp)
             );
 
-            wallet_db_lock
+            wallet_db
                 .monitored_utxos
                 .set(*own_utxo_index, monitored_utxo);
 
@@ -659,8 +654,14 @@ impl WalletState {
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
-        wallet_db_lock.set_sync_label(block.hash);
-        wallet_db_lock.persist();
+        drop(wallet_db); // must drop read-lock before acquiring write lock.
+
+        self.wallet_db
+            .lock_mut(|db| {
+                db.set_sync_label(block.hash);
+                db.persist();
+            })
+            .await;
 
         // Mark all expected UTXOs that were received in this block as received
         {
@@ -677,40 +678,46 @@ impl WalletState {
         Ok(())
     }
 
+    /// Locking: acquires wallet_db read lock.
     pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
-        let db_sync_digest = self.wallet_db.lock().await.get_sync_label();
-        if db_sync_digest != tip_hash {
-            return false;
-        }
-        let wallet_db_lock = self.wallet_db.lock().await;
-        let monitored_utxos = &wallet_db_lock.monitored_utxos;
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
-            let has_current_mp = monitored_utxo
-                .get_membership_proof_for_block(tip_hash)
-                .is_some();
-            // We assume that the membership proof can only be stored
-            // if it is valid for the given block hash, so there is
-            // no need to test validity here.
-            if !has_current_mp {
-                return false;
-            }
-        }
-        true
+        self.wallet_db
+            .lock_async(|wallet_db| {
+                async move {
+                    let db_sync_digest = wallet_db.get_sync_label();
+                    if db_sync_digest != tip_hash {
+                        return false;
+                    }
+                    let monitored_utxos = &wallet_db.monitored_utxos;
+                    for i in 0..monitored_utxos.len() {
+                        let monitored_utxo = monitored_utxos.get(i);
+                        let has_current_mp = monitored_utxo
+                            .get_membership_proof_for_block(tip_hash)
+                            .is_some();
+                        // We assume that the membership proof can only be stored
+                        // if it is valid for the given block hash, so there is
+                        // no need to test validity here.
+                        if !has_current_mp {
+                            return false;
+                        }
+                    }
+                    true
+                }
+                .boxed()
+            })
+            .await
     }
 
-    pub fn get_wallet_status_from_lock(
-        &self,
-        lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
-        block: &Block,
-    ) -> WalletStatus {
-        let num_monitored_utxos = lock.monitored_utxos.len();
+    /// Locking: acquires wallet_db read lock.
+    pub async fn get_wallet_status_from_lock(&self, block: &Block) -> WalletStatus {
+        let wallet_db = self.wallet_db.lock_guard().await;
+
+        let num_monitored_utxos = wallet_db.monitored_utxos.len();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
         let mut synced_spent = vec![];
         let mut unsynced_spent = vec![];
         for i in 0..num_monitored_utxos {
-            let mutxo = lock.monitored_utxos.get(i);
+            let mutxo = wallet_db.monitored_utxos.get(i);
             debug!(
                 "mutxo. Synced to: {}",
                 mutxo
@@ -766,16 +773,15 @@ impl WalletState {
         }
     }
 
-    pub fn allocate_sufficient_input_funds_from_lock(
+    pub async fn allocate_sufficient_input_funds_from_lock(
         &self,
-        lock: &mut tokio::sync::MutexGuard<RustyWalletDatabase>,
         requested_amount: Amount,
         block: &Block,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
         // TODO: Should return the correct spending keys associated with the UTXOs
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status: WalletStatus = self.get_wallet_status_from_lock(lock, block);
+        let wallet_status: WalletStatus = self.get_wallet_status_from_lock(block).await;
 
         // First check that we have enough. Otherwise return an error.
         if wallet_status.synced_unspent_amount < requested_amount {
@@ -815,8 +821,8 @@ impl WalletState {
         requested_amount: Amount,
         block: &Block,
     ) -> Result<Vec<(Utxo, LockScript, MsMembershipProof<Hash>)>> {
-        let mut lock = self.wallet_db.lock().await;
-        self.allocate_sufficient_input_funds_from_lock(&mut lock, requested_amount, block)
+        self.allocate_sufficient_input_funds_from_lock(requested_amount, block)
+            .await
     }
 }
 
@@ -858,7 +864,7 @@ mod tests {
         let monitored_utxos_count_init = own_global_state
             .wallet_state
             .wallet_db
-            .lock()
+            .lock_guard()
             .await
             .monitored_utxos
             .len();
@@ -881,10 +887,8 @@ mod tests {
                 make_mock_block(&latest_block, None, other_recipient_address);
             own_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &new_block,
-                    &mut own_global_state.wallet_state.wallet_db.lock().await,
-                )
+                .update_wallet_state_with_new_block(&new_block)
+                .await
                 .unwrap();
             own_global_state
                 .chain
@@ -904,7 +908,7 @@ mod tests {
             own_global_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .len()
@@ -934,10 +938,8 @@ mod tests {
             .unwrap();
         own_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_3a,
-                &mut own_global_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_3a)
+            .await
             .unwrap();
         own_global_state
             .chain
@@ -955,7 +957,7 @@ mod tests {
             own_global_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .len()
@@ -966,7 +968,7 @@ mod tests {
             own_global_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .get(0)
@@ -985,10 +987,8 @@ mod tests {
             make_mock_block(&latest_block, None, other_recipient_address);
         own_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_3b,
-                &mut own_global_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_3b)
+            .await
             .unwrap();
         own_global_state
             .chain
@@ -1006,7 +1006,7 @@ mod tests {
             own_global_state
             .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .get(0)
@@ -1022,7 +1022,6 @@ mod tests {
             .wallet_state
             .prune_abandoned_monitored_utxos_with_lock(
                 10,
-                &mut own_global_state.wallet_state.wallet_db.lock().await,
                 &block_3b.header,
                 own_global_state.chain.archival_state.as_ref().unwrap(),
             )
@@ -1037,10 +1036,8 @@ mod tests {
                 make_mock_block(&latest_block, None, other_recipient_address);
             own_global_state
                 .wallet_state
-                .update_wallet_state_with_new_block(
-                    &new_block,
-                    &mut own_global_state.wallet_state.wallet_db.lock().await,
-                )
+                .update_wallet_state_with_new_block(&new_block)
+                .await
                 .unwrap();
             own_global_state
                 .chain
@@ -1061,7 +1058,6 @@ mod tests {
             .wallet_state
             .prune_abandoned_monitored_utxos_with_lock(
                 10,
-                &mut own_global_state.wallet_state.wallet_db.lock().await,
                 &latest_block.header,
                 own_global_state.chain.archival_state.as_ref().unwrap(),
             )
@@ -1072,7 +1068,7 @@ mod tests {
             own_global_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .get(0)
@@ -1089,10 +1085,8 @@ mod tests {
         let (block_12, _, _) = make_mock_block(&latest_block, None, other_recipient_address);
         own_global_state
             .wallet_state
-            .update_wallet_state_with_new_block(
-                &block_12,
-                &mut own_global_state.wallet_state.wallet_db.lock().await,
-            )
+            .update_wallet_state_with_new_block(&block_12)
+            .await
             .unwrap();
         own_global_state
             .chain
@@ -1110,7 +1104,7 @@ mod tests {
             own_global_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .get(0)
@@ -1122,7 +1116,6 @@ mod tests {
             .wallet_state
             .prune_abandoned_monitored_utxos_with_lock(
                 10,
-                &mut own_global_state.wallet_state.wallet_db.lock().await,
                 &block_12.header,
                 own_global_state.chain.archival_state.as_ref().unwrap(),
             )
@@ -1138,7 +1131,7 @@ mod tests {
             own_global_state
                 .wallet_state
                 .wallet_db
-                .lock()
+                .lock_guard()
                 .await
                 .monitored_utxos
                 .get(0)
