@@ -183,8 +183,6 @@ impl RPC for NeptuneRPCServer {
     }
 
     fn block_height(self, _: context::Context) -> Self::BlockHeightFut {
-        // let mut databases = executor::block_on(self.state.block_databases.lock());
-        // let lookup_res = databases.latest_block_header.get(());
         let latest_block_header =
             executor::block_on(self.state.chain.light_state.get_latest_block_header());
         future::ready(latest_block_header.height)
@@ -230,6 +228,8 @@ impl RPC for NeptuneRPCServer {
         future::ready(head_hashes)
     }
 
+    /// Locking:
+    ///   acquires read lock for `peer_map`
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
         let peer_map = self
             .state
@@ -352,6 +352,10 @@ impl RPC for NeptuneRPCServer {
         future::ready(display_history)
     }
 
+    /// Locking:
+    ///   acquires read lock for `syncing`
+    ///   acquires read lock for `peer_map`
+    ///   acquires read lock for `mining`
     fn get_dashboard_overview_data(
         self,
         context: tarpc::context::Context,
@@ -383,6 +387,8 @@ impl RPC for NeptuneRPCServer {
 
     // endpoints for changing stuff
 
+    /// Locking:
+    ///   acquires write lock for `peer_map`
     fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
         self.state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(_, peerinfo)| {
@@ -395,6 +401,8 @@ impl RPC for NeptuneRPCServer {
         future::ready(())
     }
 
+    /// Locking:
+    ///   acquires write lock for `peer_map`
     fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
         self.state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(socketaddr, peerinfo)| {
@@ -408,6 +416,9 @@ impl RPC for NeptuneRPCServer {
         future::ready(())
     }
 
+    /// Locking:
+    ///   acquires read lock for `latest_block`
+    ///   acquires read lock for `mining`
     fn send(
         self,
         _ctx: context::Context,

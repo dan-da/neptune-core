@@ -20,10 +20,12 @@ impl LightState {
         }
     }
 
+    /// Locking: acquires read lock for `latest_block`
     pub async fn get_latest_block(&self) -> Block {
         self.latest_block.lock(|lb| lb.clone()).await
     }
 
+    /// Locking: acquires read lock for `latest_block`
     pub async fn get_latest_block_header(&self) -> BlockHeader {
         self.latest_block.lock(|lb| lb.header.clone()).await
     }
