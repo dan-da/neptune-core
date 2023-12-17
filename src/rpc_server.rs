@@ -58,7 +58,7 @@ pub trait RPC {
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
-    /// returns Option<BlockHeight>
+    /// returns `Option<BlockHeight>`
     ///
     /// return value will be None if wallet has not received any incoming funds.
     async fn get_confirmations() -> Option<BlockHeight>;
@@ -229,7 +229,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     /// Locking:
-    ///   acquires read lock for `peer_map`
+    ///  * acquires read lock for `peer_map`
     fn get_peer_info(self, _: context::Context) -> Self::GetPeerInfoFut {
         let peer_map = self
             .state
@@ -353,9 +353,9 @@ impl RPC for NeptuneRPCServer {
     }
 
     /// Locking:
-    ///   acquires read lock for `syncing`
-    ///   acquires read lock for `peer_map`
-    ///   acquires read lock for `mining`
+    ///  * acquires read lock for `syncing`
+    ///  * acquires read lock for `peer_map`
+    ///  * acquires read lock for `mining`
     fn get_dashboard_overview_data(
         self,
         context: tarpc::context::Context,
@@ -388,7 +388,7 @@ impl RPC for NeptuneRPCServer {
     // endpoints for changing stuff
 
     /// Locking:
-    ///   acquires write lock for `peer_map`
+    ///  * acquires write lock for `peer_map`
     fn clear_all_standings(self, _: context::Context) -> Self::ClearAllStandingsFut {
         self.state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(_, peerinfo)| {
@@ -402,7 +402,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     /// Locking:
-    ///   acquires write lock for `peer_map`
+    ///  * acquires write lock for `peer_map`
     fn clear_ip_standing(self, _: context::Context, ip: IpAddr) -> Self::ClearIpStandingFut {
         self.state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(socketaddr, peerinfo)| {
@@ -417,8 +417,8 @@ impl RPC for NeptuneRPCServer {
     }
 
     /// Locking:
-    ///   acquires read lock for `latest_block`
-    ///   acquires read lock for `mining`
+    ///  * acquires read lock for `latest_block`
+    ///  * acquires read lock for `mining`
     fn send(
         self,
         _ctx: context::Context,

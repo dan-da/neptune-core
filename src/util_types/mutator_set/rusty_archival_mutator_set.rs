@@ -92,7 +92,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
 
 impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet<H> {
     /// Locking:
-    ///   acquires read lock for DbtSchema `tables`
+    ///  * acquires read lock for DbtSchema `tables`
     fn persist(&mut self) {
         let write_batch = WriteBatch::new();
 
@@ -119,7 +119,7 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet
     }
 
     /// Locking:
-    ///   acquires read lock for DbtSchema `tables`
+    ///  * acquires read lock for DbtSchema `tables`
     fn restore_or_new(&mut self) {
         self.schema.tables.lock(|tables| {
             for table in tables.iter() {

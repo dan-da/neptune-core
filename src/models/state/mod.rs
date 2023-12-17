@@ -104,7 +104,7 @@ impl GlobalState {
     }
 
     /// Locking:
-    ///   acquires read lock for `latest_block`
+    ///  * acquires read lock for `latest_block`
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let block_lock = self.chain.light_state.latest_block.lock_guard().await;
         self.wallet_state
@@ -252,8 +252,8 @@ impl GlobalState {
     /// randomness for each output UTXO.
     ///
     /// Locking:
-    ///   acquires read lock for `latest_block`
-    ///   acquires write lock for `expected_utxos`
+    ///  * acquires read lock for `latest_block`
+    ///  * acquires write lock for `expected_utxos`
     pub async fn create_transaction(
         &self,
         receiver_data: Vec<UtxoReceiverData>,
@@ -543,8 +543,8 @@ impl GlobalState {
     /// can only happen if the wallet database is deleted or corrupted.
     ///
     /// Locking:
-    ///   acquires read and write lock `wallet_db`
-    ///   acquires read lock for `latest_block`
+    ///  * acquires read and write lock `wallet_db`
+    ///  * acquires read lock for `latest_block`
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&self) -> Result<()> {
         // todo: refactor to use closure style locks, once wallet_state uses AtomicRw.
 
@@ -659,7 +659,7 @@ impl GlobalState {
     }
 
     /// Locking:
-    ///   acquires read and write lock for `wallet_db`
+    ///  * acquires read and write lock for `wallet_db`
     pub async fn resync_membership_proofs_from_stored_blocks(
         &self,
         tip_hash: Digest,

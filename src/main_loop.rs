@@ -322,7 +322,7 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires read and write lock for `syncing`
     ///   acquires read lock for `latest_block`
     async fn handle_peer_thread_message(
@@ -462,7 +462,7 @@ impl MainLoopHandler {
     //   PeerThreadToMain::NewBlocks
     //   MinerToMain::NewBlockFound
     ///
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires read and write lock for `latest_block`
     ///   acquires read and write lock for `syncing`
     ///   acquires write_lock for `expected_utxos`
@@ -624,7 +624,7 @@ impl MainLoopHandler {
     /// Function to perform peer discovery: Finds potential peers from connected peers and attempts
     /// to establish connections with one of those potential peers.
     ///
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires read lock for `peer_map`
     async fn peer_discovery_and_reconnector(
         &self,
@@ -796,7 +796,7 @@ impl MainLoopHandler {
 
     /// Logic for requesting the batch-download of blocks from peers
     ///
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires read lock for `syncing`
     ///   acquires read lock for `latest_block`
     async fn block_sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
@@ -884,7 +884,7 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires write lock for `expected_utxos`
     pub async fn run(
         &self,
@@ -1083,7 +1083,7 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires read lock for `syncing`
     ///   acquires read lock for `latest_block`
     async fn resync_membership_proofs(&self) -> Result<()> {
@@ -1170,7 +1170,7 @@ impl MainLoopHandler {
         }
     }
 
-    /// Locking:
+    /// ///  * acquires:
     ///   acquires write lock for `wallet_db`
     ///   acquires write lock for `archival_mutator_set`
     async fn flush_databases(&self) -> Result<()> {
