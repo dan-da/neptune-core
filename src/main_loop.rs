@@ -322,9 +322,9 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// ///  * acquires:
-    ///   acquires read and write lock for `syncing`
-    ///   acquires read lock for `latest_block`
+    /// Locking:
+    ///  * acquires read and write lock for `syncing`
+    ///  * acquires read lock for `latest_block`
     async fn handle_peer_thread_message(
         &self,
         msg: PeerThreadToMain,
@@ -462,10 +462,10 @@ impl MainLoopHandler {
     //   PeerThreadToMain::NewBlocks
     //   MinerToMain::NewBlockFound
     ///
-    /// ///  * acquires:
-    ///   acquires read and write lock for `latest_block`
-    ///   acquires read and write lock for `syncing`
-    ///   acquires write_lock for `expected_utxos`
+    /// Locking:
+    ///  * acquires read and write lock for `latest_block`
+    ///  * acquires read and write lock for `syncing`
+    ///  * acquires write_lock for `expected_utxos`
     async fn process_new_blocks(
         &self,
         main_loop_state: &mut MutableMainLoopState,
@@ -624,8 +624,8 @@ impl MainLoopHandler {
     /// Function to perform peer discovery: Finds potential peers from connected peers and attempts
     /// to establish connections with one of those potential peers.
     ///
-    /// ///  * acquires:
-    ///   acquires read lock for `peer_map`
+    /// Locking:
+    ///  * acquires read lock for `peer_map`
     async fn peer_discovery_and_reconnector(
         &self,
         main_loop_state: &mut MutableMainLoopState,
@@ -796,9 +796,9 @@ impl MainLoopHandler {
 
     /// Logic for requesting the batch-download of blocks from peers
     ///
-    /// ///  * acquires:
-    ///   acquires read lock for `syncing`
-    ///   acquires read lock for `latest_block`
+    /// Locking:
+    ///  * acquires read lock for `syncing`
+    ///  * acquires read lock for `latest_block`
     async fn block_sync(&self, main_loop_state: &mut MutableMainLoopState) -> Result<()> {
         // Check if we are in sync mode
         if !self.global_state.net.syncing.lock(|s| *s) {
@@ -884,8 +884,8 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// ///  * acquires:
-    ///   acquires write lock for `expected_utxos`
+    /// Locking:
+    ///  * acquires write lock for `expected_utxos`
     pub async fn run(
         &self,
         mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
@@ -1083,9 +1083,9 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// ///  * acquires:
-    ///   acquires read lock for `syncing`
-    ///   acquires read lock for `latest_block`
+    /// Locking:
+    ///  * acquires read lock for `syncing`
+    ///  * acquires read lock for `latest_block`
     async fn resync_membership_proofs(&self) -> Result<()> {
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
@@ -1170,9 +1170,9 @@ impl MainLoopHandler {
         }
     }
 
-    /// ///  * acquires:
-    ///   acquires write lock for `wallet_db`
-    ///   acquires write lock for `archival_mutator_set`
+    /// Locking:
+    ///  * acquires write lock for `wallet_db`
+    ///  * acquires write lock for `archival_mutator_set`
     async fn flush_databases(&self) -> Result<()> {
         // flush wallet databases
         self.global_state
