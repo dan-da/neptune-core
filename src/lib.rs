@@ -79,7 +79,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Connect to or create databases for block index, peers, mutator set, block sync
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
 
-    let peer_databases = NetworkingState::initialize_peer_databases(&data_dir)?;
+    let peer_databases = NetworkingState::initialize_peer_databases(&data_dir).await?;
 
     let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)?;
 

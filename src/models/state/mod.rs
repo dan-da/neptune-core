@@ -34,8 +34,6 @@ use super::blockchain::transaction::{
 };
 use super::blockchain::transaction::{PrimitiveWitness, PubScript, Witness};
 use crate::config_models::cli_args;
-use crate::database::leveldb::LevelDB;
-use crate::database::rusty::RustyLevelDBIterator;
 use crate::models::peer::{HandshakeData, PeerStanding};
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::time_fn_call_async;
@@ -468,25 +466,26 @@ impl GlobalState {
         ip: IpAddr,
         current_standing: PeerStanding,
     ) {
-        self.net
-            .peer_databases
-            .lock_mut(|pd| {
-                let old_standing = pd.peer_standings.get(ip);
+        // We want to update the persisted standing to match input standing if:
+        //   a) it is greater than the input standing.
+        //   b) it is not found.
+        let update = match self.net.peer_databases.peer_standings.get(ip).await {
+            Some(s) if s.standing > current_standing.standing => true,
+            None => true,
+            _ => false,
+        };
 
-                if old_standing.is_none()
-                    || old_standing.unwrap().standing > current_standing.standing
-                {
-                    pd.peer_standings.put(ip, current_standing)
-                }
-            })
-            .await;
+        if update {
+            self.net
+                .peer_databases
+                .peer_standings
+                .put(ip, current_standing)
+                .await;
+        }
     }
 
     pub async fn get_peer_standing_from_database(&self, ip: IpAddr) -> Option<PeerStanding> {
-        self.net
-            .peer_databases
-            .lock(|pd| pd.peer_standings.get(ip))
-            .await
+        self.net.peer_databases.peer_standings.get(ip).await
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
@@ -505,32 +504,29 @@ impl GlobalState {
     }
 
     pub async fn clear_ip_standing_in_database(&self, ip: IpAddr) {
-        self.net
-            .peer_databases
-            .lock_mut(|pd| {
-                if pd.peer_standings.get(ip).is_some() {
-                    pd.peer_standings.put(ip, PeerStanding::default())
-                }
-            })
-            .await;
+        let ps = &self.net.peer_databases.peer_standings;
+
+        if ps.get(ip).await.is_some() {
+            ps.put(ip, PeerStanding::default()).await
+        }
     }
 
     pub async fn clear_all_standings_in_database(&self) {
-        self.net
-            .peer_databases
-            .lock_mut(|pd| {
-                let dbiterator: RustyLevelDBIterator<IpAddr, PeerStanding> =
-                    pd.peer_standings.new_iter();
+        // note: this clone just bumps a ref-count.
+        let peer_standings = self.net.peer_databases.peer_standings.clone();
 
-                let ip_with_standing_list = dbiterator
-                    .filter_map(|(ip, _v)| pd.peer_standings.get(ip).map(|_| ip))
-                    .collect_vec();
+        // LevelDB iterators are blocking, so we use spawn_blocking.
+        tokio::task::spawn_blocking(|| async move {
+            // note: this *should* be an iter_mut() block, but not (yet?) supported.
+            let ip_with_standing_list = peer_standings.iter().map(|(ip, _v)| ip).collect_vec(); // todo: can we avoid collect?
 
-                for ip in ip_with_standing_list.into_iter() {
-                    pd.peer_standings.put(ip, PeerStanding::default())
-                }
-            })
-            .await;
+            for ip in ip_with_standing_list {
+                peer_standings.put(ip, PeerStanding::default()).await
+            }
+        })
+        .await
+        .unwrap()
+        .await;
     }
 
     /// In case the wallet database is corrupted or deleted, this method will restore

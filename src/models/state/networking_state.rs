@@ -1,9 +1,7 @@
 use crate::config_models::data_directory::DataDirectory;
-use crate::database::leveldb::LevelDB;
-use crate::database::rusty::{default_options, RustyLevelDB};
+use crate::database::rusty::{default_options, RustyLevelDbAsync};
 use crate::models::database::PeerDatabases;
 use crate::models::peer::{self, PeerStanding};
-use crate::util_types::sync::tokio as sync_tokio;
 use anyhow::Result;
 use std::net::IpAddr;
 use std::{collections::HashMap, net::SocketAddr};
@@ -21,10 +19,9 @@ pub struct NetworkingState {
     // Peer threads may update their own entries into this map.
     pub peer_map: sync::AtomicRw<PeerMap>,
 
-    // Since this is a database, we use the tokio Mutex here.
     // `peer_databases` are used to persist IPs with their standing.
     // The peer threads may update their own entries into this map.
-    pub peer_databases: sync_tokio::AtomicRw<PeerDatabases>,
+    pub peer_databases: PeerDatabases,
 
     // This value is only true if instance is running an archival node
     // that is currently downloading blocks to catch up.
@@ -39,21 +36,22 @@ impl NetworkingState {
     pub fn new(peer_map: PeerMap, peer_databases: PeerDatabases, syncing: bool) -> Self {
         Self {
             peer_map: sync::AtomicRw::from(peer_map),
-            peer_databases: sync_tokio::AtomicRw::from(peer_databases),
+            peer_databases,
             syncing: sync::AtomicRw::from(syncing),
             instance_id: rand::random(),
         }
     }
 
     /// Create databases for peer standings
-    pub fn initialize_peer_databases(data_dir: &DataDirectory) -> Result<PeerDatabases> {
+    pub async fn initialize_peer_databases(data_dir: &DataDirectory) -> Result<PeerDatabases> {
         let database_dir_path = data_dir.database_dir_path();
         DataDirectory::create_dir_if_not_exists(&database_dir_path)?;
 
-        let peer_standings = RustyLevelDB::<IpAddr, PeerStanding>::new(
+        let peer_standings = RustyLevelDbAsync::<IpAddr, PeerStanding>::new(
             &data_dir.banned_ips_database_dir_path(),
             default_options(),
-        )?;
+        )
+        .await?;
 
         Ok(PeerDatabases { peer_standings })
     }

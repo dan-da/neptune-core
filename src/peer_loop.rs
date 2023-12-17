@@ -1,6 +1,5 @@
 use super::models::blockchain::shared::Hash;
 use crate::connect_to_peers::close_peer_connected_callback;
-use crate::database::leveldb::LevelDB;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::transfer_block::TransferBlock;
@@ -1013,12 +1012,10 @@ impl PeerLoopHandler {
             .state
             .net
             .peer_databases
-            .lock(|p| {
-                p.peer_standings
-                    .get(self.peer_address.ip())
-                    .unwrap_or_default()
-            })
-            .await;
+            .peer_standings
+            .get(self.peer_address.ip())
+            .await
+            .unwrap_or_default();
 
         // Add peer to peer map
         let new_peer = PeerInfo {
@@ -1340,8 +1337,10 @@ mod peer_loop_tests {
         let standing = state
             .net
             .peer_databases
-            .lock(|p| p.peer_standings.get(peer_address.ip()).unwrap())
-            .await;
+            .peer_standings
+            .get(peer_address.ip())
+            .await
+            .unwrap();
         assert!(
             standing.standing < 0,
             "Peer must be sanctioned for sending a bad block"
