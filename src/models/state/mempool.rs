@@ -61,6 +61,33 @@ fn now() -> Duration {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
 
+#[allow(rustdoc::invalid_codeblock_attributes)]
+/// The fundamental data type in this module.
+///
+/// # Example
+///
+/// ```norun
+/// // Instantiate Mempool, insert and get a transaction.
+/// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
+/// use neptune_core::models::state::mempool::Mempool;
+/// use byte_size::ByteSize;
+/// use twenty_first::{shared_math::b_field_element::BFieldElement, amount::u32s::U32s};
+///
+/// let mempool = Mempool::new(ByteSize::gb(1));
+/// let timestamp = BFieldElement::new(0);
+/// let transaction = Transaction {
+///     inputs: vec![],
+///     outputs: vec![],
+///     public_scripts: vec![],
+///     fee: U32s::from(0u32),
+///     timestamp,
+///     authority_proof: None,
+/// };
+/// mempool.insert(&transaction);
+/// let transaction_digest = transaction.neptune_hash();
+/// let stored_transaction = mempool.get(&transaction_digest).unwrap();
+/// assert_eq!(transaction, stored_transaction)
+/// ```
 #[derive(Debug, Clone)]
 pub struct Mempool {
     internal: sync::AtomicRw<MempoolInternal>,
@@ -168,35 +195,8 @@ impl Mempool {
     }
 }
 
-#[allow(rustdoc::invalid_codeblock_attributes)]
-/// The fundamental data type in this module.
-///
-/// # Example
-///
-/// ```norun
-/// // Instantiate Mempool, insert and get a transaction.
-/// use neptune_core::models::blockchain::{transaction::Transaction, digest::Hashable};
-/// use neptune_core::models::state::mempool::Mempool;
-/// use byte_size::ByteSize;
-/// use twenty_first::{shared_math::b_field_element::BFieldElement, amount::u32s::U32s};
-///
-/// let mempool = Mempool::new(ByteSize::gb(1));
-/// let timestamp = BFieldElement::new(0);
-/// let transaction = Transaction {
-///     inputs: vec![],
-///     outputs: vec![],
-///     public_scripts: vec![],
-///     fee: U32s::from(0u32),
-///     timestamp,
-///     authority_proof: None,
-/// };
-/// mempool.insert(&transaction);
-/// let transaction_digest = transaction.neptune_hash();
-/// let stored_transaction = mempool.get(&transaction_digest).unwrap();
-/// assert_eq!(transaction, stored_transaction)
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
-pub struct MempoolInternal {
+struct MempoolInternal {
     max_total_size: usize,
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
