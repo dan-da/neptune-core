@@ -1,13 +1,16 @@
 // recursion limit for macros (e.g. triton_asm!)
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
+
+// danda: making all of these pub for now, so docs are generated.
+// later maybe we ought to split some stuff out into re-usable crate(s)...?
 pub mod config_models;
-mod connect_to_peers;
-mod database;
-mod main_loop;
-mod mine_loop;
+pub mod connect_to_peers;
+pub mod database;
+pub mod main_loop;
+pub mod mine_loop;
 pub mod models;
-mod peer_loop;
+pub mod peer_loop;
 pub mod rpc_server;
 pub mod util_types;
 
