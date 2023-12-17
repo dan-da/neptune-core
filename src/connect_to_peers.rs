@@ -37,6 +37,9 @@ fn get_codec_rules() -> LengthDelimitedCodec {
 }
 
 /// Check if connection is allowed. Used for both ingoing and outgoing connections.
+///
+/// Locking:
+///   acquires read lock for `peer_map`
 async fn check_if_connection_is_allowed(
     state: &GlobalState,
     own_handshake: &HandshakeData,
@@ -406,6 +409,9 @@ where
 /// Remove peer from state. This function must be called every time
 /// a peer is disconnected. Whether this happens through a panic
 /// in the peer thread or through a regular disconnect.
+///
+/// Locking:
+///   acquires write lock for `peer_map`
 pub async fn close_peer_connected_callback(
     global_state: &GlobalState,
     peer_address: SocketAddr,

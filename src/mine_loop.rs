@@ -98,6 +98,9 @@ fn make_block_template(
 }
 
 /// Attempt to mine a valid block for the network
+///
+/// Locking:
+///   acquires read lock for `syncing`
 async fn mine_block(
     mut block_header: BlockHeader,
     block_body: BlockBody,
@@ -295,6 +298,9 @@ fn create_block_transaction(
     (merged_transaction, utxo_info_for_coinbase)
 }
 
+/// Locking:
+///   acquires read lock for `syncing`
+///   acquires write lock for `mining`
 pub async fn mine(
     mut from_main: watch::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,

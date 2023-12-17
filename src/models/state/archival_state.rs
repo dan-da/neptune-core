@@ -561,6 +561,9 @@ impl ArchivalState {
     /// Handles rollback of the mutator set if needed but requires that all blocks that are
     /// rolled back are present in the DB. The input block is considered chain tip. All blocks
     /// stored in the database are assumed to be valid.
+    ///
+    /// Locking:
+    ///   acquires read lock for `archival_mutator_set`
     pub async fn update_mutator_set(&self, new_block: &Block) -> Result<()> {
         // todo: use closure style locking, if possible.
 

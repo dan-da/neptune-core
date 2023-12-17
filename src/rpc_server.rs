@@ -140,6 +140,7 @@ pub struct NeptuneRPCServer {
 
 impl NeptuneRPCServer {
     fn confirmations_internal(&self) -> Option<BlockHeight> {
+
         match executor::block_on(self.state.get_latest_balance_height()) {
             Some(latest_balance_height) => {
                 let tip_block_header =

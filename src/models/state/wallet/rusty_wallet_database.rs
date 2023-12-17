@@ -68,6 +68,8 @@ impl RustyWalletDatabase {
 }
 
 impl StorageWriter for RustyWalletDatabase {
+    /// Locking:
+    ///   acquires read lock for DbtSchema `tables`
     fn persist(&mut self) {
         let write_batch = WriteBatch::new();
 
@@ -90,6 +92,8 @@ impl StorageWriter for RustyWalletDatabase {
             .expect("Pending operations should be written to DB");
     }
 
+    /// Locking:
+    ///   acquires read lock for DbtSchema `tables`
     fn restore_or_new(&mut self) {
         self.schema.tables.lock(|tables| {
             for table in tables.iter() {

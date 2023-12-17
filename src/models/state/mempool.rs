@@ -63,7 +63,7 @@ fn now() -> Duration {
 
 #[derive(Debug, Clone)]
 pub struct Mempool {
-    pub internal: sync::AtomicRw<MempoolInternal>,
+    internal: sync::AtomicRw<MempoolInternal>,
 }
 
 impl Mempool {

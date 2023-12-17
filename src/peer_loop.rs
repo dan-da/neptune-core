@@ -67,6 +67,7 @@ impl PeerLoopHandler {
 
     // TODO: Add a reward function that mutates the peer status
 
+    /// Locking: acquires write lock for `peer_map`
     fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
         warn!(
             "Sanctioning peer {} for {:?}",
@@ -304,6 +305,11 @@ impl PeerLoopHandler {
     /// Handle peer messages and returns Ok(true) if connection should be closed.
     /// Connection should also be closed if an error is returned.
     /// Otherwise returns OK(false).
+    ///
+    /// Locking:
+    ///   acquires read lock for `peer_map`
+    ///   acquires read lock for `syncing`
+    ///   acquires read lock for `latest_block`
     async fn handle_peer_message<S>(
         &self,
         msg: PeerMessage,
@@ -912,6 +918,9 @@ impl PeerLoopHandler {
 
     /// Loop for the peer threads. Awaits either a message from the peer over TCP,
     /// or a message from main over the main-to-peer-threads broadcast channel.
+    ///
+    /// Locking:
+    ///   acquires read lock for `syncing`
     async fn run<S>(
         &self,
         mut peer: S,
@@ -997,6 +1006,9 @@ impl PeerLoopHandler {
     /// its final resting place: the `peer_loop`. Note that the peer has already been
     /// accepted for a connection for this loop to be entered. So we don't need
     /// to check the standing again.
+    ///
+    /// Locking:
+    ///   acquires write lock for `peer_map`
     pub async fn run_wrapper<S>(
         &self,
         mut peer: S,
