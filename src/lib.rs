@@ -81,7 +81,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let block_index_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
     info!("Got block index database");
 
-    let peer_databases = NetworkingState::initialize_peer_databases(&data_dir)?;
+    let peer_databases = NetworkingState::initialize_peer_databases(&data_dir).await?;
     info!("Got peer database");
 
     let archival_mutator_set = ArchivalState::initialize_mutator_set(&data_dir)?;

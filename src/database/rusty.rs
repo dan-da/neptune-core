@@ -1,20 +1,18 @@
 use super::leveldb::LevelDB;
 use anyhow::Result;
-use twenty_first::leveldb::{
-    batch::WriteBatch,
-    iterator::Iterable,
-    iterator::Iterator as DBIterator,
-    options::{Options, ReadOptions},
-};
-use twenty_first::leveldb_sys::Compression;
-use twenty_first::storage::level_db::DB;
-use twenty_first::sync::AtomicRw;
-// use rusty_leveldb::{DBIterator, LdbIterator, WriteBatch, DB};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
 use tokio::task;
+use twenty_first::leveldb::{
+    batch::WriteBatch,
+    iterator::Iterable,
+    options::{Options, ReadOptions},
+};
+use twenty_first::leveldb_sys::Compression;
+use twenty_first::storage::level_db::DB;
+use twenty_first::sync::AtomicRw;
 
 pub struct RustyLevelDB<Key, Value>
 where
@@ -100,58 +98,6 @@ where
     }
 }
 
-impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
-    RustyLevelDB<Key, Value>
-{
-    pub fn new_iter(&self) -> RustyLevelDBIterator<Key, Value> {
-        RustyLevelDBIterator::new(self)
-    }
-
-    // pub fn flush(&mut self) {
-    //     self.database
-    //         .flush()
-    //         .expect("Database flushing to disk must succeed");
-    // }
-}
-
-pub struct RustyLevelDBIterator<
-    'a,
-    Key: Serialize + DeserializeOwned,
-    Value: Serialize + DeserializeOwned,
-> {
-    iterator: DBIterator<'a>,
-    _key: PhantomData<Key>,
-    _value: PhantomData<Value>,
-}
-
-impl<Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned> Iterator
-    for RustyLevelDBIterator<'_, Key, Value>
-{
-    type Item = (Key, Value);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iterator.next().map(|(sk, sv)| {
-            (
-                bincode::deserialize(&sk).unwrap(),
-                bincode::deserialize(&sv).unwrap(),
-            )
-        })
-    }
-}
-
-impl<'a, Key: Serialize + DeserializeOwned, Value: Serialize + DeserializeOwned>
-    RustyLevelDBIterator<'a, Key, Value>
-{
-    fn new(database: &'a RustyLevelDB<Key, Value>) -> Self {
-        let iterator = database.database.iter(&ReadOptions::new());
-        Self {
-            iterator,
-            _key: PhantomData,
-            _value: PhantomData,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct RustyLevelDbAsync<Key, Value>(AtomicRw<RustyLevelDB<Key, Value>>)
 where
@@ -183,6 +129,30 @@ where
             task::spawn_blocking(move || RustyLevelDB::new(&path, options_async.into())).await??;
 
         Ok(Self(AtomicRw::from(db)))
+    }
+
+    /// IMPORTANT:  this iterator is NOT async.  The database is queried
+    /// synchrously so the caller will block.  Consider using
+    /// `spawn_blocking()` task when using this iterator in async code.
+    ///
+    /// ALSO: this calls allocates all DB keys.  For large databases
+    /// this could be problematic and is best to avoid.
+    ///
+    // todo: can we avoid allocating keys with collect()?
+    // todo: can we create a true async iterator?
+    // todo: perhaps refactor neptune, so it does not need/use a level-db iterator.
+    pub fn iter(&self) -> Box<dyn Iterator<Item = (Key, Value)> + '_> {
+        let lock = self.0.lock_guard();
+        let keys: Vec<_> = lock.database.keys_iter(&ReadOptions::new()).collect();
+
+        Box::new(keys.into_iter().map(move |k| {
+            let v = lock.database.get_u8(&k).unwrap().unwrap();
+
+            (
+                bincode::deserialize(&k).unwrap(),
+                bincode::deserialize(&v).unwrap(),
+            )
+        }))
     }
 
     /// Get database value asynchronously

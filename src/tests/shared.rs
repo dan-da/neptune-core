@@ -107,19 +107,19 @@ pub fn unit_test_databases(
     DataDirectory,
 )> {
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
-    let data_dir_copy = data_dir.clone();
 
     // temporary hack.  todo: make this fn async.
-    let handle = std::thread::spawn(move || {
+    let result = std::thread::spawn(move || {
         tokio::runtime::Runtime::new()?.block_on(async {
-            ArchivalState::initialize_block_index_database(&data_dir_copy).await
+            let block_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
+            let peer_db = NetworkingState::initialize_peer_databases(&data_dir).await?;
+            Ok((block_db, peer_db, data_dir))
         })
-    });
-    let block_db = handle.join().unwrap()?;
+    })
+    .join()
+    .unwrap();
 
-    let peer_db = NetworkingState::initialize_peer_databases(&data_dir)?;
-
-    Ok((block_db, peer_db, data_dir))
+    result
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
