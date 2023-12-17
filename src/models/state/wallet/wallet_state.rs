@@ -135,7 +135,8 @@ impl WalletState {
     /// Read recovery-information for mutator set membership proof of a UTXO. Returns all lines in the files,
     /// where each line represents an incoming UTXO.
     ///
-    /// Locking: acquires write lock for `expected_utxos`
+    /// Locking:
+    ///  * acquires write lock for `expected_utxos`
     pub(crate) fn read_utxo_ms_recovery_data(&self) -> Result<Vec<IncomingUtxoRecoveryData>> {
         let incoming_secrets_file = OpenOptions::new()
             .read(true)
@@ -229,7 +230,8 @@ impl WalletState {
         ret
     }
 
-    /// Locking: acquires wallet_db read lock.
+    /// Locking:
+    ///  * acquires wallet_db read lock.
     async fn scan_for_spent_utxos(
         &self,
         transaction: &Transaction,
@@ -294,7 +296,8 @@ impl WalletState {
     /// abandoned chains of unknown depth.
     /// Returns the number of monitored UTXOs removed from the database.
     ///
-    /// Locking: acquires wallet_db read lock.
+    /// Locking:
+    ///  * acquires wallet_db read lock.
     pub async fn prune_abandoned_monitored_utxos_with_lock<'a>(
         &self,
         block_depth_threshhold: usize,
@@ -365,8 +368,8 @@ impl WalletState {
     /// is valid and that the wallet state is not up to date yet.
     ///
     /// Locking:
-    ///  acquires `wallet_db`` read lock and write lock.
-    ///  acquires `expected_utxos` read lock and write lock.
+    ///  * acquires `wallet_db`` read lock and write lock.
+    ///  * acquires `expected_utxos` read lock and write lock.
     pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
         let transaction: Transaction = block.body.transaction.clone();
 
@@ -679,7 +682,8 @@ impl WalletState {
         Ok(())
     }
 
-    /// Locking: acquires wallet_db read lock.
+    /// Locking:
+    ///  * acquires wallet_db read lock.
     pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {
         self.wallet_db
             .lock_async(|wallet_db| {
@@ -708,7 +712,8 @@ impl WalletState {
             .await
     }
 
-    /// Locking: acquires wallet_db read lock.
+    /// Locking:
+    ///  * acquires wallet_db read lock.
     pub async fn get_wallet_status_from_lock(&self, block: &Block) -> WalletStatus {
         let wallet_db = self.wallet_db.lock_guard().await;
 

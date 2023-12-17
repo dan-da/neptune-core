@@ -31,11 +31,27 @@ use crate::util_types::sync::tokio as sync_tokio;
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
 
+/// Provides interface to historic blockchain data which consists of
+///  * block-data stored in individual files (append-only)
+///  * block-index database stored in levelDB
+///  * mutator set stored in LevelDB,
+///
+/// TODO: make all file operations async.
+///       see <https://github.com/Neptune-Crypto/neptune-core/issues/75>
 #[derive(Clone)]
 pub struct ArchivalState {
     data_dir: DataDirectory,
 
-    // Since this is a database, we use the tokio Mutex here.
+    /// maps block index key to block index value where key/val pairs can be:
+    /// ```ignore
+    ///   Block(Digest)        -> Block(Box<BlockRecord>)
+    ///   File(u32)            -> File(FileRecord)
+    ///   Height(BlockHeight)  -> Height(Vec<Digest>)
+    ///   LastFile             -> LastFile(LastFileRecord)
+    ///   BlockTipDigest       -> BlockTipDigest(Digest)
+    /// ```
+    ///
+    /// So this is effectively 5 logical indexes.
     pub block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
 
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
@@ -229,6 +245,9 @@ impl ArchivalState {
         let mut block_file_path = self.data_dir.block_file_path(last_rec.last_file);
         let serialized_block: Vec<u8> = bincode::serialize(&new_block)?;
         let serialized_block_size: u64 = serialized_block.len() as u64;
+
+        // todo: make following file operations async friendly.
+
         let mut block_file = DataDirectory::open_ensure_parent_dir_exists(&block_file_path)?;
 
         // Check if we should use the last file, or we need a new one.
@@ -259,6 +278,7 @@ impl ArchivalState {
             }
         };
 
+        // todo: make file ops async
         // Make room in file for mmapping and record where block starts
         let pos = block_file.seek(SeekFrom::End(0)).unwrap();
         debug!("Size of file prior to block writing: {}", pos);
@@ -353,7 +373,7 @@ impl ArchivalState {
         Ok(block)
     }
 
-    /// Given a mutex lock on the database, return the latest block
+    /// return the latest block
     async fn get_latest_block_from_disk(&self) -> Result<Option<Block>> {
         let tip_digest = self.block_index_db.get(BlockIndexKey::BlockTipDigest).await;
         let tip_digest: Digest = match tip_digest {
@@ -563,14 +583,12 @@ impl ArchivalState {
     /// stored in the database are assumed to be valid.
     ///
     /// Locking:
-    ///   acquires read lock for `archival_mutator_set`
+    ///  * acquires read and write lock for `archival_mutator_set`
     pub async fn update_mutator_set(&self, new_block: &Block) -> Result<()> {
         // todo: use closure style locking, if possible.
 
-        let mut ams_lock = self.archival_mutator_set.lock_guard_mut().await;
-
         // Get the block digest that the mutator set was most recently synced to
-        let ms_block_sync_digest = ams_lock.get_sync_label();
+        let ms_block_sync_digest = self.archival_mutator_set.lock(|a| a.get_sync_label()).await;
 
         // Find path from mutator set sync digest to new block. Optimize for the common case,
         // where the new block is the child block of block that the mutator set is synced to.
@@ -584,6 +602,9 @@ impl ArchivalState {
                     .await
             };
         let forwards = [forwards, vec![new_block.hash]].concat();
+
+        // We hold the lock over entire update operation.
+        let mut ams_lock = self.archival_mutator_set.lock_guard_mut().await;
 
         for digest in backwards {
             // Roll back mutator set

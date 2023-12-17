@@ -57,7 +57,7 @@ pub trait RPC {
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
-    /// returns Option<BlockHeight>
+    /// returns `Option<BlockHeight>`
     ///
     /// return value will be None if wallet has not received any incoming funds.
     async fn get_confirmations() -> Option<BlockHeight>;

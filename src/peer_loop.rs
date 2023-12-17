@@ -67,7 +67,8 @@ impl PeerLoopHandler {
 
     // TODO: Add a reward function that mutates the peer status
 
-    /// Locking: acquires write lock for `peer_map`
+    /// Locking:
+    ///  * acquires write lock for `peer_map`
     fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
         warn!(
             "Sanctioning peer {} for {:?}",
@@ -307,9 +308,9 @@ impl PeerLoopHandler {
     /// Otherwise returns OK(false).
     ///
     /// Locking:
-    ///   acquires read lock for `peer_map`
-    ///   acquires read lock for `syncing`
-    ///   acquires read lock for `latest_block`
+    ///  * acquires read lock for `peer_map`
+    ///  * acquires read lock for `syncing`
+    ///  * acquires read lock for `latest_block`
     async fn handle_peer_message<S>(
         &self,
         msg: PeerMessage,
@@ -920,7 +921,7 @@ impl PeerLoopHandler {
     /// or a message from main over the main-to-peer-threads broadcast channel.
     ///
     /// Locking:
-    ///   acquires read lock for `syncing`
+    ///  * acquires read lock for `syncing`
     async fn run<S>(
         &self,
         mut peer: S,
@@ -1008,7 +1009,7 @@ impl PeerLoopHandler {
     /// to check the standing again.
     ///
     /// Locking:
-    ///   acquires write lock for `peer_map`
+    ///  * acquires write lock for `peer_map`
     pub async fn run_wrapper<S>(
         &self,
         mut peer: S,
