@@ -361,7 +361,7 @@ impl MainLoopHandler {
                     .global_state
                     .chain
                     .light_state
-                    .get_latest_block_header()
+                    .header_clone() // todo: avoid this clone
                     .await;
                 if enter_sync_mode(
                     our_block_tip_header,
@@ -392,7 +392,7 @@ impl MainLoopHandler {
                     .global_state
                     .chain
                     .light_state
-                    .get_latest_block_header()
+                    .header_clone() // todo: avoid this clone
                     .await;
 
                 if self.global_state.net.syncing.get() {
@@ -427,13 +427,7 @@ impl MainLoopHandler {
                 );
 
                 if pt2m_transaction.confirmable_for_block
-                    != self
-                        .global_state
-                        .chain
-                        .light_state
-                        .latest_block
-                        .lock(|lb| lb.hash)
-                        .await
+                    != self.global_state.chain.light_state.hash().await
                 {
                     warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                     return Ok(());
@@ -460,9 +454,6 @@ impl MainLoopHandler {
     // common logic for processing new blocks. Called by handlers for:
     //   PeerThreadToMain::NewBlocks
     //   MinerToMain::NewBlockFound
-    ///
-    /// Locking:
-    ///  * acquires read and write lock for `latest_block`
     async fn process_new_blocks(
         &self,
         main_loop_state: &mut MutableMainLoopState,
@@ -484,8 +475,8 @@ impl MainLoopHandler {
             .global_state
             .chain
             .light_state
-            .latest_block
-            .lock(|lb| (lb.hash, lb.header.proof_of_work_family))
+            .inner
+            .lock(|b| (b.hash, b.header.proof_of_work_family))
             .await;
 
         // The peer threads also check this condition, if block is more canonical than current
@@ -587,16 +578,15 @@ impl MainLoopHandler {
                 .await?;
         }
 
-        // acquire light_state write lock (briefly)
         // Update information about latest block
+        // acquires light_state write lock (briefly)
         // TODO: shouldn't this be inside above loop, so that latest_block is in sync
         //       with other data stores for each loop iteration?   else reading threads
         //       may see inconsistencies, is that ok for this?
         self.global_state
             .chain
             .light_state
-            .latest_block
-            .lock_mut(|lb| *lb = *last_block.clone())
+            .set_block(*last_block.clone())
             .await;
 
         // Flush databases
@@ -802,17 +792,17 @@ impl MainLoopHandler {
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let current_block = self
+        let (current_block_hash, current_block_height, current_block_proof_of_work_family) = self
             .global_state
             .chain
             .light_state
-            .latest_block
-            .lock(|lb| lb.to_owned())
+            .inner
+            .lock(|b| (b.hash, b.header.height, b.header.proof_of_work_family))
             .await;
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state
-            .get_status_of_last_request(current_block.header.height);
+            .get_status_of_last_request(current_block_height);
 
         // Sanction peer if they failed to respond
         if let Some(peer) = peer_to_sanction {
@@ -831,7 +821,7 @@ impl MainLoopHandler {
         // Pick a random peer that has reported to have relevant blocks
         let candidate_peers = main_loop_state
             .sync_state
-            .get_potential_peers_for_sync_request(current_block.header.proof_of_work_family);
+            .get_potential_peers_for_sync_request(current_block_proof_of_work_family);
         let mut rng = thread_rng();
         let chosen_peer = candidate_peers.choose(&mut rng);
         assert!(
@@ -840,7 +830,7 @@ impl MainLoopHandler {
         );
 
         // Find the blocks to request
-        let tip_digest = current_block.hash;
+        let tip_digest = current_block_hash;
         let most_canonical_digests = self
             .global_state
             .chain
@@ -859,8 +849,8 @@ impl MainLoopHandler {
         info!(
             "Sending block batch request to {}\nrequesting blocks descending from {}\n height {}",
             chosen_peer,
-            current_block.hash.emojihash(),
-            current_block.header.height
+            current_block_hash.emojihash(),
+            current_block_height
         );
         self.main_to_peer_broadcast_tx
             .send(MainToPeerThread::RequestBlockBatch(
@@ -870,7 +860,7 @@ impl MainLoopHandler {
             .expect("Sending message to peers must succeed");
 
         // Record that this request was sent to the peer
-        let requested_block_height = current_block.header.height.next();
+        let requested_block_height = current_block_height.next();
         main_loop_state
             .sync_state
             .record_request(requested_block_height, *chosen_peer);
@@ -1086,13 +1076,7 @@ impl MainLoopHandler {
         }
 
         // is it necessary?
-        let current_tip_digest = self
-            .global_state
-            .chain
-            .light_state
-            .latest_block
-            .lock(|lb| lb.hash)
-            .await;
+        let current_tip_digest = self.global_state.chain.light_state.hash().await;
         if self
             .global_state
             .wallet_state

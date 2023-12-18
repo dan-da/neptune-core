@@ -6,11 +6,15 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 
 use tracing::{debug, warn};
+
+use twenty_first::amount::u32s::U32s;
+use twenty_first::shared_math::b_field_element::BFieldElement;
+use twenty_first::shared_math::digest::Digest;
 use twenty_first::shared_math::tip5::DIGEST_LENGTH;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::{amount::u32s::U32s, shared_math::digest::Digest};
+use crate::models::blockchain::block::block_header::BlockHeaderPartial;
+use crate::util_types::sync::tokio as sync_tokio;
 
 pub mod block_body;
 pub mod block_header;
@@ -446,6 +450,84 @@ impl Block {
         } else {
             old_block.header.difficulty - adjustment_u32s
         }
+    }
+}
+
+// Eventually I would like to make `inner` private, but to do that now we'd have to
+// wrapper several AtomicRw methods that are needed by callers.
+#[derive(Debug, Clone)]
+pub struct AtomicBlock {
+    pub inner: sync_tokio::AtomicRw<Block>,
+}
+
+impl AtomicBlock {
+    #[inline]
+    pub fn new(block: Block) -> Self {
+        Self {
+            inner: sync_tokio::AtomicRw::from(block),
+        }
+    }
+
+    #[inline]
+    pub fn new_from_parts(header: BlockHeader, body: BlockBody) -> Self {
+        Self::new(Block::new(header, body))
+    }
+
+    #[inline]
+    pub async fn hash(&self) -> Digest {
+        self.inner.lock(|b| b.hash).await
+    }
+
+    #[inline]
+    pub async fn header_partial(&self) -> BlockHeaderPartial {
+        self.inner.lock(|b| (&b.header).into()).await
+    }
+
+    #[inline]
+    pub async fn header_uncles_clone(&self) -> Vec<Digest> {
+        self.inner.lock(|b| b.header.uncles.clone()).await
+    }
+
+    #[inline]
+    pub async fn block_clone(&self) -> Block {
+        self.inner.lock(|b| b.clone()).await
+    }
+
+    #[inline]
+    pub async fn header_clone(&self) -> BlockHeader {
+        self.inner.lock(|b| b.header.clone()).await
+    }
+
+    #[inline]
+    pub async fn set_block(&self, block: Block) {
+        self.inner.lock_mut(|b| *b = block).await
+    }
+
+    /// Merge a transaction into this block's transaction.
+    /// The mutator set data must be valid in all inputs.
+    #[inline]
+    pub async fn accumulate_transaction(&self, transaction: Transaction) {
+        self.inner
+            .lock_mut(|b| b.accumulate_transaction(transaction))
+            .await
+    }
+
+    /// Verify a block. It is assumed that `previous_block` is valid.
+    /// Note that this function does **not** check that the PoW digest is below the threshold.
+    /// That must be done separately by the caller.
+    #[inline]
+    pub async fn is_valid(&self, previous_block: &Block) -> bool {
+        self.inner.lock(|b| b.is_valid(previous_block)).await
+    }
+
+    /// Determine if the the proof-of-work puzzle was solved correctly. Specifically,
+    /// compare the hash of the current block against the difficulty determined by
+    /// the previous.
+    #[inline]
+    pub async fn has_proof_of_work(&self, previous_block: &Block) -> bool {
+        self.inner
+            .lock(|b| b.has_proof_of_work(previous_block))
+            .await
     }
 }
 

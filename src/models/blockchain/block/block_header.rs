@@ -59,6 +59,52 @@ impl Display for BlockHeader {
     }
 }
 
+/// Contains all the Copy fields from BlockHeader.  Used to avoid cloning
+/// in situations that do not need `uncles` field.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
+pub struct BlockHeaderPartial {
+    pub version: BFieldElement,
+    pub height: BlockHeight,
+    pub mutator_set_hash: Digest,
+    pub prev_block_digest: Digest,
+
+    // TODO: Reject blocks that are more than 10 seconds into the future
+    // number of milliseconds since unix epoch
+    pub timestamp: BFieldElement,
+
+    // TODO: Consider making a type for `nonce`
+    pub nonce: [BFieldElement; 3],
+    pub max_block_size: u32,
+
+    // use to compare two forks of different height
+    pub proof_of_work_line: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+
+    // use to compare two forks of the same height
+    pub proof_of_work_family: U32s<PROOF_OF_WORK_COUNT_U32_SIZE>,
+
+    // This is the difficulty for the *next* block. Unit: expected # hashes
+    pub difficulty: U32s<TARGET_DIFFICULTY_U32_SIZE>,
+    pub block_body_merkle_root: Digest,
+}
+
+impl From<&BlockHeader> for BlockHeaderPartial {
+    fn from(bh: &BlockHeader) -> Self {
+        Self {
+            version: bh.version,
+            height: bh.height,
+            mutator_set_hash: bh.mutator_set_hash,
+            prev_block_digest: bh.prev_block_digest,
+            timestamp: bh.timestamp,
+            nonce: bh.nonce,
+            max_block_size: bh.max_block_size,
+            proof_of_work_line: bh.proof_of_work_line,
+            proof_of_work_family: bh.proof_of_work_family,
+            difficulty: bh.difficulty,
+            block_body_merkle_root: bh.block_body_merkle_root,
+        }
+    }
+}
+
 #[cfg(test)]
 mod block_header_tests {
     use rand::{thread_rng, Rng, RngCore};

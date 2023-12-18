@@ -109,7 +109,7 @@ pub fn unit_test_databases(
     let data_dir: DataDirectory = unit_test_data_directory(network)?;
 
     // temporary hack.  todo: make this fn async.
-    let result = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         tokio::runtime::Runtime::new()?.block_on(async {
             let block_db = ArchivalState::initialize_block_index_database(&data_dir).await?;
             let peer_db = NetworkingState::initialize_peer_databases(&data_dir).await?;
@@ -117,9 +117,7 @@ pub fn unit_test_databases(
         })
     })
     .join()
-    .unwrap();
-
-    result
+    .unwrap()
 }
 
 pub fn get_dummy_socket_address(count: u8) -> SocketAddr {
@@ -260,7 +258,7 @@ pub async fn get_test_genesis_setup(
 }
 
 pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block) -> Result<()> {
-    let mut light_state_locked = light_state.latest_block.lock_guard_mut().await;
+    let mut light_state_locked = light_state.inner.lock_guard_mut().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
     if previous_pow_family < new_block.header.proof_of_work_family {
@@ -321,7 +319,7 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 
 /// Helper function for tests to update state with a new block
 pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
-    let mut light_state_locked = state.chain.light_state.latest_block.lock_guard_mut().await;
+    let mut light_state_locked = state.chain.light_state.inner.lock_guard_mut().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
     state
