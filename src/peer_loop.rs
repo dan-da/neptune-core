@@ -309,7 +309,6 @@ impl PeerLoopHandler {
     ///
     /// Locking:
     ///  * acquires read lock for `peer_map`
-    ///  * acquires read lock for `syncing`
     ///  * acquires read lock for `latest_block`
     async fn handle_peer_message<S>(
         &self,
@@ -541,7 +540,7 @@ impl PeerLoopHandler {
                 // Verify that we are in fact in syncing mode
                 // TODO: Seperate peer messages into those allowed under syncing
                 // and those that are not
-                if !self.state.net.syncing.lock(|s| *s) {
+                if !self.state.net.syncing.get() {
                     warn!("Received a batch of blocks without being in syncing mode");
                     self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)?;
                     return Ok(false);
@@ -618,7 +617,7 @@ impl PeerLoopHandler {
                     // a fork. If we are reconciling, that is handled later, and the information
                     // about that is stored in `highest_shared_block_height`. If we are syncing
                     // we are also not requesting the block but instead updating the sync state.
-                    if self.state.net.syncing.lock(|s| *s) {
+                    if self.state.net.syncing.get() {
                         self.to_main_tx
                             .send(PeerThreadToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
@@ -919,9 +918,6 @@ impl PeerLoopHandler {
 
     /// Loop for the peer threads. Awaits either a message from the peer over TCP,
     /// or a message from main over the main-to-peer-threads broadcast channel.
-    ///
-    /// Locking:
-    ///  * acquires read lock for `syncing`
     async fn run<S>(
         &self,
         mut peer: S,
@@ -945,7 +941,7 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    let syncing = self.state.net.syncing.lock(|s| *s);
+                                    let syncing = self.state.net.syncing.get();
                                     if peer_msg.ignore_during_sync() && syncing {
                                         debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;

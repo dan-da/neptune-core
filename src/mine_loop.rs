@@ -98,9 +98,6 @@ fn make_block_template(
 }
 
 /// Attempt to mine a valid block for the network
-///
-/// Locking:
-///  * acquires read lock for `syncing`
 async fn mine_block(
     mut block_header: BlockHeader,
     block_body: BlockBody,
@@ -141,7 +138,7 @@ async fn mine_block(
         }
 
         // Don't mine if we are syncing (but don't check too often)
-        if counter % 100 == 0 && state.net.syncing.lock(|s| *s) {
+        if counter % 100 == 0 && state.net.syncing.get() {
             return;
         } else {
             counter += 1;
@@ -299,7 +296,6 @@ fn create_block_transaction(
 }
 
 /// Locking:
-///  * acquires read lock for `syncing`
 ///  * acquires write lock for `mining`
 pub async fn mine(
     mut from_main: watch::Receiver<MainToMiner>,
@@ -316,7 +312,7 @@ pub async fn mine(
     let mut pause_mine = false;
     loop {
         let (worker_thread_tx, worker_thread_rx) = oneshot::channel::<NewBlockFound>();
-        let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.lock(|s| *s) {
+        let miner_thread: Option<JoinHandle<()>> = if state.net.syncing.get() {
             info!("Not mining because we are syncing");
             state.mining.lock_mut(|m| *m = false);
             None

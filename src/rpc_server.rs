@@ -353,7 +353,6 @@ impl RPC for NeptuneRPCServer {
     }
 
     /// Locking:
-    ///  * acquires read lock for `syncing`
     ///  * acquires read lock for `peer_map`
     ///  * acquires read lock for `mining`
     fn get_dashboard_overview_data(
@@ -362,7 +361,7 @@ impl RPC for NeptuneRPCServer {
     ) -> Self::GetDashboardOverviewDataFut {
         let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        let syncing = self.state.net.syncing.lock(|s| *s);
+        let syncing = self.state.net.syncing.get();
         let mempool_size = self.state.mempool.get_size();
         let mempool_tx_count = self.state.mempool.len();
 
