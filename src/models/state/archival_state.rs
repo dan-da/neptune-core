@@ -1429,7 +1429,6 @@ mod archival_state_tests {
         genesis_state
             .wallet_state
             .expected_utxos
-            .lock_guard_mut()
             .add_expected_utxo(
                 cb_utxo,
                 cb_output_randomness,
@@ -1457,7 +1456,6 @@ mod archival_state_tests {
             alice_state
                 .wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
@@ -1476,7 +1474,6 @@ mod archival_state_tests {
             bob_state
                 .wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
@@ -1624,7 +1621,6 @@ mod archival_state_tests {
             genesis_state
                 .wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
@@ -1637,7 +1633,6 @@ mod archival_state_tests {
             genesis_state
                 .wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     rec_data.utxo.clone(),
                     rec_data.sender_randomness,
@@ -1649,7 +1644,6 @@ mod archival_state_tests {
         genesis_state
             .wallet_state
             .expected_utxos
-            .lock_guard_mut()
             .add_expected_utxo(
                 cb_utxo_block_2,
                 cb_sender_randomness_block_2,

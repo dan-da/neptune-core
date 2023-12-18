@@ -417,7 +417,6 @@ mod wallet_tests {
 
         own_wallet_state
             .expected_utxos
-            .lock_guard_mut()
             .add_expected_utxo(
                 block_1_coinbase_utxo.clone(),
                 block_1_coinbase_sender_randomness,
@@ -427,7 +426,7 @@ mod wallet_tests {
             .unwrap();
         assert_eq!(
             1,
-            own_wallet_state.expected_utxos.lock_guard().len(),
+            own_wallet_state.expected_utxos.len(),
             "Expected UTXO list must have length 1 before block registration"
         );
         own_wallet_state
@@ -435,12 +434,9 @@ mod wallet_tests {
             .await?;
         assert_eq!(
             1,
-            own_wallet_state.expected_utxos.lock_guard().len(),
+            own_wallet_state.expected_utxos.len(),
             "A: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
-        let expected_utxos = own_wallet_state
-            .expected_utxos
-            .lock_guard()
-            .get_all_expected_utxos();
+        let expected_utxos = own_wallet_state.expected_utxos.get_all_expected_utxos();
         assert_eq!(1, expected_utxos.len(), "B: Expected UTXO list must have length 1 after block registration, due to potential reorganizations");
         assert_eq!(
             block_1.hash,
@@ -530,7 +526,6 @@ mod wallet_tests {
         // Add block to wallet state
         own_wallet_state
             .expected_utxos
-            .lock_guard_mut()
             .add_expected_utxo(
                 cb_utxo,
                 cb_output_randomness,
@@ -589,7 +584,6 @@ mod wallet_tests {
                 make_mock_block(&previous_block, None, own_spending_key.to_address());
             own_wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     cb_utxo_prime,
                     cb_output_randomness_prime,
@@ -791,7 +785,6 @@ mod wallet_tests {
         for receive_data in receiver_data_to_other {
             own_wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     receive_data.utxo,
                     receive_data.sender_randomness,
@@ -852,7 +845,6 @@ mod wallet_tests {
             next_block = ret.0;
             own_wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     ret.1,
                     ret.2,
@@ -1025,7 +1017,6 @@ mod wallet_tests {
         );
         own_wallet_state
             .expected_utxos
-            .lock_guard_mut()
             .add_expected_utxo(
                 cb_utxo,
                 cb_sender_randomness,
@@ -1035,7 +1026,6 @@ mod wallet_tests {
             .unwrap();
         own_wallet_state
             .expected_utxos
-            .lock_guard_mut()
             .add_expected_utxo(
                 receiver_data_six.utxo,
                 receiver_data_six.sender_randomness,

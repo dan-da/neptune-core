@@ -253,7 +253,6 @@ impl GlobalState {
     ///
     /// Locking:
     ///  * acquires read lock for `latest_block`
-    ///  * acquires write lock for `expected_utxos`
     pub async fn create_transaction(
         &self,
         receiver_data: Vec<UtxoReceiverData>,
@@ -342,14 +341,12 @@ impl GlobalState {
             let _change_addition_record = self
                 .wallet_state
                 .expected_utxos
-                .lock_mut(|e| {
-                    e.add_expected_utxo(
-                        change_utxo,
-                        change_sender_randomness,
-                        receiver_preimage,
-                        UtxoNotifier::Myself,
-                    )
-                })
+                .add_expected_utxo(
+                    change_utxo,
+                    change_sender_randomness,
+                    receiver_preimage,
+                    UtxoNotifier::Myself,
+                )
                 .expect("Adding change UTXO to UTXO notification pool must succeed");
         }
 
@@ -1147,7 +1144,6 @@ mod global_state_tests {
             global_state
                 .wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     coinbase_utxo,
                     coinbase_output_randomness,
@@ -1273,7 +1269,6 @@ mod global_state_tests {
             global_state
                 .wallet_state
                 .expected_utxos
-                .lock_guard_mut()
                 .add_expected_utxo(
                     coinbase_utxo_1a,
                     cb_utxo_output_randomness_1a,

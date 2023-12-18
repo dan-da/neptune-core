@@ -465,7 +465,6 @@ impl MainLoopHandler {
     /// Locking:
     ///  * acquires read and write lock for `latest_block`
     ///  * acquires read and write lock for `syncing`
-    ///  * acquires write_lock for `expected_utxos`
     async fn process_new_blocks(
         &self,
         main_loop_state: &mut MutableMainLoopState,
@@ -543,14 +542,12 @@ impl MainLoopHandler {
                     self.global_state
                         .wallet_state
                         .expected_utxos
-                        .lock_mut(|e| {
-                            e.add_expected_utxo(
-                                new_block_info.coinbase_utxo_info.utxo,
-                                new_block_info.coinbase_utxo_info.sender_randomness,
-                                new_block_info.coinbase_utxo_info.receiver_preimage,
-                                UtxoNotifier::OwnMiner,
-                            )
-                        })
+                        .add_expected_utxo(
+                            new_block_info.coinbase_utxo_info.utxo,
+                            new_block_info.coinbase_utxo_info.sender_randomness,
+                            new_block_info.coinbase_utxo_info.receiver_preimage,
+                            UtxoNotifier::OwnMiner,
+                        )
                         .expect("UTXO notification from miner must be accepted");
 
                     *new_block_info.block
@@ -884,8 +881,6 @@ impl MainLoopHandler {
         Ok(())
     }
 
-    /// Locking:
-    ///  * acquires write lock for `expected_utxos`
     pub async fn run(
         &self,
         mut peer_thread_to_main_rx: mpsc::Receiver<PeerThreadToMain>,
@@ -1061,7 +1056,7 @@ impl MainLoopHandler {
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
                     debug!("Timer: UTXO notification pool cleanup job");
-                    self.global_state.wallet_state.expected_utxos.lock_mut(|e| e.prune_stale_utxo_notifications());
+                    self.global_state.wallet_state.expected_utxos.prune_stale_utxo_notifications();
 
                     utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
                 }

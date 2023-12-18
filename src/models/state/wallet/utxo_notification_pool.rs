@@ -9,6 +9,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tracing::{error, info, warn};
+use twenty_first::sync;
 use twenty_first::{shared_math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
 use crate::{
@@ -63,7 +64,7 @@ impl ExpectedUtxo {
 }
 
 #[derive(Clone, Debug, GetSize)]
-pub struct UtxoNotificationPool {
+struct UtxoNotificationPoolInternal {
     max_total_size: usize,
     max_unconfirmed_notification_count_per_peer: usize,
     notifications: HashMap<AdditionRecord, ExpectedUtxo>,
@@ -74,7 +75,10 @@ pub struct UtxoNotificationPool {
     queue: DoublePriorityQueue<AdditionRecord, Credibility>,
 }
 
-impl UtxoNotificationPool {
+#[derive(Clone, Debug)]
+pub struct UtxoNotificationPool(sync::AtomicRw<UtxoNotificationPoolInternal>);
+
+impl UtxoNotificationPoolInternal {
     fn pop_min(&mut self) -> Option<(ExpectedUtxo, Credibility)> {
         if let Some((utxo_digest, credibility)) = self.queue.pop_min() {
             let expected_utxo = self.notifications.remove(&utxo_digest).unwrap();
@@ -320,6 +324,85 @@ impl UtxoNotificationPool {
     }
 }
 
+impl UtxoNotificationPool {
+    pub fn new(max_total_size: ByteSize, max_notification_count_per_peer: usize) -> Self {
+        let inner =
+            UtxoNotificationPoolInternal::new(max_total_size, max_notification_count_per_peer);
+        Self(sync::AtomicRw::from(inner))
+    }
+
+    pub fn pop_min(&self) -> Option<(ExpectedUtxo, Credibility)> {
+        self.0.lock_mut(|u| u.pop_min())
+    }
+
+    /// Minimize space used by data model. Reduces `capacity` of contained data structures
+    pub fn shrink_to_fit(&self) {
+        self.0.lock_mut(|u| u.shrink_to_fit())
+    }
+
+    /// Drop elements of lowest credibility until data model does not exceed its max allowed size
+    pub fn shrink_to_max_size(&self) {
+        self.0.lock_mut(|u| u.shrink_to_max_size())
+    }
+
+    /// Delete an expected UTXO from this data model
+    pub fn drop_expected_utxo(&self, addition_record: AdditionRecord) {
+        self.0.lock_mut(|u| u.drop_expected_utxo(addition_record))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.lock(|u| u.len())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.lock(|u| u.is_empty())
+    }
+
+    /// Scans the transaction for outputs that match with list of expected
+    /// incoming UTXOs, and returns expected UTXOs that are present in the
+    /// transaction.
+    /// Returns a list of (addition record, UTXO, sender randomness, receiver_preimage)
+    pub fn scan_for_expected_utxos(
+        &self,
+        transaction: &Transaction,
+    ) -> Vec<(AdditionRecord, Utxo, Digest, Digest)> {
+        self.0.lock(|u| u.scan_for_expected_utxos(transaction))
+    }
+
+    /// Return all expected UTXOs
+    pub fn get_all_expected_utxos(&self) -> Vec<ExpectedUtxo> {
+        self.0.lock(|u| u.get_all_expected_utxos())
+    }
+
+    /// Add an expected incoming UTXO to this data model
+    pub fn add_expected_utxo(
+        &self,
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_preimage: Digest,
+        received_from: UtxoNotifier,
+    ) -> Result<AdditionRecord> {
+        self.0.lock_mut(|u| {
+            u.add_expected_utxo(utxo, sender_randomness, receiver_preimage, received_from)
+        })
+    }
+
+    /// Mark an expected incoming UTXO as received
+    pub fn mark_as_received(
+        &self,
+        addition_record: AdditionRecord,
+        block_digest: Digest,
+    ) -> Result<()> {
+        self.0
+            .lock_mut(|u| u.mark_as_received(addition_record, block_digest))
+    }
+
+    /// Delete UTXO notifications that exceed a certain age
+    pub fn prune_stale_utxo_notifications(&self) {
+        self.0.lock_mut(|u| u.prune_stale_utxo_notifications())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize)]
 pub enum UtxoNotifier {
     OwnMiner,
@@ -365,7 +448,7 @@ mod wallet_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn utxo_notification_insert_remove_scan() {
-        let mut notification_pool = UtxoNotificationPool::new(ByteSize::kb(1), 100);
+        let notification_pool = UtxoNotificationPool::new(ByteSize::kb(1), 100);
         assert!(notification_pool.is_empty());
         assert!(notification_pool.len().is_zero());
         let mock_utxo = Utxo {
@@ -392,7 +475,7 @@ mod wallet_state_tests {
         assert_eq!(1, notification_pool.len());
         assert_eq!(
             1,
-            notification_pool.peer_id_to_expected_utxos[&peer_instance_id].len()
+            notification_pool.0.lock_guard().peer_id_to_expected_utxos[&peer_instance_id].len()
         );
 
         let mock_tx_containing_expected_utxo =
@@ -417,6 +500,8 @@ mod wallet_state_tests {
         assert!(notification_pool.is_empty());
         assert!(
             !notification_pool
+                .0
+                .lock_guard()
                 .peer_id_to_expected_utxos
                 .contains_key(&peer_instance_id),
             "Key for peer must be deleted after removal of expected UTXO"
@@ -427,7 +512,7 @@ mod wallet_state_tests {
     #[tokio::test]
     async fn utxo_notification_peer_spam_test() {
         let max_number_of_stored_utxos_per_peer = 100;
-        let mut notification_pool =
+        let notification_pool =
             UtxoNotificationPool::new(ByteSize::mb(1), max_number_of_stored_utxos_per_peer);
 
         let spamming_peer: InstanceId = random();
@@ -520,11 +605,11 @@ mod wallet_state_tests {
             .unwrap();
         assert_eq!(
             101,
-            notification_pool.peer_id_to_expected_utxos[&spamming_peer].len()
+            notification_pool.0.lock_guard().peer_id_to_expected_utxos[&spamming_peer].len()
         );
         assert_eq!(
             1,
-            notification_pool.peer_id_to_expected_utxos[&non_spamming_peer].len()
+            notification_pool.0.lock_guard().peer_id_to_expected_utxos[&non_spamming_peer].len()
         );
 
         // Verify that `pop_min` returns the UTXO notification with lowest credibility
@@ -545,7 +630,7 @@ mod wallet_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_utxo_notifications_test() {
-        let mut notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
+        let notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
         let mock_utxo = Utxo {
             lock_script_hash: LockScript::anyone_can_spend().hash(),
             coins: Into::<Amount>::into(14).to_native_coins(),
@@ -580,6 +665,8 @@ mod wallet_state_tests {
         // Manipulate the time this entry was inserted
         let two_weeks_as_sec = 60 * 60 * 24 * 7 * 2;
         notification_pool
+            .0
+            .lock_guard_mut()
             .notifications
             .get_mut(&addition_records[0])
             .unwrap()
@@ -596,11 +683,15 @@ mod wallet_state_tests {
         // Manipulate the time of two more entries
         let eight_weeks_as_secs = 60 * 60 * 24 * 7 * 8;
         notification_pool
+            .0
+            .lock_guard_mut()
             .notifications
             .get_mut(&addition_records[1])
             .unwrap()
             .notification_received = SystemTime::now() - Duration::from_secs(eight_weeks_as_secs);
         notification_pool
+            .0
+            .lock_guard_mut()
             .notifications
             .get_mut(&addition_records[3])
             .unwrap()
