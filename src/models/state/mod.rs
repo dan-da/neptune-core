@@ -103,10 +103,8 @@ impl GlobalState {
         }
     }
 
-    /// Locking:
-    ///  * acquires read lock for `latest_block`
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
-        let block_lock = self.chain.light_state.latest_block.lock_guard().await;
+        let block_lock = self.chain.light_state.inner.lock_guard().await;
         self.wallet_state
             .get_wallet_status_from_lock(&block_lock)
             .await
@@ -138,7 +136,7 @@ impl GlobalState {
     ///
     /// Locking: acquires wallet_db read lock
     async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
-        let current_tip_digest = self.chain.light_state.get_latest_block().await.hash;
+        let current_tip_digest = self.chain.light_state.hash().await;
         let monitored_utxos = self
             .wallet_state
             .wallet_db
@@ -194,7 +192,7 @@ impl GlobalState {
     ///
     /// Locking: acquires wallet_db read lock
     pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
-        let current_tip_digest = self.chain.light_state.get_latest_block().await.hash;
+        let current_tip_digest = self.chain.light_state.hash().await;
 
         self.wallet_state
             .wallet_db
@@ -250,21 +248,14 @@ impl GlobalState {
     ///
     /// Returns the transaction and a vector containing the sender
     /// randomness for each output UTXO.
-    ///
-    /// Locking:
-    ///  * acquires read lock for `latest_block`
     pub async fn create_transaction(
         &self,
         receiver_data: Vec<UtxoReceiverData>,
         fee: Amount,
     ) -> Result<Transaction> {
         // Get the block tip as the transaction is made relative to it
-        let bc_tip = self
-            .chain
-            .light_state
-            .latest_block
-            .lock(|lb| lb.to_owned())
-            .await;
+        // todo: avoid this clone.
+        let bc_tip = self.chain.light_state.block_clone().await;
 
         // Get the UTXOs required for this transaction
         let total_spend: Amount = receiver_data
@@ -395,12 +386,12 @@ impl GlobalState {
         // sanity check: test membership proofs
         for (utxo, membership_proof) in input_utxos.iter().zip(input_membership_proofs.iter()) {
             let item = Hash::hash(utxo);
-            assert!(self.chain.light_state.get_latest_block().await.body.next_mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
+            assert!(self.chain.light_state.block_clone().await.body.next_mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
             debug!(
                 "Have valid membership proofs relative to {}",
                 self.chain
                     .light_state
-                    .get_latest_block()
+                    .block_clone()
                     .await
                     .body
                     .next_mutator_set_accumulator
@@ -417,7 +408,7 @@ impl GlobalState {
         let mutator_set_accumulator = self
             .chain
             .light_state
-            .get_latest_block()
+            .block_clone()
             .await
             .body
             .next_mutator_set_accumulator;
@@ -492,7 +483,7 @@ impl GlobalState {
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
-        let latest_block_header = self.chain.light_state.get_latest_block_header().await;
+        let latest_block_header = self.chain.light_state.header_clone().await;
 
         HandshakeData {
             tip_header: latest_block_header,
@@ -555,9 +546,9 @@ impl GlobalState {
             .archival_mutator_set
             .lock_guard()
             .await;
-        let tip = self.chain.light_state.latest_block.lock_guard().await;
+        let tip_hash = self.chain.light_state.hash().await;
         assert_eq!(
-            tip.hash,
+            tip_hash,
             ams_lock.get_sync_label(),
             "Archival mutator set must be synced to tip for successful MUTXO recovery"
         );
@@ -652,7 +643,7 @@ impl GlobalState {
 
             let mut restored_mutxo =
                 MonitoredUtxo::new(incoming_utxo.utxo, self.wallet_state.number_of_mps_per_utxo);
-            restored_mutxo.add_membership_proof_for_tip(tip.hash, restored_msmp);
+            restored_mutxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
 
             wallet_db.monitored_utxos.push(restored_mutxo);
             restored_mutxos += 1;
@@ -1020,7 +1011,7 @@ mod global_state_tests {
             global_state
                 .chain
                 .light_state
-                .get_latest_block()
+                .block_clone()
                 .await
                 .body
                 .next_mutator_set_accumulator

@@ -643,7 +643,7 @@ mod tests {
         *premine_receiver_global_state
             .chain
             .light_state
-            .latest_block
+            .inner
             .lock_guard_mut()
             .await = block_1.clone();
         other_global_state
@@ -663,7 +663,7 @@ mod tests {
         *other_global_state
             .chain
             .light_state
-            .latest_block
+            .inner
             .lock_guard_mut()
             .await = block_1.clone();
 

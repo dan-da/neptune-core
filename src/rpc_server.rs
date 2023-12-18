@@ -144,7 +144,7 @@ impl NeptuneRPCServer {
         match executor::block_on(self.state.get_latest_balance_height()) {
             Some(latest_balance_height) => {
                 let tip_block_header =
-                    executor::block_on(self.state.chain.light_state.get_latest_block_header());
+                    executor::block_on(self.state.chain.light_state.header_partial());
 
                 assert!(tip_block_header.height >= latest_balance_height);
 
@@ -176,7 +176,7 @@ impl RPC for NeptuneRPCServer {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
         // let lookup_res = databases.latest_block_header.get(());
         let latest_block_header =
-            executor::block_on(self.state.chain.light_state.get_latest_block_header());
+            executor::block_on(self.state.chain.light_state.header_clone());
         latest_block_header.height
     }
 
@@ -185,13 +185,12 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn head(self, _: context::Context) -> Digest {
-        let latest_block = executor::block_on(self.state.chain.light_state.get_latest_block());
-        latest_block.hash
+        executor::block_on(self.state.chain.light_state.hash())
     }
 
     async fn heads(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let latest_block_digest =
-            executor::block_on(self.state.chain.light_state.get_latest_block()).hash;
+            executor::block_on(self.state.chain.light_state.hash());
 
         let head_hashes = executor::block_on(
             self.state
@@ -268,7 +267,7 @@ impl RPC for NeptuneRPCServer {
 
     async fn get_tip_header(self, _: context::Context) -> BlockHeader {
         let latest_block_block_header =
-            executor::block_on(self.state.chain.light_state.get_latest_block_header());
+            executor::block_on(self.state.chain.light_state.header_clone());
         latest_block_block_header
     }
 
@@ -328,7 +327,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
-        let tip_header = executor::block_on(self.state.chain.light_state.get_latest_block_header());
+        let tip_header = executor::block_on(self.state.chain.light_state.header_clone());
         let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
         let syncing = self.state.net.syncing.get();
         let mempool_size = self.state.mempool.get_size();
@@ -390,13 +389,7 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
-        let block_height = executor::block_on(
-            self.state
-                .chain
-                .light_state
-                .latest_block
-                .lock(|lb| lb.header.height),
-        );
+        let block_height = executor::block_on(self.state.chain.light_state.header_partial()).height;
         let receiver_privacy_digest = address.privacy_digest;
         let sender_randomness = self
             .state
@@ -497,7 +490,7 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
     ) -> usize {
         let prune_count_res = executor::block_on(async move {
-            let tip_block_header = self.state.chain.light_state.get_latest_block_header().await;
+            let tip_block_header = self.state.chain.light_state.header_clone().await;
             const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
             self.state

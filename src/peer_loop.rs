@@ -309,7 +309,6 @@ impl PeerLoopHandler {
     ///
     /// Locking:
     ///  * acquires read lock for `peer_map`
-    ///  * acquires read lock for `latest_block`
     async fn handle_peer_message<S>(
         &self,
         msg: PeerMessage,
@@ -391,7 +390,7 @@ impl PeerLoopHandler {
                     .state
                     .chain
                     .light_state
-                    .get_latest_block_header()
+                    .header_partial()
                     .await
                     .proof_of_work_family
                     < block.header.proof_of_work_family;
@@ -418,7 +417,8 @@ impl PeerLoopHandler {
             PeerMessage::BlockRequestBatch(most_canonical_digests, requested_batch_size) => {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
-                let tip_header = self.state.chain.light_state.get_latest_block_header().await;
+                // todo: avoid cloning
+                let tip_header = self.state.chain.light_state.header_clone().await;
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
@@ -584,15 +584,10 @@ impl PeerLoopHandler {
             PeerMessage::BlockNotificationRequest => {
                 debug!("Got BlockNotificationRequest");
 
-                let block_header = self
-                    .state
-                    .chain
-                    .light_state
-                    .latest_block
-                    .lock(|lb| lb.to_owned())
-                    .await;
+                // todo: can we avoid this clone?
+                let block_header = self.state.chain.light_state.header_clone().await;
 
-                peer.send(PeerMessage::BlockNotification(block_header.into()))
+                peer.send(PeerMessage::BlockNotification((&block_header).into()))
                     .await?;
 
                 Ok(false)
@@ -608,7 +603,7 @@ impl PeerLoopHandler {
                         .state
                         .chain
                         .light_state
-                        .get_latest_block_header()
+                        .header_partial()
                         .await
                         .proof_of_work_family
                         < block_notification.proof_of_work_family;
@@ -679,7 +674,8 @@ impl PeerLoopHandler {
                 // If more than one block is found, we need to find the one that's canonical
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
-                    let tip_header = self.state.chain.light_state.get_latest_block_header().await;
+                    // todo: can we avoid this clone?
+                    let tip_header = self.state.chain.light_state.header_clone().await;
                     for block_header in block_headers {
                         if self
                             .state
@@ -745,10 +741,16 @@ impl PeerLoopHandler {
                 }
 
                 // if transaction is not confirmable, punish
-                let latest_block = self.state.chain.light_state.get_latest_block().await;
-                if !transaction
-                    .is_confirmable_relative_to(&latest_block.body.next_mutator_set_accumulator)
-                {
+                let confirmable = self
+                    .state
+                    .chain
+                    .light_state
+                    .inner
+                    .lock(|b| {
+                        transaction.is_confirmable_relative_to(&b.body.next_mutator_set_accumulator)
+                    })
+                    .await;
+                if !confirmable {
                     warn!("Received unconfirmable tx");
                     self.punish(PeerSanctionReason::UnconfirmableTransaction)?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -788,7 +790,7 @@ impl PeerLoopHandler {
                 // Otherwise relay to main
                 let pt2m_transaction = PeerThreadToMainTransaction {
                     transaction: *transaction.to_owned(),
-                    confirmable_for_block: latest_block.hash,
+                    confirmable_for_block: self.state.chain.light_state.hash().await,
                 };
                 self.to_main_tx
                     .send(PeerThreadToMain::Transaction(Box::new(pt2m_transaction)))
@@ -1081,7 +1083,7 @@ impl PeerLoopHandler {
                 .state
                 .chain
                 .light_state
-                .get_latest_block_header()
+                .header_partial()
                 .await
                 .proof_of_work_family
         {
