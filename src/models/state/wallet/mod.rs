@@ -309,13 +309,8 @@ mod wallet_tests {
     /// Locking:
     ///  * acquires read lock for `wallet_db`
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
-        let lock = wallet_state.wallet_db.lock_guard().await;
-        let num_monitored_utxos = lock.monitored_utxos.len();
-        let mut monitored_utxos = vec![];
-        for i in 0..num_monitored_utxos {
-            monitored_utxos.push(lock.monitored_utxos.get(i));
-        }
-        monitored_utxos
+        // note: we could just return a DbtVec here and avoid cloning...
+        wallet_state.wallet_db.monitored_utxos().await.get_all()
     }
 
     #[tokio::test]

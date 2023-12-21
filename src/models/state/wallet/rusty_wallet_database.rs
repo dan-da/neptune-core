@@ -1,3 +1,4 @@
+use crate::util_types::sync::tokio as sync_tokio;
 use std::sync::Arc;
 
 // use rusty_leveldb::{WriteBatch, DB};
@@ -13,12 +14,13 @@ use twenty_first::{
 
 use super::monitored_utxo::MonitoredUtxo;
 
-pub struct RustyWalletDatabase {
-    // pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
+pub(in super::super) struct RustyWalletDatabaseInner {
+    // Holds references to monitored_utxos, sync_label, counter
+    // so they can be all written to levelDB as a single atomic batch write.
     schema: DbtSchema<RustyReader>,
 
     // active_window_storage: DbtSingleton<RustyKey, RustyMSValue, Vec<u32>>,
-    pub monitored_utxos: DbtVec<MonitoredUtxo>,
+    monitored_utxos: DbtVec<MonitoredUtxo>,
 
     // records which block the database is synced to
     sync_label: DbtSingleton<Digest>,
@@ -27,7 +29,7 @@ pub struct RustyWalletDatabase {
     counter: DbtSingleton<u64>,
 }
 
-impl RustyWalletDatabase {
+impl RustyWalletDatabaseInner {
     pub fn connect(db: DB) -> Self {
         let mut schema = DbtSchema::<RustyReader> {
             tables: AtomicRw::from(vec![]),
@@ -46,8 +48,13 @@ impl RustyWalletDatabase {
         }
     }
 
-    fn db(&self) -> &DB {
+    pub fn db(&self) -> &DB {
         &self.schema.reader.db
+    }
+
+    pub fn monitored_utxos(&self) -> DbtVec<MonitoredUtxo> {
+        // note: this clone just increments an Arc reference.
+        self.monitored_utxos.clone()
     }
 
     pub fn get_sync_label(&self) -> Digest {
@@ -67,7 +74,50 @@ impl RustyWalletDatabase {
     }
 }
 
-impl StorageWriter for RustyWalletDatabase {
+#[derive(Clone)]
+pub struct RustyWalletDatabase {
+    pub(in super::super) inner: sync_tokio::AtomicRw<RustyWalletDatabaseInner>,
+}
+
+impl RustyWalletDatabase {
+    pub fn connect(db: DB) -> Self {
+        let inner = RustyWalletDatabaseInner::connect(db);
+        Self {
+            inner: sync_tokio::AtomicRw::from(inner),
+        }
+    }
+
+    pub async fn get_sync_label(&self) -> Digest {
+        self.inner.lock(|r| r.get_sync_label()).await
+    }
+
+    pub async fn set_sync_label(&self, sync_label: Digest) {
+        self.inner.lock_mut(|r| r.set_sync_label(sync_label)).await
+    }
+
+    pub async fn get_counter(&self) -> u64 {
+        self.inner.lock(|r| r.get_counter()).await
+    }
+
+    pub async fn set_counter(&self, counter: u64) {
+        self.inner.lock_mut(|r| r.set_counter(counter)).await
+    }
+
+    pub async fn monitored_utxos(&self) -> DbtVec<MonitoredUtxo> {
+        // note: this clone just increments an Arc reference.
+        self.inner.lock(|r| r.monitored_utxos()).await
+    }
+
+    pub async fn persist(&self) {
+        self.inner.lock_mut(|r| r.persist()).await
+    }
+
+    pub async fn restore_or_new(&self) {
+        self.inner.lock_mut(|r| r.restore_or_new()).await
+    }
+}
+
+impl StorageWriter for RustyWalletDatabaseInner {
     /// Locking:
     ///  * acquires read lock for DbtSchema `tables`
     fn persist(&mut self) {

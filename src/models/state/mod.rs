@@ -137,13 +137,7 @@ impl GlobalState {
     /// Locking: acquires wallet_db read lock
     async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
         let current_tip_digest = self.chain.light_state.hash().await;
-        let monitored_utxos = self
-            .wallet_state
-            .wallet_db
-            .lock_guard()
-            .await
-            .monitored_utxos
-            .clone();
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
 
         if monitored_utxos.is_empty() {
             return None;
@@ -194,49 +188,45 @@ impl GlobalState {
     pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
         let current_tip_digest = self.chain.light_state.hash().await;
 
-        self.wallet_state
-            .wallet_db
-            .lock(|wallet_db| {
-                let monitored_utxos = wallet_db.monitored_utxos.clone();
-                let num_monitored_utxos = monitored_utxos.len();
-                let mut history = vec![];
-                for i in 0..num_monitored_utxos {
-                    let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
 
-                    if monitored_utxo
-                        .get_membership_proof_for_block(current_tip_digest)
-                        .is_none()
-                    {
-                        continue;
-                    }
+        let num_monitored_utxos = monitored_utxos.len();
+        let mut history = vec![];
+        for i in 0..num_monitored_utxos {
+            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
 
-                    if let Some((confirming_block, confirmation_timestamp, confirmation_height)) =
-                        monitored_utxo.confirmed_in_block
-                    {
-                        let amount = monitored_utxo.utxo.get_native_coin_amount();
-                        history.push((
-                            confirming_block,
-                            confirmation_timestamp,
-                            confirmation_height,
-                            amount,
-                            Sign::NonNegative,
-                        ));
-                        if let Some((spending_block, spending_timestamp, spending_height)) =
-                            monitored_utxo.spent_in_block
-                        {
-                            history.push((
-                                spending_block,
-                                spending_timestamp,
-                                spending_height,
-                                amount,
-                                Sign::Negative,
-                            ));
-                        }
-                    }
+            if monitored_utxo
+                .get_membership_proof_for_block(current_tip_digest)
+                .is_none()
+            {
+                continue;
+            }
+
+            if let Some((confirming_block, confirmation_timestamp, confirmation_height)) =
+                monitored_utxo.confirmed_in_block
+            {
+                let amount = monitored_utxo.utxo.get_native_coin_amount();
+                history.push((
+                    confirming_block,
+                    confirmation_timestamp,
+                    confirmation_height,
+                    amount,
+                    Sign::NonNegative,
+                ));
+                if let Some((spending_block, spending_timestamp, spending_height)) =
+                    monitored_utxo.spent_in_block
+                {
+                    history.push((
+                        spending_block,
+                        spending_timestamp,
+                        spending_height,
+                        amount,
+                        Sign::Negative,
+                    ));
                 }
-                history
-            })
-            .await
+            }
+        }
+        history
     }
 
     /// Create a transaction that sends coins to the given
@@ -552,7 +542,9 @@ impl GlobalState {
 
         // note: RwLock read locks do not block eachother so we don't
         // really need to worry about a `canonical order`
-        let wallet_db = self.wallet_state.wallet_db.lock_guard().await;
+        let wallet_db = self.wallet_state.wallet_db.inner.lock_guard().await;
+        let monitored_utxos = wallet_db.monitored_utxos();
+
         let ams_lock = self
             .chain
             .archival_state
@@ -576,7 +568,7 @@ impl GlobalState {
         // Loop over all `incoming_utxos` and check if they have a corresponding
         // monitored UTXO in the database.
         let mut recovery_data_for_missing_mutxos = vec![];
-        let mutxo_count = wallet_db.monitored_utxos.len();
+        let mutxo_count = monitored_utxos.len();
         '_outer: for (j, incoming_utxo) in incoming_utxos.into_iter().enumerate() {
             // The outer loop can take a long time to run. So we inform the user how far we have progressed.
             if j % 10 == 0 {
@@ -593,7 +585,7 @@ impl GlobalState {
                 // TODO: It's inefficient to fetch each monitored UTXO in this loop.
                 // It would be better to fetch all monitored UTXOs at once and then
                 // run the loop.
-                let monitored_utxo = wallet_db.monitored_utxos.get(searched_index);
+                let monitored_utxo = monitored_utxos.get(searched_index);
                 if monitored_utxo.utxo == incoming_utxo.utxo {
                     let msmp_res = monitored_utxo.get_latest_membership_proof_entry();
                     let msmp = match msmp_res {
@@ -660,13 +652,20 @@ impl GlobalState {
                 MonitoredUtxo::new(incoming_utxo.utxo, self.wallet_state.number_of_mps_per_utxo);
             restored_mutxo.add_membership_proof_for_tip(tip_hash, restored_msmp);
 
-            wallet_db.monitored_utxos.push(restored_mutxo);
+            monitored_utxos.push(restored_mutxo);
             restored_mutxos += 1;
         }
 
         drop(wallet_db); // drop read lock before acquiring write lock.
 
-        self.wallet_state.wallet_db.lock_guard_mut().await.persist();
+        // note: we could just call wallet_db.persist(), but this makes it
+        // clearer we are acquiring write lock.
+        self.wallet_state
+            .wallet_db
+            .inner
+            .lock_guard_mut()
+            .await
+            .persist();
         info!("Successfully restored {restored_mutxos} monitored UTXOs to wallet database");
 
         drop(atomic_update_section); // finish atomic read+write section.
@@ -694,13 +693,7 @@ impl GlobalState {
         let atomic_update_section = ATOMIC_MUTEX.lock().await;
 
         // loop over all monitored utxos
-        let monitored_utxos = self
-            .wallet_state
-            .wallet_db
-            .lock_guard()
-            .await
-            .monitored_utxos
-            .clone();
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
         let num_monitored_utxos = monitored_utxos.len();
         'outer: for i in 0..num_monitored_utxos {
             let mut monitored_utxo = monitored_utxos.get(i).clone();
@@ -851,6 +844,7 @@ impl GlobalState {
         // Update sync label and persist
         self.wallet_state
             .wallet_db
+            .inner
             .lock_mut(|db| {
                 db.set_sync_label(tip_hash);
                 db.persist();
@@ -880,8 +874,7 @@ mod global_state_tests {
         wallet_state: &WalletState,
         tip_block: &Block,
     ) -> bool {
-        let wallet_db_lock = wallet_state.wallet_db.lock_guard().await;
-        let monitored_utxos = &wallet_db_lock.monitored_utxos;
+        let monitored_utxos = wallet_state.wallet_db.monitored_utxos().await;
         for i in 0..monitored_utxos.len() {
             let monitored_utxo = monitored_utxos.get(i);
             let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash);
@@ -1012,15 +1005,15 @@ mod global_state_tests {
 
         // Delete everything from monitored UTXO (the premined UTXO)
         {
-            let wallet_db_lock = global_state.wallet_state.wallet_db.lock_guard().await;
+            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
             assert!(
-                wallet_db_lock.monitored_utxos.len().is_one(),
+                monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element before emptying it"
             );
-            wallet_db_lock.monitored_utxos.pop();
+            monitored_utxos.pop();
 
             assert!(
-                wallet_db_lock.monitored_utxos.is_empty(),
+                monitored_utxos.is_empty(),
                 "MUTXO must be empty after emptying it"
             );
         }
@@ -1031,14 +1024,14 @@ mod global_state_tests {
             .await
             .unwrap();
         {
-            let wallet_db_lock = global_state.wallet_state.wallet_db.lock_guard().await;
+            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
             assert!(
-                wallet_db_lock.monitored_utxos.len().is_one(),
+                monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element after recovering it"
             );
 
             // Verify that the restored MUTXO has a valid MSMP
-            let own_premine_mutxo = wallet_db_lock.monitored_utxos.get(0);
+            let own_premine_mutxo = monitored_utxos.get(0);
             let ms_item = Hash::hash(&own_premine_mutxo.utxo);
             global_state
                 .chain
@@ -1230,8 +1223,7 @@ mod global_state_tests {
 
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
-        let wallet_db_lock = global_state.wallet_state.wallet_db.lock_guard().await;
-        let monitored_utxos = &wallet_db_lock.monitored_utxos;
+        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
         assert!(
             !monitored_utxos
                 .get(0)
@@ -1452,8 +1444,7 @@ mod global_state_tests {
         );
 
         // Also check that UTXO from 1a is considered abandoned
-        let wallet_db_lock = global_state.wallet_state.wallet_db.lock_guard().await;
-        let monitored_utxos = &wallet_db_lock.monitored_utxos;
+        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
         assert!(
             !monitored_utxos
                 .get(0)

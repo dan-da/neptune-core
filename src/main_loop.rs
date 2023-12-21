@@ -1149,12 +1149,18 @@ impl MainLoopHandler {
     ///  * acquires write lock for `wallet_db`
     ///  * acquires write lock for `archival_mutator_set`
     async fn flush_databases(&self) -> Result<()> {
+        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+        // Obtain a mutex lock for entering this fn
+        // which performs read+write over multiple databases
+        //
+        // This lock serializes the read+write, so we guarantee
+        // that each writer thread calling this fn is writing based
+        // on the most recent state across DBs.
+        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+
         // flush wallet databases
-        self.global_state
-            .wallet_state
-            .wallet_db
-            .lock_mut(|db| db.persist())
-            .await;
+        self.global_state.wallet_state.wallet_db.persist().await;
 
         let hash = self
             .global_state
@@ -1178,6 +1184,8 @@ impl MainLoopHandler {
                 ams.persist();
             })
             .await;
+
+        drop(atomic_update_section);
 
         debug!("Persisted all databases");
 
