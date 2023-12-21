@@ -1464,9 +1464,8 @@ mod archival_state_tests {
             genesis_state
                 .wallet_state
                 .wallet_db
-                .lock_guard()
+                .monitored_utxos()
                 .await
-                .monitored_utxos
                 .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
         );
 
@@ -1681,9 +1680,8 @@ mod archival_state_tests {
             genesis_state
                 .wallet_state
                 .wallet_db
-                .lock_guard()
+                .monitored_utxos()
                 .await
-                .monitored_utxos
                 .len(), "Genesis receiver must have 9 UTXOs after block 2: 3 after block 1, and 6 added by block 2"
         );
 
