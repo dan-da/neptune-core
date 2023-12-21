@@ -363,9 +363,22 @@ impl WalletState {
     /// is valid and that the wallet state is not up to date yet.
     ///
     /// Locking:
-    ///  * acquires `wallet_db`` read lock and write lock.
+    ///  * acquires `wallet_db` read lock and write lock.
     ///  * acquires `expected_utxos` read lock and write lock.
     pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
+        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+        // Obtain a mutex lock for entering this fn
+        // which performs read+write
+        //
+        // This lock serializes the read+write, so we guarantee
+        // that each writer thread calling this fn is writing based
+        // on the most recent state.
+        //
+        // Yet we keep the write-lock section as short as possible
+        // to maximize concurrency of any reader threads.
+        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+
         let transaction: Transaction = block.body.transaction.clone();
 
         let spent_inputs: Vec<(Utxo, AbsoluteIndexSet, u64)> =
@@ -393,6 +406,8 @@ impl WalletState {
         // the process update existing membership proofs with
         // updates from this block
 
+        // Obtain wallet DB read lock for some lengthy-ish work.
+        // This does not block wallet DB readers on other threads.
         let wallet_db = self.wallet_db.lock_guard().await;
 
         // return early if there are no monitored utxos and this
@@ -653,14 +668,20 @@ impl WalletState {
             // Another option is to attempt to mark those abandoned monitored UTXOs as reorganized.
         }
 
-        drop(wallet_db); // must drop read-lock before acquiring write lock.
+        // we drop read-lock before acquiring write lock.
+        drop(wallet_db);
 
+        // note: here we are still holding atomic_update_section mutex.
+
+        // obtain wallet DB write lock and perform write as quick as we can.
         self.wallet_db
             .lock_mut(|db| {
                 db.set_sync_label(block.hash);
                 db.persist();
             })
             .await;
+
+        // note: still holding atomic_update_section mutex.
 
         // Mark all expected UTXOs that were received in this block as received
         expected_utxos_in_this_block
@@ -670,6 +691,8 @@ impl WalletState {
                     .mark_as_received(addition_rec, block.hash)
                     .expect("Expected UTXO must be present when marking it as received")
             });
+
+        drop(atomic_update_section);
 
         Ok(())
     }

@@ -60,7 +60,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: sync_tokio::AtomicMutex<RustyArchivalMutatorSet<Hash>>,
+    pub archival_mutator_set: sync_tokio::AtomicRw<RustyArchivalMutatorSet<Hash>>,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -217,7 +217,7 @@ impl ArchivalState {
             data_dir,
             block_index_db,
             genesis_block,
-            archival_mutator_set: sync_tokio::AtomicMutex::from(archival_mutator_set),
+            archival_mutator_set: sync_tokio::AtomicRw::from(archival_mutator_set),
         }
     }
 
@@ -585,23 +585,44 @@ impl ArchivalState {
     /// Locking:
     ///  * acquires read and write lock for `archival_mutator_set`
     pub async fn update_mutator_set(&self, new_block: &Block) -> Result<()> {
-        // todo: use closure style locking, if possible.
+        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-        // Get the block digest that the mutator set was most recently synced to
-        let ms_block_sync_digest = self.archival_mutator_set.lock(|a| a.get_sync_label()).await;
+        // Obtain a mutex lock for entering this fn
+        // which performs read+write
+        //
+        // This lock serializes the read+write, so we guarantee
+        // that each writer thread calling this fn is writing based
+        // on the most recent state.
+        //
+        // Yet we keep the write-lock section as short as possible
+        // to maximize concurrency of any reader threads.
+        let atomic_update_section = ATOMIC_MUTEX.lock().await;
 
-        // Find path from mutator set sync digest to new block. Optimize for the common case,
-        // where the new block is the child block of block that the mutator set is synced to.
-        let (backwards, _luca, forwards) =
-            if ms_block_sync_digest == new_block.header.prev_block_digest {
-                // Trivial path
-                (vec![], ms_block_sync_digest, vec![])
-            } else {
-                // Non-trivial path from current mutator set sync digest to new block
-                self.find_path(ms_block_sync_digest, new_block.header.prev_block_digest)
-                    .await
-            };
-        let forwards = [forwards, vec![new_block.hash]].concat();
+        let (forwards, backwards) = {
+            // This code block reads data with `archival_mutator_set` read lock.
+            // We *could* simply use a write lock for this entire fn, however
+            // the `find_path` call is potentially lengthy, so using a read lock
+            // here should provide better concurrency for any other thread that
+            // needs to acquire the read lock.
+
+            // Get the block digest that the mutator set was most recently synced to
+            let ms_block_sync_digest = self.archival_mutator_set.lock(|a| a.get_sync_label()).await;
+
+            // Find path from mutator set sync digest to new block. Optimize for the common case,
+            // where the new block is the child block of block that the mutator set is synced to.
+            let (backwards, _luca, forwards) =
+                if ms_block_sync_digest == new_block.header.prev_block_digest {
+                    // Trivial path
+                    (vec![], ms_block_sync_digest, vec![])
+                } else {
+                    // Non-trivial path from current mutator set sync digest to new block
+                    self.find_path(ms_block_sync_digest, new_block.header.prev_block_digest)
+                        .await
+                };
+            let forwards = [forwards, vec![new_block.hash]].concat();
+
+            (forwards, backwards)
+        };
 
         // We hold the lock over entire update operation.
         let mut ams_lock = self.archival_mutator_set.lock_guard_mut().await;
@@ -696,6 +717,8 @@ impl ArchivalState {
         // Persist updated mutator set to disk, with sync label
         ams_lock.set_sync_label(new_block.hash);
         ams_lock.persist();
+
+        drop(atomic_update_section); // end atomic read+write section
 
         Ok(())
     }

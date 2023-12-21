@@ -532,11 +532,26 @@ impl GlobalState {
     ///
     /// Locking:
     ///  * acquires read and write lock `wallet_db`
+    ///  * acquires read lock for `archival_mutator_set`
     ///  * acquires read lock for `latest_block`
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&self) -> Result<()> {
         // todo: refactor to use closure style locks, once wallet_state uses AtomicRw.
 
-        // Grab locks in canonical order to avoid deadlocks
+        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+        // Obtain a mutex lock for entering this fn
+        // which performs read+write
+        //
+        // This lock serializes the read+write, so we guarantee
+        // that each writer thread calling this fn is writing based
+        // on the most recent state.
+        //
+        // Yet we keep the write-lock section as short as possible
+        // to maximize concurrency of any reader threads.
+        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+
+        // note: RwLock read locks do not block eachother so we don't
+        // really need to worry about a `canonical order`
         let wallet_db = self.wallet_state.wallet_db.lock_guard().await;
         let ams_lock = self
             .chain
@@ -654,6 +669,8 @@ impl GlobalState {
         self.wallet_state.wallet_db.lock_guard_mut().await.persist();
         info!("Successfully restored {restored_mutxos} monitored UTXOs to wallet database");
 
+        drop(atomic_update_section); // finish atomic read+write section.
+
         Ok(())
     }
 
@@ -663,6 +680,19 @@ impl GlobalState {
         &self,
         tip_hash: Digest,
     ) -> Result<()> {
+        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+        // Obtain a mutex lock for entering this fn
+        // which performs read+write
+        //
+        // This lock serializes the read+write, so we guarantee
+        // that each writer thread calling this fn is writing based
+        // on the most recent state.
+        //
+        // Yet we keep the write-lock section as short as possible
+        // to maximize concurrency of any reader threads.
+        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+
         // loop over all monitored utxos
         let monitored_utxos = self
             .wallet_state
@@ -826,6 +856,8 @@ impl GlobalState {
                 db.persist();
             })
             .await;
+
+        drop(atomic_update_section); // end of atomic read+write section.
 
         Ok(())
     }
