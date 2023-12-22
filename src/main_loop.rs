@@ -1179,6 +1179,7 @@ impl MainLoopHandler {
             .as_ref()
             .unwrap()
             .archival_mutator_set
+            .inner
             .lock_mut(|ams| {
                 ams.set_sync_label(hash);
                 ams.persist();

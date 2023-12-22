@@ -1041,7 +1041,9 @@ pub async fn make_unit_test_archival_state(
 ) -> (ArchivalState, PeerDatabases, DataDirectory) {
     let (block_index_db, peer_db, data_dir) = unit_test_databases(network).unwrap();
 
-    let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
+    let ams = ArchivalState::initialize_mutator_set(&data_dir)
+        .await
+        .unwrap();
 
     let archival_state = ArchivalState::new(data_dir.clone(), block_index_db, ams).await;
 
