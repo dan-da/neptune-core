@@ -551,6 +551,7 @@ impl GlobalState {
             .as_ref()
             .unwrap()
             .archival_mutator_set
+            .inner
             .lock_guard()
             .await;
         let tip_hash = self.chain.light_state.hash().await;

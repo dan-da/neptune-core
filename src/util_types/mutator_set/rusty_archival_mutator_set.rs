@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
+use crate::util_types::sync::tokio as sync_tokio;
 use twenty_first::{
     leveldb::batch::WriteBatch,
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
@@ -9,7 +10,6 @@ use twenty_first::{
     storage::storage_schema::{
         traits::*, DbtSchema, DbtSingleton, DbtVec, RustyKey, RustyValue, WriteOperation,
     },
-    sync::AtomicRw,
     util_types::{algebraic_hasher::AlgebraicHasher, mmr::archival_mmr::ArchivalMmr},
 };
 
@@ -37,26 +37,23 @@ impl StorageReader for RamsReader {
 
 type AmsMmrStorage = DbtVec<Digest>;
 type AmsChunkStorage = DbtVec<Chunk>;
-pub struct RustyArchivalMutatorSet<H>
+pub(in super::super::super) struct RustyArchivalMutatorSetInner<H>
 where
     H: AlgebraicHasher + BFieldCodec,
 {
     pub ams: ArchivalMutatorSet<H, AmsMmrStorage, AmsChunkStorage>,
     schema: DbtSchema<RamsReader>,
-    db: Arc<DB>,
     active_window_storage: DbtSingleton<Vec<u32>>,
     sync_label: DbtSingleton<Digest>,
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
-    pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
+impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSetInner<H> {
+    fn connect(db: DB) -> Self {
         let db_pointer = Arc::new(db);
-        let reader = RamsReader {
-            db: db_pointer.clone(),
-        };
+        let reader = RamsReader { db: db_pointer };
         let reader_pointer = Arc::new(reader);
         let mut schema = DbtSchema::<RamsReader> {
-            tables: AtomicRw::from(vec![]),
+            tables: twenty_first::sync::AtomicRw::from(vec![]),
             reader: reader_pointer,
         };
         let aocl_storage = schema.new_vec::<Digest>("aocl");
@@ -75,7 +72,6 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
         Self {
             ams,
             schema,
-            db: db_pointer,
             active_window_storage,
             sync_label,
         }
@@ -90,9 +86,45 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     }
 }
 
-impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet<H> {
-    /// Locking:
-    ///  * acquires read lock for DbtSchema `tables`
+#[derive(Clone)]
+pub struct RustyArchivalMutatorSet<H>
+where
+    H: AlgebraicHasher + BFieldCodec,
+{
+    pub(in super::super::super) inner: sync_tokio::AtomicRw<RustyArchivalMutatorSetInner<H>>,
+}
+
+impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
+    pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
+        let inner = RustyArchivalMutatorSetInner::connect(db);
+        Self {
+            inner: sync_tokio::AtomicRw::from(inner),
+        }
+    }
+
+    pub async fn get_sync_label(&self) -> Digest {
+        self.inner.lock(|i| i.get_sync_label()).await
+    }
+
+    pub async fn set_sync_label(&self, sync_label: Digest) {
+        self.inner.lock_mut(|i| i.set_sync_label(sync_label)).await
+    }
+
+    pub async fn active_window_storage(&self) -> DbtSingleton<Vec<u32>> {
+        // note: this cheap clone just bumps DbtSingleton Arc refcount.
+        self.inner.lock(|i| i.active_window_storage.clone()).await
+    }
+
+    pub async fn persist(&self) {
+        self.inner.lock_mut(|i| i.persist()).await
+    }
+
+    pub async fn restore_or_new(&self) {
+        self.inner.lock_mut(|i| i.restore_or_new()).await
+    }
+}
+
+impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSetInner<H> {
     fn persist(&mut self) {
         let write_batch = WriteBatch::new();
 
@@ -113,7 +145,9 @@ impl<H: AlgebraicHasher + BFieldCodec> StorageWriter for RustyArchivalMutatorSet
 
         // Perform a syncronous write, to be on the safe side.
         // future: evaluate sync vs async writes for mutator set.
-        self.db
+        self.schema
+            .reader
+            .db
             .write(&write_batch, true)
             .expect("Could not persist to database.");
     }
@@ -152,8 +186,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn persist_test() {
+    #[tokio::test]
+    async fn persist_test() {
         type H = Tip5;
 
         let num_additions = 150 + 2 * BATCH_SIZE as usize;
@@ -163,10 +197,9 @@ mod tests {
         // let (mut archival_mutator_set, db) = empty_rustyleveldb_ams();
         let db = DB::open_new_test_database(false, None, None, None).unwrap();
         let db_path = db.path().clone();
-        let mut rusty_mutator_set: RustyArchivalMutatorSet<H> =
-            RustyArchivalMutatorSet::connect(db);
+        let rusty_mutator_set: RustyArchivalMutatorSet<H> = RustyArchivalMutatorSet::connect(db);
         println!("Connected to database");
-        rusty_mutator_set.restore_or_new();
+        rusty_mutator_set.restore_or_new().await;
         println!("Restored or new odne.");
 
         let mut items = vec![];
@@ -174,14 +207,19 @@ mod tests {
 
         println!(
             "before additions mutator set contains {} elements",
-            rusty_mutator_set.ams.kernel.aocl.count_leaves()
+            rusty_mutator_set
+                .inner
+                .lock(|a| a.ams.kernel.aocl.count_leaves())
+                .await
         );
+
+        let mut ams_lock = rusty_mutator_set.inner.lock_guard_mut().await;
 
         for _ in 0..num_additions {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
             let addition_record =
                 commit::<H>(item, sender_randomness, receiver_preimage.hash::<H>());
-            let mp = rusty_mutator_set
+            let mp = ams_lock
                 .ams
                 .kernel
                 .prove(item, sender_randomness, receiver_preimage);
@@ -189,24 +227,24 @@ mod tests {
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
-                &rusty_mutator_set.ams.kernel,
+                &ams_lock.ams.kernel,
                 &addition_record,
             )
             .expect("Cannot batch update from addition");
 
             mps.push(mp);
             items.push(item);
-            rusty_mutator_set.ams.add(&addition_record);
+            ams_lock.ams.add(&addition_record);
         }
 
         println!(
             "after additions mutator set contains {} elements",
-            rusty_mutator_set.ams.kernel.aocl.count_leaves()
+            ams_lock.ams.kernel.aocl.count_leaves()
         );
 
         // Verify membership
         for (mp, &item) in mps.iter().zip(items.iter()) {
-            assert!(rusty_mutator_set.ams.verify(item, mp));
+            assert!(ams_lock.ams.verify(item, mp));
         }
 
         // Remove items
@@ -216,14 +254,14 @@ mod tests {
             let index = rng.next_u64() as usize % items.len();
             let item = items[index];
             let membership_proof = mps[index].clone();
-            let removal_record = rusty_mutator_set.ams.kernel.drop(item, &membership_proof);
+            let removal_record = ams_lock.ams.kernel.drop(item, &membership_proof);
             MsMembershipProof::batch_update_from_remove(
                 &mut mps.iter_mut().collect_vec(),
                 &removal_record,
             )
             .expect("Could not batch update membership proofs from remove");
 
-            rusty_mutator_set.ams.remove(&removal_record);
+            ams_lock.ams.remove(&removal_record);
 
             removed_items.push(items.remove(index));
             removed_mps.push(mps.remove(index));
@@ -233,35 +271,38 @@ mod tests {
         // a new archival object from the databases it contains and then check
         // that this archival MS contains the same values
         let sync_label: Digest = random();
-        rusty_mutator_set.set_sync_label(sync_label);
+        ams_lock.set_sync_label(sync_label);
 
         println!(
             "at persistence mutator set aocl contains {} elements",
-            rusty_mutator_set.ams.kernel.aocl.count_leaves()
+            ams_lock.ams.kernel.aocl.count_leaves()
         );
 
         // persist and drop
-        rusty_mutator_set.persist();
+        ams_lock.persist();
 
-        let active_window_before = rusty_mutator_set.ams.kernel.swbf_active.clone();
+        let active_window_before = ams_lock.ams.kernel.swbf_active.clone();
 
+        drop(ams_lock);
         drop(rusty_mutator_set); // Drop DB
 
         // new database
         let new_db = DB::open_test_database(&db_path, true, None, None, None)
             .expect("should open existing database");
-        let mut new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
+        let new_rusty_mutator_set: RustyArchivalMutatorSet<H> =
             RustyArchivalMutatorSet::connect(new_db);
-        new_rusty_mutator_set.restore_or_new();
+        new_rusty_mutator_set.restore_or_new().await;
+
+        let new_ams_lock = new_rusty_mutator_set.inner.lock_guard().await;
 
         // Verify memberships
         println!(
             "restored mutator set contains {} elements",
-            new_rusty_mutator_set.ams.kernel.aocl.count_leaves()
+            new_ams_lock.ams.kernel.aocl.count_leaves()
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
-                new_rusty_mutator_set.ams.verify(item, mp),
+                new_ams_lock.ams.verify(item, mp),
                 "membership proof {index} does not verify"
             );
         }
@@ -269,15 +310,15 @@ mod tests {
         // Verify non-membership
         for (index, (mp, &item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
             assert!(
-                !new_rusty_mutator_set.ams.verify(item, mp),
+                !new_ams_lock.ams.verify(item, mp),
                 "membership proof of non-member {index} still valid"
             );
         }
 
-        let retrieved_sync_label = new_rusty_mutator_set.get_sync_label();
+        let retrieved_sync_label = new_ams_lock.get_sync_label();
         assert_eq!(sync_label, retrieved_sync_label);
 
-        let active_window_after = new_rusty_mutator_set.ams.kernel.swbf_active.clone();
+        let active_window_after = new_ams_lock.ams.kernel.swbf_active.clone();
 
         assert_eq!(active_window_before, active_window_after);
     }

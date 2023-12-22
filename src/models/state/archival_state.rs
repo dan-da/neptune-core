@@ -26,7 +26,6 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
-use crate::util_types::sync::tokio as sync_tokio;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -60,7 +59,7 @@ pub struct ArchivalState {
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
-    pub archival_mutator_set: sync_tokio::AtomicRw<RustyArchivalMutatorSet<Hash>>,
+    pub archival_mutator_set: RustyArchivalMutatorSet<Hash>,
 }
 
 // The only reason we have this `Debug` implementation is that it's required
@@ -93,17 +92,24 @@ impl ArchivalState {
     }
 
     /// Initialize an `ArchivalMutatorSet` by opening or creating its databases.
-    pub fn initialize_mutator_set(
+    pub async fn initialize_mutator_set(
         data_dir: &DataDirectory,
     ) -> Result<RustyArchivalMutatorSet<Hash>> {
         let ms_db_dir_path = data_dir.mutator_set_database_dir_path();
         DataDirectory::create_dir_if_not_exists(&ms_db_dir_path)?;
 
-        let mut options = twenty_first::leveldb::options::Options::new();
-        options.create_if_missing = true;
+        let path = ms_db_dir_path.clone();
 
-        let db = match DB::open(&ms_db_dir_path.clone(), &options) {
-            Ok(db) => db,
+        let result = tokio::task::spawn_blocking(move || {
+            let mut options = twenty_first::leveldb::options::Options::new();
+            options.create_if_missing = true;
+
+            DB::open(&path, &options)
+        })
+        .await;
+
+        let db = match result {
+            Ok(db) => db?,
             Err(e) => {
                 tracing::error!(
                     "Could not open mutator set database at {}: {e}",
@@ -117,8 +123,8 @@ impl ArchivalState {
             }
         };
 
-        let mut archival_set = RustyArchivalMutatorSet::<Hash>::connect(db);
-        archival_set.restore_or_new();
+        let archival_set = RustyArchivalMutatorSet::<Hash>::connect(db);
+        archival_set.restore_or_new().await;
 
         Ok(archival_set)
     }
@@ -190,7 +196,7 @@ impl ArchivalState {
     pub async fn new(
         data_dir: DataDirectory,
         block_index_db: RustyLevelDbAsync<BlockIndexKey, BlockIndexValue>,
-        mut archival_mutator_set: RustyArchivalMutatorSet<Hash>,
+        archival_mutator_set: RustyArchivalMutatorSet<Hash>,
     ) -> Self {
         let genesis_block = Box::new(Block::genesis_block());
 
@@ -200,24 +206,27 @@ impl ArchivalState {
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
         let ams_is_empty = archival_mutator_set
-            .ams
-            .kernel
-            .aocl
-            .count_leaves()
-            .is_zero();
+            .inner
+            .lock(|a| a.ams.kernel.aocl.count_leaves().is_zero())
+            .await;
         if ams_is_empty {
-            for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
-                archival_mutator_set.ams.add(addition_record);
-            }
-            archival_mutator_set.set_sync_label(genesis_block.hash);
-            archival_mutator_set.persist();
+            archival_mutator_set
+                .inner
+                .lock_mut(|a| {
+                    for addition_record in genesis_block.body.transaction.kernel.outputs.iter() {
+                        a.ams.add(addition_record);
+                    }
+                    a.set_sync_label(genesis_block.hash);
+                    a.persist();
+                })
+                .await;
         }
 
         Self {
             data_dir,
             block_index_db,
             genesis_block,
-            archival_mutator_set: sync_tokio::AtomicRw::from(archival_mutator_set),
+            archival_mutator_set,
         }
     }
 
@@ -606,7 +615,7 @@ impl ArchivalState {
             // needs to acquire the read lock.
 
             // Get the block digest that the mutator set was most recently synced to
-            let ms_block_sync_digest = self.archival_mutator_set.lock(|a| a.get_sync_label()).await;
+            let ms_block_sync_digest = self.archival_mutator_set.get_sync_label().await;
 
             // Find path from mutator set sync digest to new block. Optimize for the common case,
             // where the new block is the child block of block that the mutator set is synced to.
@@ -625,7 +634,7 @@ impl ArchivalState {
         };
 
         // We hold the lock over entire update operation.
-        let mut ams_lock = self.archival_mutator_set.lock_guard_mut().await;
+        let mut ams_lock = self.archival_mutator_set.inner.lock_guard_mut().await;
 
         for digest in backwards {
             // Roll back mutator set
@@ -747,7 +756,9 @@ mod archival_state_tests {
     async fn make_test_archival_state(network: Network) -> ArchivalState {
         let (block_index_db, _peer_db_lock, data_dir) = unit_test_databases(network).unwrap();
 
-        let ams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
+        let ams = ArchivalState::initialize_mutator_set(&data_dir)
+            .await
+            .unwrap();
 
         ArchivalState::new(data_dir, block_index_db, ams).await
     }
@@ -791,6 +802,7 @@ mod archival_state_tests {
             Block::genesis_block().body.transaction.kernel.outputs.len() as u64,
             archival_state
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .ams
@@ -804,6 +816,7 @@ mod archival_state_tests {
             Block::genesis_block().hash,
             archival_state
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .get_sync_label(),
@@ -849,6 +862,7 @@ mod archival_state_tests {
             mock_block_1.hash,
             restored_archival_state
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .get_sync_label(),
@@ -902,6 +916,7 @@ mod archival_state_tests {
                 .as_ref()
                 .unwrap()
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await;
             assert_ne!(0, ams_lock.ams.kernel.aocl.count_leaves());
@@ -947,6 +962,7 @@ mod archival_state_tests {
                 .as_ref()
                 .unwrap()
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await;
             assert_ne!(0, ams_lock.ams.kernel.swbf_active.sbf.len());
@@ -1101,6 +1117,7 @@ mod archival_state_tests {
         assert!(
             archival_state
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .ams
@@ -1115,6 +1132,7 @@ mod archival_state_tests {
             2,
             archival_state
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .ams
@@ -1270,6 +1288,7 @@ mod archival_state_tests {
                 .as_ref()
                 .unwrap()
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .ams
@@ -1288,6 +1307,7 @@ mod archival_state_tests {
                 .as_ref()
                 .unwrap()
                 .archival_mutator_set
+                .inner
                 .lock_guard()
                 .await
                 .ams
@@ -1695,6 +1715,7 @@ mod archival_state_tests {
                     .as_ref()
                     .unwrap()
                     .archival_mutator_set
+                    .inner
                     .lock_guard()
                     .await
                     .ams
@@ -2678,10 +2699,12 @@ mod archival_state_tests {
     use crate::config_models::{cli_args, data_directory::DataDirectory};
 
     #[traced_test]
-    #[test]
-    fn can_initialize_mutator_set_database() {
+    #[tokio::test]
+    async fn can_initialize_mutator_set_database() {
         let args: cli_args::Args = cli_args::Args::default();
         let data_dir = DataDirectory::get(args.data_dir.clone(), args.network).unwrap();
-        let _rams = ArchivalState::initialize_mutator_set(&data_dir).unwrap();
+        let _rams = ArchivalState::initialize_mutator_set(&data_dir)
+            .await
+            .unwrap();
     }
 }
