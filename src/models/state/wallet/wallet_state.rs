@@ -237,16 +237,14 @@ impl WalletState {
         let monitored_utxos = self.wallet_db.monitored_utxos().await;
 
         let mut spent_own_utxos = vec![];
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
-            let utxo = monitored_utxo.utxo.clone();
+        for (i, monitored_utxo) in monitored_utxos.iter() {
             let abs_i = match monitored_utxo.get_latest_membership_proof_entry() {
-                Some(msmp) => msmp.1.compute_indices(Hash::hash(&utxo)),
+                Some(msmp) => msmp.1.compute_indices(Hash::hash(&monitored_utxo.utxo)),
                 None => continue,
             };
 
             if confirmed_absolute_index_sets.contains(&abs_i) {
-                spent_own_utxos.push((utxo, abs_i, i));
+                spent_own_utxos.push((monitored_utxo.utxo.clone(), abs_i, i));
             }
         }
         spent_own_utxos
@@ -308,11 +306,19 @@ impl WalletState {
             Duration::from_millis(current_tip.timestamp.value()),
             current_tip.height,
         );
+
+        // note: using monitored_utxos.iter_mut() makes the
+        // entire loop atomic.
+
         let monitored_utxos = self.wallet_db.monitored_utxos().await;
-        let mutxo_count = monitored_utxos.len();
         let mut removed_count = 0;
-        for i in 0..mutxo_count {
-            let mut monitored_utxo = monitored_utxos.get(i);
+
+        // note: write lock acquired by iter, and not released until
+        //       iter is dropped.
+        let mut iter = monitored_utxos.iter_mut();
+
+        while let Some(mut setter) = iter.next() {
+            let monitored_utxo = setter.value();
 
             // Spent MUTXOs are not marked as abandoned, as there's no reason to maintain them
             // once the spending block is buried sufficiently deep
@@ -343,8 +349,9 @@ impl WalletState {
             };
 
             if mark_as_abandoned {
+                let mut monitored_utxo = monitored_utxo.clone();
                 monitored_utxo.abandoned_at = Some(current_tip_info);
-                monitored_utxos.set(i, monitored_utxo);
+                setter.set(monitored_utxo);
                 removed_count += 1;
             }
         }
@@ -417,8 +424,7 @@ impl WalletState {
             StrongUtxoKey,
             (MsMembershipProof<Hash>, u64),
         > = HashMap::default();
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
+        for (i, monitored_utxo) in monitored_utxos.iter() {
             let utxo_digest = Hash::hash(&monitored_utxo.utxo);
 
             match monitored_utxo.get_membership_proof_for_block(block.header.prev_block_digest) {
@@ -546,8 +552,7 @@ impl WalletState {
 
         // sanity checks
         let mut mutxo_with_valid_mps = 0;
-        for i in 0..monitored_utxos.len() {
-            let mutxo = monitored_utxos.get(i);
+        for (_i, mutxo) in monitored_utxos.iter() {
             if mutxo.is_synced_to(block.header.prev_block_digest)
                 || mutxo.blockhash_to_membership_proof.is_empty()
             {
@@ -626,13 +631,11 @@ impl WalletState {
         changed_mps.dedup();
         debug!("Number of mutated membership proofs: {}", changed_mps.len());
 
-        let num_monitored_utxos_after_block = monitored_utxos.len();
-        let mut num_unspent_utxos = 0;
-        for j in 0..num_monitored_utxos_after_block {
-            if monitored_utxos.get(j).spent_in_block.is_none() {
-                num_unspent_utxos += 1;
-            }
-        }
+        let num_unspent_utxos = monitored_utxos
+            .iter()
+            .filter(|(_, m)| m.spent_in_block.is_none())
+            .count();
+
         debug!("Number of unspent UTXOs: {}", num_unspent_utxos);
 
         for (&strong_utxo_key, (updated_ms_mp, own_utxo_index)) in
@@ -689,32 +692,26 @@ impl WalletState {
             return false;
         }
         let monitored_utxos = self.wallet_db.monitored_utxos().await;
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
-            let has_current_mp = monitored_utxo
-                .get_membership_proof_for_block(tip_hash)
-                .is_some();
-            // We assume that the membership proof can only be stored
-            // if it is valid for the given block hash, so there is
-            // no need to test validity here.
-            if !has_current_mp {
-                return false;
-            }
-        }
-        true
+
+        // Check if every monitored_utxo has a member proof.
+        // We assume that the membership proof can only be stored
+        // if it is valid for the given block hash, so there is
+        // no need to test validity here.
+        let synced = monitored_utxos
+            .iter()
+            .all(|(_, m)| m.get_membership_proof_for_block(tip_hash).is_some());
+        synced
     }
 
     /// Locking:
     ///  * acquires wallet_db read lock.
     pub async fn get_wallet_status_from_lock(&self, block: &Block) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos().await;
-        let num_monitored_utxos = monitored_utxos.len();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
         let mut synced_spent = vec![];
         let mut unsynced_spent = vec![];
-        for i in 0..num_monitored_utxos {
-            let mutxo = monitored_utxos.get(i);
+        for (_i, mutxo) in monitored_utxos.iter() {
             debug!(
                 "mutxo. Synced to: {}",
                 mutxo
