@@ -153,9 +153,7 @@ impl GlobalState {
         //
         // We then continue working backward through all entries to
         // determine max(spent_in_block)
-        for i in (0..monitored_utxos.len()).rev() {
-            let utxo = monitored_utxos.get(i);
-
+        for (_i, utxo) in monitored_utxos.many_iter((0..monitored_utxos.len()).rev()) {
             if max_confirmed_in_block.is_none() {
                 if let Some((.., confirmed_in_block)) = utxo.confirmed_in_block {
                     if utxo
@@ -190,11 +188,9 @@ impl GlobalState {
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
 
-        let num_monitored_utxos = monitored_utxos.len();
+        // let num_monitored_utxos = monitored_utxos.len();
         let mut history = vec![];
-        for i in 0..num_monitored_utxos {
-            let monitored_utxo: MonitoredUtxo = monitored_utxos.get(i);
-
+        for (_idx, monitored_utxo) in monitored_utxos.iter() {
             if monitored_utxo
                 .get_membership_proof_for_block(current_tip_digest)
                 .is_none()
@@ -695,9 +691,12 @@ impl GlobalState {
 
         // loop over all monitored utxos
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
-        let num_monitored_utxos = monitored_utxos.len();
-        'outer: for i in 0..num_monitored_utxos {
-            let mut monitored_utxo = monitored_utxos.get(i).clone();
+
+        // note: iter_mut_lock holds a write-lock, so it should be dropped
+        // immediately after use.
+        let mut iter_mut_lock = monitored_utxos.iter_mut();
+        'outer: while let Some(mut setter) = iter_mut_lock.next() {
+            let monitored_utxo = setter.value();
 
             // Ignore those MUTXOs that were marked as abandoned
             if monitored_utxo.abandoned_at.is_some() {
@@ -710,7 +709,8 @@ impl GlobalState {
             }
 
             debug!(
-                "Resyncing monitored UTXO number {i}, with hash {}",
+                "Resyncing monitored UTXO number {}, with hash {}",
+                setter.index(),
                 Hash::hash(&monitored_utxo.utxo)
             );
 
@@ -739,6 +739,9 @@ impl GlobalState {
                 .unwrap()
                 .find_path(block_hash, tip_hash)
                 .await;
+
+            // after this point, we may be modifying it.
+            let mut monitored_utxo = monitored_utxo.clone();
 
             // walk backwards, reverting
             for revert_block_hash in backwards.into_iter() {
@@ -839,8 +842,9 @@ impl GlobalState {
 
             // store updated membership proof
             monitored_utxo.add_membership_proof_for_tip(tip_hash, membership_proof);
-            monitored_utxos.set(i, monitored_utxo);
+            setter.set(monitored_utxo);
         }
+        drop(iter_mut_lock); // <---- releases write lock.
 
         // Update sync label and persist
         self.wallet_state
@@ -876,8 +880,7 @@ mod global_state_tests {
         tip_block: &Block,
     ) -> bool {
         let monitored_utxos = wallet_state.wallet_db.monitored_utxos().await;
-        for i in 0..monitored_utxos.len() {
-            let monitored_utxo = monitored_utxos.get(i);
+        for (_idx, monitored_utxo) in monitored_utxos.iter() {
             let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash);
 
             match current_mp {
