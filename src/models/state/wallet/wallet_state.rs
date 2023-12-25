@@ -885,9 +885,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(new_block.clone()),
                     Some(latest_block.header.proof_of_work_family),
@@ -896,7 +894,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .light_state
+                .light_state()
                 .set_block(new_block.clone())
                 .await;
             latest_block = new_block;
@@ -937,9 +935,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .write_block(
                 Box::new(block_3a.clone()),
                 Some(latest_block.header.proof_of_work_family),
@@ -948,7 +944,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .light_state
+            .light_state()
             .set_block(block_3a.clone())
             .await;
         assert!(
@@ -988,9 +984,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .write_block(
                 Box::new(block_3b.clone()),
                 Some(latest_block.header.proof_of_work_family),
@@ -999,7 +993,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .light_state
+            .light_state()
             .set_block(block_3b.clone())
             .await;
         assert!(
@@ -1022,7 +1016,7 @@ mod tests {
             .prune_abandoned_monitored_utxos_with_lock(
                 10,
                 &block_3b.header,
-                own_global_state.chain.archival_state.as_ref().unwrap(),
+                own_global_state.chain.archival_state(),
             )
             .await
             .unwrap();
@@ -1040,9 +1034,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(new_block.clone()),
                     Some(latest_block.header.proof_of_work_family),
@@ -1051,7 +1043,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .light_state
+                .light_state()
                 .set_block(new_block.clone())
                 .await;
             latest_block = new_block;
@@ -1062,7 +1054,7 @@ mod tests {
             .prune_abandoned_monitored_utxos_with_lock(
                 10,
                 &latest_block.header,
-                own_global_state.chain.archival_state.as_ref().unwrap(),
+                own_global_state.chain.archival_state(),
             )
             .await
             .unwrap();
@@ -1092,9 +1084,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .write_block(
                 Box::new(block_12.clone()),
                 Some(latest_block.header.proof_of_work_family),
@@ -1103,7 +1093,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .light_state
+            .light_state()
             .set_block(block_12.clone())
             .await;
         assert!(
@@ -1122,7 +1112,7 @@ mod tests {
             .prune_abandoned_monitored_utxos_with_lock(
                 10,
                 &block_12.header,
-                own_global_state.chain.archival_state.as_ref().unwrap(),
+                own_global_state.chain.archival_state(),
             )
             .await
             .unwrap();

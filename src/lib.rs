@@ -23,7 +23,7 @@ use crate::main_loop::MainLoopHandler;
 use crate::models::channel::RPCServerToMain;
 
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainState;
+use crate::models::state::blockchain_state::{BlockchainArchivalState, BlockchainState};
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
@@ -117,10 +117,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let networking_state = NetworkingState::new(peer_map, peer_databases, syncing);
 
     let light_state: LightState = LightState::new(latest_block.clone());
-    let blockchain_state = BlockchainState {
+    let blockchain_archival_state = BlockchainArchivalState {
         light_state,
-        archival_state: Some(archival_state),
+        archival_state,
     };
+    let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size);
     let state = GlobalState {
         chain: blockchain_state,

@@ -104,7 +104,7 @@ impl GlobalState {
     }
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
-        let block_lock = self.chain.light_state.inner.lock_guard().await;
+        let block_lock = self.chain.light_state().inner.lock_guard().await;
         self.wallet_state
             .get_wallet_status_from_lock(&block_lock)
             .await
@@ -136,7 +136,7 @@ impl GlobalState {
     ///
     /// Locking: acquires wallet_db read lock
     async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
-        let current_tip_digest = self.chain.light_state.hash().await;
+        let current_tip_digest = self.chain.light_state().hash().await;
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
 
         if monitored_utxos.is_empty() {
@@ -184,7 +184,7 @@ impl GlobalState {
     ///
     /// Locking: acquires wallet_db read lock
     pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
-        let current_tip_digest = self.chain.light_state.hash().await;
+        let current_tip_digest = self.chain.light_state().hash().await;
 
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
 
@@ -241,7 +241,7 @@ impl GlobalState {
     ) -> Result<Transaction> {
         // Get the block tip as the transaction is made relative to it
         // todo: avoid this clone.
-        let bc_tip = self.chain.light_state.block_clone().await;
+        let bc_tip = self.chain.light_state().block_clone().await;
 
         // Get the UTXOs required for this transaction
         let total_spend: Amount = receiver_data
@@ -372,11 +372,11 @@ impl GlobalState {
         // sanity check: test membership proofs
         for (utxo, membership_proof) in input_utxos.iter().zip(input_membership_proofs.iter()) {
             let item = Hash::hash(utxo);
-            assert!(self.chain.light_state.block_clone().await.body.next_mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
+            assert!(self.chain.light_state().block_clone().await.body.next_mutator_set_accumulator.verify(item, membership_proof), "sanity check failed: trying to generate transaction with invalid membership proofs for inputs!");
             debug!(
                 "Have valid membership proofs relative to {}",
                 self.chain
-                    .light_state
+                    .light_state()
                     .block_clone()
                     .await
                     .body
@@ -393,7 +393,7 @@ impl GlobalState {
 
         let mutator_set_accumulator = self
             .chain
-            .light_state
+            .light_state()
             .block_clone()
             .await
             .body
@@ -469,7 +469,7 @@ impl GlobalState {
     }
 
     pub async fn get_own_handshakedata(&self) -> HandshakeData {
-        let latest_block_header = self.chain.light_state.header_clone().await;
+        let latest_block_header = self.chain.light_state().header_clone().await;
 
         HandshakeData {
             tip_header: latest_block_header,
@@ -479,7 +479,7 @@ impl GlobalState {
             instance_id: self.net.instance_id,
             version: VERSION.to_string(),
             // For now, all nodes are archival nodes
-            is_archival_node: self.chain.archival_state.is_some(),
+            is_archival_node: self.chain.is_archival_node(),
         }
     }
 
@@ -543,14 +543,12 @@ impl GlobalState {
 
         let ams_lock = self
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .archival_mutator_set
             .inner
             .lock_guard()
             .await;
-        let tip_hash = self.chain.light_state.hash().await;
+        let tip_hash = self.chain.light_state().hash().await;
         assert_eq!(
             tip_hash,
             ams_lock.get_sync_label(),
@@ -734,9 +732,7 @@ impl GlobalState {
             // request path-to-tip
             let (backwards, _luca, forwards) = self
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .find_path(block_hash, tip_hash)
                 .await;
 
@@ -760,9 +756,7 @@ impl GlobalState {
 
                 let revert_block = self
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(revert_block_hash)
                     .await?
                     .unwrap();
@@ -807,9 +801,7 @@ impl GlobalState {
 
                 let apply_block = self
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(apply_block_hash)
                     .await?
                     .unwrap();
@@ -998,12 +990,12 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block();
         let (mock_block_1, _, _) = make_mock_block(&genesis_block, None, other_receiver_address);
         crate::tests::shared::add_block_to_archival_state(
-            global_state.chain.archival_state.as_ref().unwrap(),
+            global_state.chain.archival_state(),
             mock_block_1.clone(),
         )
         .await
         .unwrap();
-        add_block_to_light_state(&global_state.chain.light_state, mock_block_1.clone())
+        add_block_to_light_state(&global_state.chain.light_state(), mock_block_1.clone())
             .await
             .unwrap();
 
@@ -1039,7 +1031,7 @@ mod global_state_tests {
             let ms_item = Hash::hash(&own_premine_mutxo.utxo);
             global_state
                 .chain
-                .light_state
+                .light_state()
                 .block_clone()
                 .await
                 .body
@@ -1079,9 +1071,7 @@ mod global_state_tests {
         {
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(mock_block_1a.clone()),
                     Some(mock_block_1a.header.proof_of_work_family),
@@ -1141,21 +1131,13 @@ mod global_state_tests {
         let own_receiving_address = own_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
-        let genesis_block = global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block = global_state.chain.archival_state().get_latest_block().await;
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
             make_mock_block(&genesis_block, None, own_receiving_address);
         {
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(mock_block_1a.clone()),
                     Some(mock_block_1a.header.proof_of_work_family),
@@ -1195,9 +1177,7 @@ mod global_state_tests {
             let (next_block, _, _) = make_mock_block(&parent_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(next_block.clone()),
                     Some(next_block.header.proof_of_work_family),
@@ -1231,19 +1211,13 @@ mod global_state_tests {
         assert!(
             !monitored_utxos
                 .get(0)
-                .was_abandoned(
-                    parent_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
-                )
+                .was_abandoned(parent_block.hash, global_state.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
-                .was_abandoned(
-                    parent_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
-                )
+                .was_abandoned(parent_block.hash, global_state.chain.archival_state())
                 .await
         );
 
@@ -1264,22 +1238,14 @@ mod global_state_tests {
             .to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
-        let genesis_block = global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block = global_state.chain.archival_state().get_latest_block().await;
         assert!(genesis_block.header.height.is_genesis());
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
             make_mock_block(&genesis_block, None, own_receiving_address);
         {
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(mock_block_1a.clone()),
                     Some(mock_block_1a.header.proof_of_work_family),
@@ -1316,9 +1282,7 @@ mod global_state_tests {
                 make_mock_block(&fork_a_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(next_a_block.clone()),
                     Some(next_a_block.header.proof_of_work_family),
@@ -1347,9 +1311,7 @@ mod global_state_tests {
                 make_mock_block(&fork_b_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(next_b_block.clone()),
                     Some(next_b_block.header.proof_of_work_family),
@@ -1401,9 +1363,7 @@ mod global_state_tests {
                 make_mock_block(&fork_c_block, None, other_receiving_address);
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(next_c_block.clone()),
                     Some(next_c_block.header.proof_of_work_family),
@@ -1452,19 +1412,13 @@ mod global_state_tests {
         assert!(
             !monitored_utxos
                 .get(0)
-                .was_abandoned(
-                    fork_c_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
-                )
+                .was_abandoned(fork_c_block.hash, global_state.chain.archival_state())
                 .await
         );
         assert!(
             monitored_utxos
                 .get(1)
-                .was_abandoned(
-                    fork_c_block.hash,
-                    global_state.chain.archival_state.as_ref().unwrap()
-                )
+                .was_abandoned(fork_c_block.hash, global_state.chain.archival_state())
                 .await
         );
 

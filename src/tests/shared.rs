@@ -66,7 +66,7 @@ use crate::models::database::PeerDatabases;
 use crate::models::peer::{HandshakeData, PeerInfo, PeerMessage, PeerStanding};
 use crate::models::shared::LatestBlockInfo;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainState;
+use crate::models::state::blockchain_state::{BlockchainArchivalState, BlockchainState};
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
@@ -208,10 +208,10 @@ pub async fn get_mock_global_state(
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
     let (block, _, _) = get_dummy_latest_block(None);
     let light_state: LightState = LightState::new(block);
-    let blockchain_state = BlockchainState {
+    let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
-        archival_state: Some(archival_state),
-    };
+        archival_state,
+    });
     let mempool = Mempool::new(ByteSize::gb(1));
     let cli_args: cli_args::Args = Default::default();
 
@@ -319,14 +319,12 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 
 /// Helper function for tests to update state with a new block
 pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
-    let mut light_state_locked = state.chain.light_state.inner.lock_guard_mut().await;
+    let mut light_state_locked = state.chain.light_state().inner.lock_guard_mut().await;
 
     let previous_pow_family = light_state_locked.header.proof_of_work_family;
     state
         .chain
-        .archival_state
-        .as_ref()
-        .unwrap()
+        .archival_state()
         .write_block(Box::new(new_block.clone()), Some(previous_pow_family))
         .await?;
     if previous_pow_family < new_block.header.proof_of_work_family {

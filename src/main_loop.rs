@@ -360,7 +360,7 @@ impl MainLoopHandler {
                 let our_block_tip_header: BlockHeader = self
                     .global_state
                     .chain
-                    .light_state
+                    .light_state()
                     .header_clone() // todo: avoid this clone
                     .await;
                 if enter_sync_mode(
@@ -391,7 +391,7 @@ impl MainLoopHandler {
                 let tip_header: BlockHeader = self
                     .global_state
                     .chain
-                    .light_state
+                    .light_state()
                     .header_clone() // todo: avoid this clone
                     .await;
 
@@ -427,7 +427,7 @@ impl MainLoopHandler {
                 );
 
                 if pt2m_transaction.confirmable_for_block
-                    != self.global_state.chain.light_state.hash().await
+                    != self.global_state.chain.light_state().hash().await
                 {
                     warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                     return Ok(());
@@ -474,7 +474,7 @@ impl MainLoopHandler {
         let (tip_hash, tip_proof_of_work_family) = self
             .global_state
             .chain
-            .light_state
+            .light_state()
             .inner
             .lock(|b| (b.hash, b.header.proof_of_work_family))
             .await;
@@ -553,9 +553,7 @@ impl MainLoopHandler {
             // update the mutator set with the UTXOs from this block
             self.global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .update_mutator_set(&new_block)
                 .await?;
 
@@ -571,9 +569,7 @@ impl MainLoopHandler {
 
             self.global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(Box::new(new_block), Some(tip_proof_of_work_family))
                 .await?;
         }
@@ -585,7 +581,7 @@ impl MainLoopHandler {
         //       may see inconsistencies, is that ok for this?
         self.global_state
             .chain
-            .light_state
+            .light_state()
             .set_block(*last_block.clone())
             .await;
 
@@ -795,7 +791,7 @@ impl MainLoopHandler {
         let (current_block_hash, current_block_height, current_block_proof_of_work_family) = self
             .global_state
             .chain
-            .light_state
+            .light_state()
             .inner
             .lock(|b| (b.hash, b.header.height, b.header.proof_of_work_family))
             .await;
@@ -834,9 +830,7 @@ impl MainLoopHandler {
         let most_canonical_digests = self
             .global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_ancestor_block_digests(tip_digest, STANDARD_BATCH_BLOCK_LOOKBEHIND_SIZE)
             .await;
 
@@ -1076,7 +1070,7 @@ impl MainLoopHandler {
         }
 
         // is it necessary?
-        let current_tip_digest = self.global_state.chain.light_state.hash().await;
+        let current_tip_digest = self.global_state.chain.light_state().hash().await;
         if self
             .global_state
             .wallet_state
@@ -1088,7 +1082,7 @@ impl MainLoopHandler {
         }
 
         // do we have blocks?
-        let we_have_blocks = self.global_state.chain.archival_state.is_some();
+        let we_have_blocks = self.global_state.chain.is_archival_node();
         if we_have_blocks {
             return self
                 .global_state
@@ -1165,9 +1159,7 @@ impl MainLoopHandler {
         let hash = self
             .global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await
             .hash;
@@ -1175,9 +1167,7 @@ impl MainLoopHandler {
         // persist archival_mutator_set, with sync label
         self.global_state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .archival_mutator_set
             .inner
             .lock_mut(|ams| {

@@ -886,9 +886,7 @@ mod archival_state_tests {
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis_receiver_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .genesis_block,
             None,
             own_receiving_address,
@@ -898,9 +896,7 @@ mod archival_state_tests {
             add_block(&genesis_receiver_global_state, mock_block_1.clone()).await?;
             genesis_receiver_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .update_mutator_set(&mock_block_1)
                 .await
                 .unwrap();
@@ -912,9 +908,7 @@ mod archival_state_tests {
 
             let ams_lock = genesis_receiver_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .archival_mutator_set
                 .inner
                 .lock_guard()
@@ -949,18 +943,14 @@ mod archival_state_tests {
             add_block(&genesis_receiver_global_state, mock_block_2.clone()).await?;
             genesis_receiver_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .update_mutator_set(&mock_block_2)
                 .await
                 .unwrap();
 
             let ams_lock = genesis_receiver_global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .archival_mutator_set
                 .inner
                 .lock_guard()
@@ -1155,13 +1145,7 @@ mod archival_state_tests {
         let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
         let global_state = get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
 
-        let genesis_block: Block = *global_state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .genesis_block
-            .to_owned();
+        let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
         let mut previous_block = genesis_block.clone();
 
         // this variable might come in handy for reporting purposes
@@ -1211,22 +1195,23 @@ mod archival_state_tests {
             {
                 global_state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .write_block(
                         Box::new(next_block.clone()),
                         Some(next_block.header.proof_of_work_family),
                     )
                     .await?;
-                *global_state.chain.light_state.inner.lock_guard_mut().await = next_block.clone();
+                *global_state
+                    .chain
+                    .light_state()
+                    .inner
+                    .lock_guard_mut()
+                    .await = next_block.clone();
 
                 // 2. Update mutator set with produced block
                 global_state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .update_mutator_set(&next_block)
                     .await
                     .unwrap();
@@ -1257,9 +1242,7 @@ mod archival_state_tests {
                 make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address);
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .write_block(
                     Box::new(mock_block_1b.clone()),
                     Some(mock_block_1b.header.proof_of_work_family),
@@ -1269,9 +1252,7 @@ mod archival_state_tests {
             // 4. Update mutator set with that and verify rollback
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .update_mutator_set(&mock_block_1b)
                 .await
                 .unwrap();
@@ -1284,9 +1265,7 @@ mod archival_state_tests {
         assert!(
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .archival_mutator_set
                 .inner
                 .lock_guard()
@@ -1303,9 +1282,7 @@ mod archival_state_tests {
             2,
             global_state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .archival_mutator_set
                 .inner
                 .lock_guard()
@@ -1455,9 +1432,7 @@ mod archival_state_tests {
             add_block(state, block_1.clone()).await.unwrap();
             state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .update_mutator_set(&block_1)
                 .await
                 .unwrap();
@@ -1623,9 +1598,7 @@ mod archival_state_tests {
             add_block(state, block_2.clone()).await.unwrap();
             state
                 .chain
-                .archival_state
-                .as_ref()
-                .unwrap()
+                .archival_state()
                 .update_mutator_set(&block_2)
                 .await
                 .unwrap();
@@ -1711,9 +1684,7 @@ mod archival_state_tests {
                 block_2.body.next_mutator_set_accumulator,
                 state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .archival_mutator_set
                     .inner
                     .lock_guard()
@@ -1724,13 +1695,7 @@ mod archival_state_tests {
             );
             assert_eq!(
                 block_2,
-                state
-                    .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
-                    .get_latest_block()
-                    .await
+                state.chain.archival_state().get_latest_block().await
             );
         }
     }

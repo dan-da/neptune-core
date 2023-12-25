@@ -193,9 +193,7 @@ impl PeerLoopHandler {
         let parent_block = self
             .state
             .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
+            .archival_state()
             .get_block(parent_digest)
             .await?;
         debug!(
@@ -389,7 +387,7 @@ impl PeerLoopHandler {
                 let incoming_block_is_heavier = self
                     .state
                     .chain
-                    .light_state
+                    .light_state()
                     .header_partial()
                     .await
                     .proof_of_work_family
@@ -418,15 +416,13 @@ impl PeerLoopHandler {
                 // Find the block that the peer is requesting to start from
                 let mut peers_most_canonical_block: Option<Block> = None;
                 // todo: avoid cloning
-                let tip_header = self.state.chain.light_state.header_clone().await;
+                let tip_header = self.state.chain.light_state().header_clone().await;
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
                         .state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .get_block(digest)
                         .await
                         .expect("Lookup must work");
@@ -437,9 +433,7 @@ impl PeerLoopHandler {
                         if self
                             .state
                             .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
+                            .archival_state()
                             .block_belongs_to_canonical_chain(&block_candidate.header, &tip_header)
                             .await
                         {
@@ -473,9 +467,7 @@ impl PeerLoopHandler {
                     let children = self
                         .state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .get_children_blocks(&parent_block_header)
                         .await;
                     if children.is_empty() {
@@ -489,9 +481,7 @@ impl PeerLoopHandler {
                             if self
                                 .state
                                 .chain
-                                .archival_state
-                                .as_ref()
-                                .unwrap()
+                                .archival_state()
                                 .block_belongs_to_canonical_chain(&child, &tip_header)
                                 .await
                             {
@@ -505,9 +495,7 @@ impl PeerLoopHandler {
                     let canonical_child: Block = self
                         .state
                         .chain
-                        .archival_state
-                        .as_ref()
-                        .unwrap()
+                        .archival_state()
                         .get_block(Hash::hash(&header_of_canonical_child))
                         .await?
                         .unwrap();
@@ -553,9 +541,7 @@ impl PeerLoopHandler {
                 let most_canonical_own_block_match: Option<Block> = self
                     .state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(first_blocks_parent_digest)
                     .await
                     .expect("Block lookup must succeed");
@@ -585,7 +571,7 @@ impl PeerLoopHandler {
                 debug!("Got BlockNotificationRequest");
 
                 // todo: can we avoid this clone?
-                let block_header = self.state.chain.light_state.header_clone().await;
+                let block_header = self.state.chain.light_state().header_clone().await;
 
                 peer.send(PeerMessage::BlockNotification((&block_header).into()))
                     .await?;
@@ -602,7 +588,7 @@ impl PeerLoopHandler {
                     let block_is_new = self
                         .state
                         .chain
-                        .light_state
+                        .light_state()
                         .header_partial()
                         .await
                         .proof_of_work_family
@@ -634,9 +620,7 @@ impl PeerLoopHandler {
                 match self
                     .state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(block_digest)
                     .await?
                 {
@@ -657,9 +641,7 @@ impl PeerLoopHandler {
                 let block_headers: Vec<BlockHeader> = self
                     .state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .block_height_to_block_headers(block_height)
                     .await;
                 debug!("Found {} blocks", block_headers.len());
@@ -675,14 +657,12 @@ impl PeerLoopHandler {
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
                     // todo: can we avoid this clone?
-                    let tip_header = self.state.chain.light_state.header_clone().await;
+                    let tip_header = self.state.chain.light_state().header_clone().await;
                     for block_header in block_headers {
                         if self
                             .state
                             .chain
-                            .archival_state
-                            .as_ref()
-                            .unwrap()
+                            .archival_state()
                             .block_belongs_to_canonical_chain(&block_header, &tip_header)
                             .await
                         {
@@ -694,9 +674,7 @@ impl PeerLoopHandler {
                 let canonical_chain_block: Block = self
                     .state
                     .chain
-                    .archival_state
-                    .as_ref()
-                    .unwrap()
+                    .archival_state()
                     .get_block(Hash::hash(&canonical_chain_block_header))
                     .await?
                     .unwrap();
@@ -744,7 +722,7 @@ impl PeerLoopHandler {
                 let confirmable = self
                     .state
                     .chain
-                    .light_state
+                    .light_state()
                     .inner
                     .lock(|b| {
                         transaction.is_confirmable_relative_to(&b.body.next_mutator_set_accumulator)
@@ -790,7 +768,7 @@ impl PeerLoopHandler {
                 // Otherwise relay to main
                 let pt2m_transaction = PeerThreadToMainTransaction {
                     transaction: *transaction.to_owned(),
-                    confirmable_for_block: self.state.chain.light_state.hash().await,
+                    confirmable_for_block: self.state.chain.light_state().hash().await,
                 };
                 self.to_main_tx
                     .send(PeerThreadToMain::Transaction(Box::new(pt2m_transaction)))
@@ -1082,7 +1060,7 @@ impl PeerLoopHandler {
             > self
                 .state
                 .chain
-                .light_state
+                .light_state()
                 .header_partial()
                 .await
                 .proof_of_work_family
@@ -1211,8 +1189,7 @@ mod peer_loop_tests {
         let mut different_genesis_block: Block = state
             .clone()
             .chain
-            .archival_state
-            .unwrap()
+            .archival_state()
             .get_latest_block()
             .await;
         different_genesis_block.header.nonce[2].increment();
@@ -1281,13 +1258,7 @@ mod peer_loop_tests {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
 
         // Make a with hash above what the implied threshold from
         // `target_difficulty` requires
@@ -1370,13 +1341,7 @@ mod peer_loop_tests {
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
 
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1434,13 +1399,7 @@ mod peer_loop_tests {
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1519,13 +1478,7 @@ mod peer_loop_tests {
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1579,13 +1532,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
 
         let (mock_block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
@@ -1639,13 +1586,7 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -1717,13 +1658,7 @@ mod peer_loop_tests {
         };
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let own_recipient_address = state
             .wallet_state
             .wallet_secret
@@ -1795,13 +1730,7 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state, hsd) =
             get_test_genesis_setup(network, 0).await?;
         let peer_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -1877,13 +1806,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(network, 0).await?;
         let peer_address = get_dummy_socket_address(0);
 
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -1959,13 +1882,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
         let (block_2, _, _) =
@@ -2062,13 +1979,7 @@ mod peer_loop_tests {
             .into_values()
             .collect::<Vec<_>>();
 
-        let genesis_block: Block = state
-            .chain
-            .archival_state
-            .as_ref()
-            .unwrap()
-            .get_latest_block()
-            .await;
+        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
