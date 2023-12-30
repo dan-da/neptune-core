@@ -35,9 +35,17 @@ pub struct NetworkingState {
 impl NetworkingState {
     pub fn new(peer_map: PeerMap, peer_databases: PeerDatabases, syncing: bool) -> Self {
         Self {
-            peer_map: sync::AtomicRw::from(peer_map),
+            peer_map: sync::AtomicRw::from((
+                peer_map,
+                Some("NetworkingState::peer_map"),
+                Some(crate::LOG_LOCK_ACQUIRED_CB),
+            )),
             peer_databases,
-            syncing: sync::AtomicRw::from(syncing),
+            syncing: sync::AtomicRw::from((
+                syncing,
+                Some("NetworkingState::syncing"),
+                Some(crate::LOG_LOCK_ACQUIRED_CB),
+            )),
             instance_id: rand::random(),
         }
     }

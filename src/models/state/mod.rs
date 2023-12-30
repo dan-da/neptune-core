@@ -99,7 +99,11 @@ impl GlobalState {
             net,
             cli,
             mempool,
-            mining: sync::AtomicRw::from(mining),
+            mining: sync::AtomicRw::from((
+                mining,
+                Some("GlobalState::mining"),
+                Some(crate::LOG_LOCK_ACQUIRED_CB),
+            )),
         }
     }
 

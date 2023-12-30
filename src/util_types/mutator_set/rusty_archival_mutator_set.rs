@@ -52,10 +52,11 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSetInner<H> {
         let db_pointer = Arc::new(db);
         let reader = RamsReader { db: db_pointer };
         let reader_pointer = Arc::new(reader);
-        let mut schema = DbtSchema::<RamsReader> {
-            tables: twenty_first::sync::AtomicRw::from(vec![]),
-            reader: reader_pointer,
-        };
+        let mut schema = DbtSchema::<RamsReader>::new(
+            reader_pointer,
+            Some("RustyArchivalMutatorSet-Schema"),
+            Some(crate::LOG_LOCK_ACQUIRED_CB),
+        );
         let aocl_storage = schema.new_vec::<Digest>("aocl");
         let swbf_inactive_storage = schema.new_vec::<Digest>("swbfi");
         let chunks = schema.new_vec::<Chunk>("chunks");
@@ -98,7 +99,11 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
     pub fn connect(db: DB) -> RustyArchivalMutatorSet<H> {
         let inner = RustyArchivalMutatorSetInner::connect(db);
         Self {
-            inner: sync_tokio::AtomicRw::from(inner),
+            inner: sync_tokio::AtomicRw::from((
+                inner,
+                Some("RustyArchivalMutatorSet"),
+                Some(crate::LOG_LOCK_ACQUIRED_CB),
+            )),
         }
     }
 

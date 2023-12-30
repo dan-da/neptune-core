@@ -97,7 +97,11 @@ impl Mempool {
     pub fn new(max_total_size: ByteSize) -> Self {
         let mempool_internal = MempoolInternal::new(max_total_size);
         Mempool {
-            internal: sync::AtomicRw::from(mempool_internal),
+            internal: sync::AtomicRw::from((
+                mempool_internal,
+                Some("mempool"),
+                Some(crate::LOG_LOCK_ACQUIRED_CB),
+            )),
         }
     }
 

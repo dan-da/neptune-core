@@ -51,7 +51,6 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::info;
-use twenty_first::sync;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -123,14 +122,14 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
     let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size);
-    let state = GlobalState {
-        chain: blockchain_state,
-        cli: cli_args,
-        net: networking_state,
+    let state = GlobalState::new(
         wallet_state,
+        blockchain_state,
+        networking_state,
+        cli_args,
         mempool,
-        mining: sync::AtomicRw::from(false),
-    };
+        false,
+    );
     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
     info!(
         "Most known canonical block has height {}",
@@ -151,17 +150,19 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
             peer_thread_to_main_tx.clone();
         let own_handshake_data_clone = own_handshake_data.clone();
-        let peer_join_handle = tokio::spawn(async move {
-            call_peer_wrapper(
-                peer_address,
-                peer_state_var.clone(),
-                main_to_peer_broadcast_rx_clone,
-                peer_thread_to_main_tx_clone,
-                own_handshake_data_clone,
-                1, // All outgoing connections have distance 1
-            )
-            .await;
-        });
+        let peer_join_handle = tokio::task::Builder::new()
+            .name("call_peer_wrapper_3")
+            .spawn(async move {
+                call_peer_wrapper(
+                    peer_address,
+                    peer_state_var.clone(),
+                    main_to_peer_broadcast_rx_clone,
+                    peer_thread_to_main_tx_clone,
+                    own_handshake_data_clone,
+                    1, // All outgoing connections have distance 1
+                )
+                .await;
+            })?;
         thread_join_handles.push(peer_join_handle);
     }
     info!("Made outgoing connections to peers");
@@ -171,16 +172,18 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
     let state_clone_for_miner = state.clone();
     if state.cli.mine {
-        let miner_join_handle = tokio::spawn(async move {
-            mine_loop::mine(
-                main_to_miner_rx,
-                miner_to_main_tx,
-                latest_block,
-                state_clone_for_miner,
-            )
-            .await
-            .expect("Error in mining thread");
-        });
+        let miner_join_handle = tokio::task::Builder::new()
+            .name("miner")
+            .spawn(async move {
+                mine_loop::mine(
+                    main_to_miner_rx,
+                    miner_to_main_tx,
+                    latest_block,
+                    state_clone_for_miner,
+                )
+                .await
+                .expect("Error in mining thread");
+            })?;
         thread_join_handles.push(miner_join_handle);
         info!("Started mining thread");
     }
@@ -263,3 +266,40 @@ where
     let total_time = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9;
     (output, total_time)
 }
+
+// This is a callback fn passed to AtomicRw, AtomicMutex
+// and called when a lock is acquired.  This way
+// we can track which threads+tasks are acquiring
+// which locks for reads and/or mutations.
+pub(crate) fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
+    let tokio_id = match tokio::task::try_id() {
+        Some(id) => format!("{}", id),
+        None => "?".to_string(),
+    };
+
+    // workaround: parse thread_id debug output into a u64.
+    // (because ThreadId::as_u64() is unstable)
+    let thread_id_dbg: String = format!("{:?}", std::thread::current().id());
+    let nums_u8 = &thread_id_dbg
+        .chars()
+        .filter_map(|c| {
+            if c.is_ascii_digit() {
+                Some(c as u8)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<u8>>();
+    let nums = String::from_utf8_lossy(&nums_u8).to_string();
+
+    let thread_id = u64::from_str_radix(&nums, 10).unwrap();
+    println!(
+        "lock `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+        name.unwrap_or("?"),
+        if is_mut { "** write **" } else { "read" },
+        thread_id,
+        std::thread::current().name().unwrap_or("?"),
+        tokio_id,
+    );
+}
+const LOG_LOCK_ACQUIRED_CB: fn(is_mut: bool, name: Option<&str>) = log_lock_acquired;

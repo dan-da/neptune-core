@@ -333,7 +333,11 @@ pub async fn mine(
                 latest_block.header.difficulty,
             );
             state.mining.lock_mut(|m| *m = true);
-            Some(tokio::spawn(miner_task))
+            Some(
+                tokio::task::Builder::new()
+                    .name("mine_block")
+                    .spawn(miner_task)?,
+            )
         };
 
         // Await a message from either the worker thread or from the main loop

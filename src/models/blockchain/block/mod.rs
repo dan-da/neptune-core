@@ -464,7 +464,11 @@ impl AtomicBlock {
     #[inline]
     pub fn new(block: Block) -> Self {
         Self {
-            inner: sync_tokio::AtomicRw::from(block),
+            inner: sync_tokio::AtomicRw::<Block>::from((
+                block,
+                Some("Block"),
+                Some(crate::LOG_LOCK_ACQUIRED_CB),
+            )),
         }
     }
 

@@ -328,7 +328,11 @@ impl UtxoNotificationPool {
     pub fn new(max_total_size: ByteSize, max_notification_count_per_peer: usize) -> Self {
         let inner =
             UtxoNotificationPoolInternal::new(max_total_size, max_notification_count_per_peer);
-        Self(sync::AtomicRw::from(inner))
+        Self(sync::AtomicRw::from((
+            inner,
+            Some("UtxoNotificationPool"),
+            Some(crate::LOG_LOCK_ACQUIRED_CB),
+        )))
     }
 
     pub fn pop_min(&self) -> Option<(ExpectedUtxo, Credibility)> {

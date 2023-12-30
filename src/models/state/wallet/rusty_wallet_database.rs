@@ -9,7 +9,6 @@ use twenty_first::{
     storage::storage_schema::{
         traits::*, DbtSchema, DbtSingleton, DbtVec, RustyKey, RustyReader, WriteOperation,
     },
-    sync::AtomicRw,
 };
 
 use super::monitored_utxo::MonitoredUtxo;
@@ -31,10 +30,11 @@ pub(in super::super) struct RustyWalletDatabaseInner {
 
 impl RustyWalletDatabaseInner {
     pub fn connect(db: DB) -> Self {
-        let mut schema = DbtSchema::<RustyReader> {
-            tables: AtomicRw::from(vec![]),
-            reader: Arc::new(RustyReader { db }),
-        };
+        let mut schema = DbtSchema::<RustyReader>::new(
+            Arc::new(RustyReader { db }),
+            Some("RustyWalletDatabase-Schema"),
+            Some(crate::LOG_LOCK_ACQUIRED_CB),
+        );
 
         let monitored_utxos_storage = schema.new_vec::<MonitoredUtxo>("monitored_utxos");
         let sync_label_storage = schema.new_singleton::<Digest>(RustyKey("sync_label".into()));

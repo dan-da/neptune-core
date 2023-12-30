@@ -100,13 +100,15 @@ impl ArchivalState {
 
         let path = ms_db_dir_path.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
-            let mut options = twenty_first::leveldb::options::Options::new();
-            options.create_if_missing = true;
+        let result = tokio::task::Builder::new()
+            .name("sigterm_handler")
+            .spawn_blocking(move || {
+                let mut options = twenty_first::leveldb::options::Options::new();
+                options.create_if_missing = true;
 
-            DB::open(&path, &options)
-        })
-        .await;
+                DB::open(&path, &options)
+            })?
+            .await;
 
         let db = match result {
             Ok(db) => db?,
