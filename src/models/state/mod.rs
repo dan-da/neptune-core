@@ -102,7 +102,7 @@ impl GlobalState {
             mining: sync::AtomicRw::from((
                 mining,
                 Some("GlobalState::mining"),
-                Some(crate::LOG_LOCK_ACQUIRED_CB),
+                Some(crate::LOG_LOCK_EVENT_CB),
             )),
         }
     }

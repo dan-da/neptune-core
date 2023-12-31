@@ -100,7 +100,7 @@ impl Mempool {
             internal: sync::AtomicRw::from((
                 mempool_internal,
                 Some("mempool"),
-                Some(crate::LOG_LOCK_ACQUIRED_CB),
+                Some(crate::LOG_LOCK_EVENT_CB),
             )),
         }
     }

@@ -51,6 +51,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::info;
+use twenty_first::sync::{LockCallbackFn, LockEvent};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
@@ -271,7 +272,7 @@ where
 // and called when a lock is acquired.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
-pub(crate) fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
+pub(crate) fn log_lock_event(lock_event: LockEvent) {
     let tokio_id = match tokio::task::try_id() {
         Some(id) => format!("{}", id),
         None => "?".to_string(),
@@ -290,9 +291,59 @@ pub(crate) fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
             }
         })
         .collect::<Vec<u8>>();
-    let nums = String::from_utf8_lossy(&nums_u8).to_string();
+    let nums = String::from_utf8_lossy(nums_u8).to_string();
 
-    let thread_id = u64::from_str_radix(&nums, 10).unwrap();
+    let thread_id = nums.parse::<u64>().unwrap();
+
+    match lock_event {
+        LockEvent::Acquire{info, acquired} =>
+            println!(
+                "lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquired,
+                thread_id,
+                std::thread::current().name().unwrap_or("?"),
+                tokio_id,
+            ),
+        LockEvent::Release{info, acquired} =>
+            println!(
+                "lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquired,
+                thread_id,
+                std::thread::current().name().unwrap_or("?"),
+                tokio_id,
+            )
+    }
+}
+const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
+
+// This is a callback fn passed to AtomicRw, AtomicMutex
+// and called when a lock is acquired.  This way
+// we can track which threads+tasks are acquiring
+// which locks for reads and/or mutations.
+pub(crate) fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
+    let tokio_id = match tokio::task::try_id() {
+        Some(id) => format!("{}", id),
+        None => "?".to_string(),
+    };
+    // (because ThreadId::as_u64() is unstable)
+    let thread_id_dbg: String = format!("{:?}", std::thread::current().id());
+    let nums_u8 = &thread_id_dbg
+        .chars()
+        .filter_map(|c| {
+            if c.is_ascii_digit() {
+                Some(c as u8)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<u8>>();
+    let nums = String::from_utf8_lossy(nums_u8).to_string();
+
+    let thread_id = nums.parse::<u64>().unwrap();
     println!(
         "lock `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
         name.unwrap_or("?"),

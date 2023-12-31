@@ -55,7 +55,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSetInner<H> {
         let mut schema = DbtSchema::<RamsReader>::new(
             reader_pointer,
             Some("RustyArchivalMutatorSet-Schema"),
-            Some(crate::LOG_LOCK_ACQUIRED_CB),
+            Some(crate::LOG_LOCK_EVENT_CB),
         );
         let aocl_storage = schema.new_vec::<Digest>("aocl");
         let swbf_inactive_storage = schema.new_vec::<Digest>("swbfi");

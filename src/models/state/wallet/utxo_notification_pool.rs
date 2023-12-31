@@ -331,7 +331,7 @@ impl UtxoNotificationPool {
         Self(sync::AtomicRw::from((
             inner,
             Some("UtxoNotificationPool"),
-            Some(crate::LOG_LOCK_ACQUIRED_CB),
+            Some(crate::LOG_LOCK_EVENT_CB),
         )))
     }
 

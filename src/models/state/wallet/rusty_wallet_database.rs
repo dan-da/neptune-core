@@ -33,7 +33,7 @@ impl RustyWalletDatabaseInner {
         let mut schema = DbtSchema::<RustyReader>::new(
             Arc::new(RustyReader { db }),
             Some("RustyWalletDatabase-Schema"),
-            Some(crate::LOG_LOCK_ACQUIRED_CB),
+            Some(crate::LOG_LOCK_EVENT_CB),
         );
 
         let monitored_utxos_storage = schema.new_vec::<MonitoredUtxo>("monitored_utxos");
