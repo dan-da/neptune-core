@@ -3003,7 +3003,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 [[package]]
 name = "twenty-first"
 version = "0.34.0"
-source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=f050d16816ede45bad78d73a3e435e5f8fbe5d20#f050d16816ede45bad78d73a3e435e5f8fbe5d20"
+source = "git+https://github.com/Neptune-Crypto/twenty-first.git?rev=01c8a6b075c6e6ed4e957c864a58a195bf2f0de1#01c8a6b075c6e6ed4e957c864a58a195bf2f0de1"
 dependencies = [
  "anyhow",
  "arbitrary",

@@ -102,7 +102,7 @@ impl<H: AlgebraicHasher + BFieldCodec> RustyArchivalMutatorSet<H> {
             inner: sync_tokio::AtomicRw::from((
                 inner,
                 Some("RustyArchivalMutatorSet"),
-                Some(crate::LOG_LOCK_ACQUIRED_CB),
+                Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
             )),
         }
     }

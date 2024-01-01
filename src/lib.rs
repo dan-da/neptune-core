@@ -52,9 +52,11 @@ use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::info;
 use twenty_first::sync::{LockCallbackFn, LockEvent};
+use crate::util_types::sync::tokio as sync_tokio;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
+
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -308,7 +310,7 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
             ),
         LockEvent::Release{info, acquired} =>
             println!(
-                "lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+                "lock `{}` of type `{}` released for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
                 info.name().unwrap_or("?"),
                 info.lock_type(),
                 acquired,
@@ -320,15 +322,18 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
 }
 const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 
+
 // This is a callback fn passed to AtomicRw, AtomicMutex
 // and called when a lock is acquired.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
-pub(crate) fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
+pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
     let tokio_id = match tokio::task::try_id() {
         Some(id) => format!("{}", id),
         None => "?".to_string(),
     };
+
+    // workaround: parse thread_id debug output into a u64.
     // (because ThreadId::as_u64() is unstable)
     let thread_id_dbg: String = format!("{:?}", std::thread::current().id());
     let nums_u8 = &thread_id_dbg
@@ -344,13 +349,30 @@ pub(crate) fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
     let nums = String::from_utf8_lossy(nums_u8).to_string();
 
     let thread_id = nums.parse::<u64>().unwrap();
-    println!(
-        "lock `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
-        name.unwrap_or("?"),
-        if is_mut { "** write **" } else { "read" },
-        thread_id,
-        std::thread::current().name().unwrap_or("?"),
-        tokio_id,
-    );
+
+    match lock_event {
+        sync_tokio::LockEvent::Acquire{info, acquired} =>
+            println!(
+                "tokio lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquired,
+                thread_id,
+                std::thread::current().name().unwrap_or("?"),
+                tokio_id,
+            ),
+        sync_tokio::LockEvent::Release{info, acquired} =>
+            println!(
+                "tokio lock `{}` of type `{}` released for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+                info.name().unwrap_or("?"),
+                info.lock_type(),
+                acquired,
+                thread_id,
+                std::thread::current().name().unwrap_or("?"),
+                tokio_id,
+            )
+    }
 }
-const LOG_LOCK_ACQUIRED_CB: fn(is_mut: bool, name: Option<&str>) = log_lock_acquired;
+const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
+
+

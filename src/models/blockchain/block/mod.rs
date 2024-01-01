@@ -467,7 +467,7 @@ impl AtomicBlock {
             inner: sync_tokio::AtomicRw::<Block>::from((
                 block,
                 Some("Block"),
-                Some(crate::LOG_LOCK_ACQUIRED_CB),
+                Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
             )),
         }
     }

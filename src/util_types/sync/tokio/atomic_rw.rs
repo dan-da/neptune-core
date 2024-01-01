@@ -1,8 +1,8 @@
 use futures::future::BoxFuture;
 use std::sync::Arc;
 use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-
-type AcquiredCallbackFn = fn(is_mut: bool, name: Option<&str>);
+use super::{LockEvent, LockType, LockCallbackFn, LockCallbackInfo, LockAcquisition};
+use std::ops::{Deref, DerefMut};
 
 /// An `Arc<RwLock<T>>` wrapper to make data thread-safe and easy to work with.
 ///
@@ -53,43 +53,49 @@ type AcquiredCallbackFn = fn(is_mut: bool, name: Option<&str>);
 /// ```
 ///
 /// results in:
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct AtomicRw<T> {
     inner: Arc<RwLock<T>>,
-    name: Option<String>,
-    acquired_callback: Option<AcquiredCallbackFn>,
+    lock_callback_info: LockCallbackInfo,
 }
+
+impl<T: Default> Default for AtomicRw<T> {
+    fn default() -> Self {
+        Self {
+            inner: Default::default(),
+            lock_callback_info: LockCallbackInfo::new(LockType::RwLock, None, None),
+        }
+    }
+}
+
 impl<T> From<T> for AtomicRw<T> {
     #[inline]
     fn from(t: T) -> Self {
         Self {
             inner: Arc::new(RwLock::new(t)),
-            name: None,
-            acquired_callback: None,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
-impl<T> From<(T, Option<String>, Option<AcquiredCallbackFn>)> for AtomicRw<T> {
+impl<T> From<(T, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from an optional name and an optional callback function, which
     /// is called when a lock is acquired.
     #[inline]
-    fn from(v: (T, Option<String>, Option<AcquiredCallbackFn>)) -> Self {
+    fn from(v: (T, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(RwLock::new(v.0)),
-            name: v.1,
-            acquired_callback: v.2,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
         }
     }
 }
-impl<T> From<(T, Option<&str>, Option<AcquiredCallbackFn>)> for AtomicRw<T> {
+impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from a name ref and an optional callback function, which
     /// is called when a lock is acquired.
     #[inline]
-    fn from(v: (T, Option<&str>, Option<AcquiredCallbackFn>)) -> Self {
+    fn from(v: (T, Option<&str>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(RwLock::new(v.0)),
-            name: v.1.map(|s| s.to_owned()),
-            acquired_callback: v.2,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1.map(|s| s.to_owned()), v.2),
         }
     }
 }
@@ -97,9 +103,8 @@ impl<T> From<(T, Option<&str>, Option<AcquiredCallbackFn>)> for AtomicRw<T> {
 impl<T> Clone for AtomicRw<T> {
     fn clone(&self) -> Self {
         Self {
-            name: self.name.clone(),
             inner: self.inner.clone(),
-            acquired_callback: None,
+            lock_callback_info: self.lock_callback_info.clone(),
         }
     }
 }
@@ -108,22 +113,20 @@ impl<T> From<RwLock<T>> for AtomicRw<T> {
     #[inline]
     fn from(t: RwLock<T>) -> Self {
         Self {
-            name: None,
             inner: Arc::new(t),
-            acquired_callback: None,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
-impl<T> From<(RwLock<T>, Option<String>, Option<AcquiredCallbackFn>)> for AtomicRw<T> {
+impl<T> From<(RwLock<T>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from an RwLock<T> plus an optional name
     /// and an optional callback function, which is called
     /// when a lock is acquired.
     #[inline]
-    fn from(v: (RwLock<T>, Option<String>, Option<AcquiredCallbackFn>)) -> Self {
+    fn from(v: (RwLock<T>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(v.0),
-            name: v.1,
-            acquired_callback: v.2,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
         }
     }
 }
@@ -139,22 +142,20 @@ impl<T> From<Arc<RwLock<T>>> for AtomicRw<T> {
     #[inline]
     fn from(t: Arc<RwLock<T>>) -> Self {
         Self {
-            name: None,
             inner: t,
-            acquired_callback: None,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, None, None),
         }
     }
 }
-impl<T> From<(Arc<RwLock<T>>, Option<String>, Option<AcquiredCallbackFn>)> for AtomicRw<T> {
+impl<T> From<(Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from an `Arc<RwLock<T>>` plus an optional name and
     /// an optional callback function, which is called when a lock
     /// is acquired.
     #[inline]
-    fn from(v: (Arc<RwLock<T>>, Option<String>, Option<AcquiredCallbackFn>)) -> Self {
+    fn from(v: (Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: v.0,
-            name: v.1,
-            acquired_callback: v.2,
+            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1, v.2),
         }
     }
 }
@@ -182,12 +183,9 @@ impl<T> AtomicRw<T> {
     /// let year = atomic_car.lock_guard().await.year;
     /// # })
     /// ```
-    pub async fn lock_guard(&self) -> RwLockReadGuard<T> {
+    pub async fn lock_guard(&self) -> AtomicRwReadGuard<T> {
         let guard = self.inner.read().await;
-        if let Some(cb) = self.acquired_callback {
-            cb(false, self.name.as_deref());
-        }
-        guard
+        AtomicRwReadGuard::new(guard, &self.lock_callback_info)
     }
 
     /// Acquire write lock and return an `AtomicRwWriteGuard`
@@ -203,12 +201,9 @@ impl<T> AtomicRw<T> {
     /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
-    pub async fn lock_guard_mut(&self) -> RwLockWriteGuard<T> {
+    pub async fn lock_guard_mut(&self) -> AtomicRwWriteGuard<T> {
         let guard = self.inner.write().await;
-        if let Some(cb) = self.acquired_callback {
-            cb(true, self.name.as_deref());
-        }
-        guard
+        AtomicRwWriteGuard::new(guard, &self.lock_callback_info)
     }
 
     /// Immutably access the data of type `T` in a closure and possibly return a result of type `R`
@@ -229,11 +224,9 @@ impl<T> AtomicRw<T> {
     where
         F: FnOnce(&T) -> R,
     {
-        let lock = self.inner.read().await;
-        if let Some(cb) = self.acquired_callback {
-            cb(false, self.name.as_deref());
-        }
-        f(&lock)
+        let inner_guard = self.inner.read().await;
+        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info);
+        f(&guard)
     }
 
     /// Mutably access the data of type `T` in a closure and possibly return a result of type `R`
@@ -254,11 +247,9 @@ impl<T> AtomicRw<T> {
     where
         F: FnOnce(&mut T) -> R,
     {
-        let mut lock = self.inner.write().await;
-        if let Some(cb) = self.acquired_callback {
-            cb(true, self.name.as_deref());
-        }
-        f(&mut lock)
+        let inner_guard = self.inner.write().await;
+        let mut guard = AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info);
+        f(&mut guard)
     }
 
     /// Immutably access the data of type `T` in an async closure and possibly return a result of type `R`
@@ -281,11 +272,9 @@ impl<T> AtomicRw<T> {
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
-        let lock = self.inner.read().await;
-        if let Some(cb) = self.acquired_callback {
-            cb(false, self.name.as_deref());
-        }
-        f(&lock).await
+        let inner_guard = self.inner.read().await;
+        let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info);
+        f(&guard).await
     }
 
     /// Mutably access the data of type `T` in an async closure and possibly return a result of type `R`
@@ -308,11 +297,99 @@ impl<T> AtomicRw<T> {
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
     pub async fn lock_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
-        let mut lock = self.inner.write().await;
-        if let Some(cb) = self.acquired_callback {
-            cb(true, self.name.as_deref());
+        let inner_guard = self.inner.write().await;
+        let mut guard = AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info);
+        f(&mut guard).await
+    }
+}
+
+/// A wrapper for [RwLockReadGuard](tokio::sync::RwLockReadGuard) that
+/// can optionally call a callback to notify when the
+/// lock is acquired or released.
+pub struct AtomicRwReadGuard<'a, T> {
+    guard: RwLockReadGuard<'a, T>,
+    lock_callback_info: &'a LockCallbackInfo,
+}
+
+impl<'a, T> AtomicRwReadGuard<'a, T> {
+    fn new(guard: RwLockReadGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
+        if let Some(cb) = lock_callback_info.lock_callback_fn {
+            cb(LockEvent::Acquire {
+                info: lock_callback_info.lock_info_owned.as_lock_info(),
+                acquired: LockAcquisition::Read,
+            });
         }
-        f(&mut lock).await
+        Self {
+            guard,
+            lock_callback_info,
+        }
+    }
+}
+
+impl<'a, T> Drop for AtomicRwReadGuard<'a, T> {
+    fn drop(&mut self) {
+        let lock_callback_info = self.lock_callback_info;
+        if let Some(cb) = lock_callback_info.lock_callback_fn {
+            cb(LockEvent::Release {
+                info: lock_callback_info.lock_info_owned.as_lock_info(),
+                acquired: LockAcquisition::Read,
+            });
+        }
+    }
+}
+
+impl<'a, T> Deref for AtomicRwReadGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &(*self.guard)
+    }
+}
+
+/// A wrapper for [RwLockWriteGuard](tokio::sync::RwLockWriteGuard) that
+/// can optionally call a callback to notify when the
+/// lock is acquired or released.
+pub struct AtomicRwWriteGuard<'a, T> {
+    guard: RwLockWriteGuard<'a, T>,
+    lock_callback_info: &'a LockCallbackInfo,
+}
+
+impl<'a, T> AtomicRwWriteGuard<'a, T> {
+    fn new(guard: RwLockWriteGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
+        if let Some(cb) = lock_callback_info.lock_callback_fn {
+            cb(LockEvent::Acquire {
+                info: lock_callback_info.lock_info_owned.as_lock_info(),
+                acquired: LockAcquisition::Write,
+            });
+        }
+        Self {
+            guard,
+            lock_callback_info,
+        }
+    }
+}
+
+impl<'a, T> Drop for AtomicRwWriteGuard<'a, T> {
+    fn drop(&mut self) {
+        let lock_callback_info = self.lock_callback_info;
+        if let Some(cb) = lock_callback_info.lock_callback_fn {
+            cb(LockEvent::Release {
+                info: lock_callback_info.lock_info_owned.as_lock_info(),
+                acquired: LockAcquisition::Write,
+            });
+        }
+    }
+}
+
+impl<'a, T> Deref for AtomicRwWriteGuard<'a, T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &*self.guard
+    }
+}
+
+impl<'a, T> DerefMut for AtomicRwWriteGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.guard
     }
 }
 
