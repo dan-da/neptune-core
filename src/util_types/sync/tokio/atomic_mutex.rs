@@ -1,8 +1,8 @@
+use super::{LockAcquisition, LockCallbackFn, LockCallbackInfo, LockEvent, LockType};
 use futures::future::BoxFuture;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use tokio::sync::{Mutex, MutexGuard};
-use super::{LockEvent, LockType, LockCallbackFn, LockCallbackInfo, LockAcquisition};
-use std::ops::{Deref, DerefMut};
 
 /// An `Arc<Mutex<T>>` wrapper to make data thread-safe and easy to work with.
 ///
@@ -96,7 +96,11 @@ impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicMutex<T> {
     fn from(v: (T, Option<&str>, Option<LockCallbackFn>)) -> Self {
         Self {
             inner: Arc::new(Mutex::new(v.0)),
-            lock_callback_info: LockCallbackInfo::new(LockType::Mutex, v.1.map(|s| s.to_owned()), v.2),
+            lock_callback_info: LockCallbackInfo::new(
+                LockType::Mutex,
+                v.1.map(|s| s.to_owned()),
+                v.2,
+            ),
         }
     }
 }
@@ -342,16 +346,15 @@ impl<'a, T> Drop for AtomicMutexGuard<'a, T> {
 impl<'a, T> Deref for AtomicMutexGuard<'a, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        &*self.guard
+        &self.guard
     }
 }
 
 impl<'a, T> DerefMut for AtomicMutexGuard<'a, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.guard
+        &mut self.guard
     }
 }
-
 
 /*
 note: commenting until async-traits are supported in stable rust.

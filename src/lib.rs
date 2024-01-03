@@ -34,6 +34,7 @@ use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
 
+use crate::util_types::sync::tokio as sync_tokio;
 use futures::future;
 use futures::Future;
 use futures::StreamExt;
@@ -52,11 +53,9 @@ use tokio::time::Instant;
 use tokio_serde::formats::*;
 use tracing::info;
 use twenty_first::sync::{LockCallbackFn, LockEvent};
-use crate::util_types::sync::tokio as sync_tokio;
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
 use crate::models::peer::HandshakeData;
-
 
 /// Magic string to ensure other program is Neptune Core
 pub const MAGIC_STRING_REQUEST: &[u8] = b"EDE8991A9C599BE908A759B6BF3279CD";
@@ -322,7 +321,6 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
 }
 const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 
-
 // This is a callback fn passed to AtomicRw, AtomicMutex
 // and called when a lock is acquired.  This way
 // we can track which threads+tasks are acquiring
@@ -374,5 +372,3 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
     }
 }
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
-
-

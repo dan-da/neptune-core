@@ -5,16 +5,15 @@ use std::cmp::max;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
+use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
+use twenty_first::shared_math::digest::Digest;
+use twenty_first::sync;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use twenty_first::util_types::storage_schema::traits::*;
 use twenty_first::util_types::storage_vec::traits::*;
-
-use twenty_first::shared_math::b_field_element::BFieldElement;
-use twenty_first::shared_math::digest::Digest;
-use twenty_first::sync;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use self::blockchain_state::BlockchainState;
 use self::mempool::Mempool;
@@ -41,6 +40,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_trait::{commit, MutatorSet};
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use crate::util_types::sync::tokio as sync_tokio;
 use crate::{Hash, VERSION};
 
 pub mod archival_state;
@@ -525,11 +525,7 @@ impl GlobalState {
     ///  * acquires read lock for `archival_mutator_set`
     ///  * acquires read lock for `latest_block`
     pub(crate) async fn restore_monitored_utxos_from_recovery_data(&self) -> Result<()> {
-        // todo: refactor to use closure style locks, once wallet_state uses AtomicRw.
-
-        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-        // Obtain a mutex lock for entering this fn
+        // Obtain a (static) mutex lock for entering this fn
         // which performs read+write
         //
         // This lock serializes the read+write, so we guarantee
@@ -538,7 +534,18 @@ impl GlobalState {
         //
         // Yet we keep the write-lock section as short as possible
         // to maximize concurrency of any reader threads.
-        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
+            std::sync::OnceLock::new();
+        let atomic_update_section = ATOMIC_MUTEX
+            .get_or_init(|| {
+                sync_tokio::AtomicMutex::from((
+                    (),
+                    Some("restore_monitored_utxos_from_recovery_data"),
+                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+                ))
+            })
+            .lock_guard_mut()
+            .await;
 
         // note: RwLock read locks do not block eachother so we don't
         // really need to worry about a `canonical order`
@@ -678,8 +685,6 @@ impl GlobalState {
         &self,
         tip_hash: Digest,
     ) -> Result<()> {
-        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
         // Obtain a mutex lock for entering this fn
         // which performs read+write
         //
@@ -689,7 +694,18 @@ impl GlobalState {
         //
         // Yet we keep the write-lock section as short as possible
         // to maximize concurrency of any reader threads.
-        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
+            std::sync::OnceLock::new();
+        let atomic_update_section = ATOMIC_MUTEX
+            .get_or_init(|| {
+                sync_tokio::AtomicMutex::from((
+                    (),
+                    Some("resync_membership_proofs_from_stored_blocks"),
+                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+                ))
+            })
+            .lock_guard_mut()
+            .await;
 
         // loop over all monitored utxos
         let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;

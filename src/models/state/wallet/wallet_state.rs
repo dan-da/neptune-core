@@ -39,6 +39,7 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
+use crate::util_types::sync::tokio as sync_tokio;
 use crate::Hash;
 
 #[derive(Clone)]
@@ -367,9 +368,7 @@ impl WalletState {
     ///  * acquires `wallet_db` read lock and write lock.
     ///  * acquires `expected_utxos` read lock and write lock.
     pub async fn update_wallet_state_with_new_block(&self, block: &Block) -> Result<()> {
-        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-        // Obtain a mutex lock for entering this fn
+        // Obtain a (static) mutex lock for entering this fn
         // which performs read+write
         //
         // This lock serializes the read+write, so we guarantee
@@ -378,7 +377,18 @@ impl WalletState {
         //
         // Yet we keep the write-lock section as short as possible
         // to maximize concurrency of any reader threads.
-        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
+            std::sync::OnceLock::new();
+        let atomic_update_section = ATOMIC_MUTEX
+            .get_or_init(|| {
+                sync_tokio::AtomicMutex::from((
+                    (),
+                    Some("update_wallet_state_with_new_block"),
+                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+                ))
+            })
+            .lock_guard_mut()
+            .await;
 
         let transaction: Transaction = block.body.transaction.clone();
 

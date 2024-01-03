@@ -11,6 +11,7 @@ use crate::models::peer::{
 
 use crate::models::state::wallet::utxo_notification_pool::UtxoNotifier;
 use crate::models::state::GlobalState;
+use crate::util_types::sync::tokio as sync_tokio;
 use anyhow::Result;
 use itertools::Itertools;
 use rand::prelude::{IteratorRandom, SliceRandom};
@@ -1156,15 +1157,24 @@ impl MainLoopHandler {
     ///  * acquires write lock for `wallet_db`
     ///  * acquires write lock for `archival_mutator_set`
     async fn flush_databases(&self) -> Result<()> {
-        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-        // Obtain a mutex lock for entering this fn
+        // Obtain a (static) mutex lock for entering this fn
         // which performs read+write over multiple databases
         //
         // This lock serializes the read+write, so we guarantee
         // that each writer thread calling this fn is writing based
         // on the most recent state across DBs.
-        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
+            std::sync::OnceLock::new();
+        let atomic_update_section = ATOMIC_MUTEX
+            .get_or_init(|| {
+                sync_tokio::AtomicMutex::from((
+                    (),
+                    Some("flush_databases"),
+                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+                ))
+            })
+            .lock_guard_mut()
+            .await;
 
         // flush wallet databases
         self.global_state.wallet_state.wallet_db.persist().await;

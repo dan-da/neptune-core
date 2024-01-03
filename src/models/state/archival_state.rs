@@ -26,6 +26,7 @@ use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
+use crate::util_types::sync::tokio as sync_tokio;
 
 pub const BLOCK_INDEX_DB_NAME: &str = "block_index";
 pub const MUTATOR_SET_DIRECTORY_NAME: &str = "mutator_set";
@@ -596,9 +597,7 @@ impl ArchivalState {
     /// Locking:
     ///  * acquires read and write lock for `archival_mutator_set`
     pub async fn update_mutator_set(&self, new_block: &Block) -> Result<()> {
-        static ATOMIC_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-        // Obtain a mutex lock for entering this fn
+        // Obtain a (static) mutex lock for entering this fn
         // which performs read+write
         //
         // This lock serializes the read+write, so we guarantee
@@ -607,7 +606,18 @@ impl ArchivalState {
         //
         // Yet we keep the write-lock section as short as possible
         // to maximize concurrency of any reader threads.
-        let atomic_update_section = ATOMIC_MUTEX.lock().await;
+        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
+            std::sync::OnceLock::new();
+        let atomic_update_section = ATOMIC_MUTEX
+            .get_or_init(|| {
+                sync_tokio::AtomicMutex::from((
+                    (),
+                    Some("update_mutator_set"),
+                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+                ))
+            })
+            .lock_guard_mut()
+            .await;
 
         let (forwards, backwards) = {
             // This code block reads data with `archival_mutator_set` read lock.
