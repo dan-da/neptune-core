@@ -3,13 +3,12 @@ use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
 use std::cmp::max;
 use std::net::IpAddr;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
-use twenty_first::sync;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -78,6 +77,14 @@ impl GlobalStateLock {
         Self::from(global_state)
     }
 
+    pub async fn mining(&self) -> bool {
+        self.lock(|s| s.mining).await
+    }
+
+    pub async fn set_mining(&self, mining: bool) {
+        self.lock_mut(|s| s.mining = mining).await
+    }
+
     // pub async fn chain_light_state(&self) -> &crate::LightState {
     //     self.lock(|s| s.chain.light_state()).await
     // }
@@ -92,6 +99,12 @@ impl Deref for GlobalStateLock {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl DerefMut for GlobalStateLock {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
@@ -116,7 +129,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     // Only the mining thread should write to this, anyone can read.
-    pub mining: sync::AtomicRw<bool>,
+    pub mining: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -143,11 +156,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
-            mining: sync::AtomicRw::from((
-                mining,
-                Some("GlobalState::mining"),
-                Some(crate::LOG_LOCK_EVENT_CB),
-            )),
+            mining,
         }
     }
 
@@ -1061,7 +1070,7 @@ mod global_state_tests {
         )
         .await
         .unwrap();
-        add_block_to_light_state(&global_state.chain.light_state(), mock_block_1.clone())
+        add_block_to_light_state(global_state.chain.light_state(), mock_block_1.clone())
             .await
             .unwrap();
 

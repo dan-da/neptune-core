@@ -338,7 +338,7 @@ impl RPC for NeptuneRPCServer {
             // Return `None` if we fail to acquire the lock
             let peer_count = Some(state.net.peer_map.lock(|pm| pm.len()));
 
-            let is_mining = Some(state.mining.lock(|m| *m));
+            let is_mining = Some(state.mining);
             drop(state);
 
         let confirmations = self.confirmations_internal().await;
@@ -434,7 +434,7 @@ impl RPC for NeptuneRPCServer {
         .to_vec();
 
         // Pause miner if we are mining
-        let was_mining = executor::block_on(self.state.lock(|s| s.mining.lock(|m| *m)));
+        let was_mining = executor::block_on(self.state.mining());
         if was_mining {
             let _ =
                 executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));

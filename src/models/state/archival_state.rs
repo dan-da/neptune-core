@@ -1430,23 +1430,24 @@ mod archival_state_tests {
                 },
             },
         ];
-        let genesis_state = genesis_state_lock.lock_guard().await;
-        let tx_to_alice_and_bob = genesis_state
-            .create_transaction(
-                [
-                    receiver_data_for_alice.clone(),
-                    receiver_data_for_bob.clone(),
-                ]
-                .concat(),
-                fee,
-            )
-            .await
-            .unwrap();
-        drop(genesis_state);
+        {
+            let genesis_state = genesis_state_lock.lock_guard().await;
+            let tx_to_alice_and_bob = genesis_state
+                .create_transaction(
+                    [
+                        receiver_data_for_alice.clone(),
+                        receiver_data_for_bob.clone(),
+                    ]
+                    .concat(),
+                    fee,
+                )
+                .await
+                .unwrap();
 
-        // Absorb and verify validity
-        block_1.accumulate_transaction(tx_to_alice_and_bob);
-        assert!(block_1.is_valid(&genesis_block));
+            // Absorb and verify validity
+            block_1.accumulate_transaction(tx_to_alice_and_bob);
+            assert!(block_1.is_valid(&genesis_block));
+        }
 
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
