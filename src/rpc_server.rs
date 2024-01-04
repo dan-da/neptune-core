@@ -141,7 +141,6 @@ pub struct NeptuneRPCServer {
 
 impl NeptuneRPCServer {
     async fn confirmations_internal(&self) -> Option<BlockHeight> {
-
         let state = self.state.lock_guard().await;
 
         match executor::block_on(state.get_latest_balance_height()) {
@@ -149,7 +148,7 @@ impl NeptuneRPCServer {
                 let tip_block_header =
                     executor::block_on(state.chain.light_state().header_partial());
 
-                    assert!(tip_block_header.height >= latest_balance_height);
+                assert!(tip_block_header.height >= latest_balance_height);
 
                 // subtract latest balance height from chain tip.
                 // note: BlockHeight is u64 internally and BlockHeight::sub() returns i128.
@@ -179,8 +178,14 @@ impl RPC for NeptuneRPCServer {
     async fn block_height(self, _: context::Context) -> BlockHeight {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
         // let lookup_res = databases.latest_block_header.get(());
-        let latest_block_header =
-            executor::block_on(self.state.lock_guard().await.chain.light_state().header_clone());
+        let latest_block_header = executor::block_on(
+            self.state
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header_clone(),
+        );
         latest_block_header.height
     }
 
@@ -195,26 +200,24 @@ impl RPC for NeptuneRPCServer {
     async fn heads(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let state = self.state.lock_guard().await;
 
-        let latest_block_digest =
-            executor::block_on(state.chain.light_state().hash());
+        let latest_block_digest = executor::block_on(state.chain.light_state().hash());
 
-        let head_hashes = executor::block_on(
-            state
-                .chain
-                .archival_state()
-                .get_ancestor_block_digests(latest_block_digest, n),
-        );
-
-        head_hashes
+        state
+            .chain
+            .archival_state()
+            .get_ancestor_block_digests(latest_block_digest, n)
+            .await
     }
 
     async fn get_peer_info(self, _: context::Context) -> Vec<PeerInfo> {
-        let peer_map = self
-            .state.lock_guard().await
+        self.state
+            .lock_guard()
+            .await
             .net
             .peer_map
-            .lock(|pm| pm.values().cloned().collect());
-        peer_map
+            .values()
+            .cloned()
+            .collect()
     }
 
     async fn validate_address(
@@ -255,23 +258,32 @@ impl RPC for NeptuneRPCServer {
 
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: Amount) -> bool {
         // test inequality
-        let wallet_status = executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
+        let wallet_status =
+            executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
         amount <= wallet_status.synced_unspent_amount
     }
 
     async fn get_synced_balance(self, _context: tarpc::context::Context) -> Amount {
-        let wallet_status = executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
+        let wallet_status =
+            executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
         wallet_status.synced_unspent_amount
     }
 
     async fn get_wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
-        let wallet_status = executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
+        let wallet_status =
+            executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
         wallet_status
     }
 
     async fn get_tip_header(self, _: context::Context) -> BlockHeader {
-        let latest_block_block_header =
-            executor::block_on(self.state.lock_guard().await.chain.light_state().header_clone());
+        let latest_block_block_header = executor::block_on(
+            self.state
+                .lock_guard()
+                .await
+                .chain
+                .light_state()
+                .header_clone(),
+        );
         latest_block_block_header
     }
 
@@ -281,7 +293,9 @@ impl RPC for NeptuneRPCServer {
         block_digest: Digest,
     ) -> Option<BlockHeader> {
         let res = executor::block_on(
-            self.state.lock_guard().await
+            self.state
+                .lock_guard()
+                .await
                 .chain
                 .archival_state()
                 .get_block_header(block_digest),
@@ -293,7 +307,9 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> generation_address::ReceivingAddress {
-        self.state.lock_guard().await
+        self.state
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -330,17 +346,17 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
         let state = self.state.lock_guard().await;
-        let tip_header = executor::block_on(state.chain.light_state().header_clone());
-        let wallet_status = executor::block_on(state.get_wallet_status_for_tip());
-        let syncing = state.net.syncing.get();
+        let tip_header = state.chain.light_state().header_clone().await;
+        let wallet_status = state.get_wallet_status_for_tip().await;
+        let syncing = state.net.syncing;
         let mempool_size = state.mempool.get_size();
         let mempool_tx_count = state.mempool.len();
 
-            // Return `None` if we fail to acquire the lock
-            let peer_count = Some(state.net.peer_map.lock(|pm| pm.len()));
+        // Return `None` if we fail to acquire the lock
+        let peer_count = Some(state.net.peer_map.len());
 
-            let is_mining = Some(state.mining);
-            drop(state);
+        let is_mining = Some(state.mining);
+        drop(state);
 
         let confirmations = self.confirmations_internal().await;
 
@@ -359,32 +375,29 @@ impl RPC for NeptuneRPCServer {
     // endpoints for changing stuff
 
     async fn clear_all_standings(self, _: context::Context) {
-        let state = self.state.lock_guard().await;
-        state.net.peer_map.lock_mut(|pm| {
-            pm.iter_mut().for_each(|(_, peerinfo)| {
-                peerinfo.standing.clear_standing();
-            });
-            // iterates and modifies standing field for all connected peers
-            state.clear_all_standings_in_database()
-        }).await;
+        let mut state = self.state.lock_guard_mut().await;
+        state.net.peer_map.iter_mut().for_each(|(_, peerinfo)| {
+            peerinfo.standing.clear_standing();
+        });
 
         // iterates and modifies standing field for all connected peers
-        executor::block_on(state.clear_all_standings_in_database());
+        state.clear_all_standings_in_database().await;
     }
 
     async fn clear_ip_standing(self, _: context::Context, ip: IpAddr) {
-        let state = self.state.lock_guard().await;
-        state.net.peer_map.lock_mut(|pm| {
-            pm.iter_mut().for_each(|(socketaddr, peerinfo)| {
+        let mut state = self.state.lock_guard_mut().await;
+        state
+            .net
+            .peer_map
+            .iter_mut()
+            .for_each(|(socketaddr, peerinfo)| {
                 if socketaddr.ip() == ip {
                     peerinfo.standing.clear_standing();
                 }
             });
-            //Also clears this IP's standing in database, whether it is connected or not.
-            state.clear_ip_standing_in_database(ip)
-        }).await;
+
         //Also clears this IP's standing in database, whether it is connected or not.
-        executor::block_on(state.clear_ip_standing_in_database(ip));
+        state.clear_ip_standing_in_database(ip).await;
     }
 
     async fn send(
@@ -501,10 +514,7 @@ impl RPC for NeptuneRPCServer {
         }
     }
 
-    async fn prune_abandoned_monitored_utxos(
-        self,
-        _context: tarpc::context::Context,
-    ) -> usize {
+    async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
         let prune_count_res = executor::block_on(async move {
             let state = self.state.lock_guard().await;
             let tip_block_header = state.chain.light_state().header_clone().await;
@@ -583,23 +593,20 @@ mod rpc_server_tests {
             state_lock,
             _hsd,
         ) = get_test_genesis_setup(Network::Alpha, 2).await?;
-        let state = state_lock.lock_guard().await;
-        let peer_address_0 =
-            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].connected_address;
-        let peer_address_1 =
-            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[1].connected_address;
+        let mut state = state_lock.lock_guard_mut().await;
+        let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
 
         // sanction both
         let (standing_0, standing_1) = {
-            let mut peers = state.net.peer_map.lock_guard_mut();
-            peers.entry(peer_address_0).and_modify(|p| {
+            state.net.peer_map.entry(peer_address_0).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
-            peers.entry(peer_address_1).and_modify(|p| {
+            state.net.peer_map.entry(peer_address_1).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
-            let standing_0 = peers[&peer_address_0].standing;
-            let standing_1 = peers[&peer_address_1].standing;
+            let standing_0 = state.net.peer_map[&peer_address_0].standing;
+            let standing_1 = state.net.peer_map[&peer_address_1].standing;
             (standing_0, standing_1)
         };
 
@@ -649,11 +656,9 @@ mod rpc_server_tests {
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
 
             // Verify expected resulting conditions in peer map
-            let peer_standing_0_from_memory =
-                state.net.peer_map.lock_guard()[&peer_address_0].clone();
+            let peer_standing_0_from_memory = state.net.peer_map[&peer_address_0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
-            let peer_standing_1_from_memory =
-                state.net.peer_map.lock_guard()[&peer_address_1].clone();
+            let peer_standing_1_from_memory = state.net.peer_map[&peer_address_1].clone();
             assert_ne!(0, peer_standing_1_from_memory.standing.standing);
         }
         Ok(())
@@ -670,24 +675,20 @@ mod rpc_server_tests {
             state_lock,
             _hsd,
         ) = get_test_genesis_setup(Network::Alpha, 2).await?;
-        let state = state_lock.lock_guard().await;
-        let peer_address_0 =
-            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].connected_address;
-        let peer_address_1 =
-            state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[1].connected_address;
+        let mut state = state_lock.lock_guard_mut().await;
+        let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
+        let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
 
         // sanction both peers
         let (standing_0, standing_1) = {
-            let mut peers = state.net.peer_map.lock_guard_mut();
-
-            peers.entry(peer_address_0).and_modify(|p| {
+            state.net.peer_map.entry(peer_address_0).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
-            peers.entry(peer_address_1).and_modify(|p| {
+            state.net.peer_map.entry(peer_address_1).and_modify(|p| {
                 p.standing.sanction(PeerSanctionReason::DifferentGenesis);
             });
-            let standing_0 = peers[&peer_address_0].standing;
-            let standing_1 = peers[&peer_address_1].standing;
+            let standing_0 = state.net.peer_map[&peer_address_0].standing;
+            let standing_1 = state.net.peer_map[&peer_address_1].standing;
             (standing_0, standing_1)
         };
 
@@ -743,14 +744,12 @@ mod rpc_server_tests {
 
         // Verify expected resulting conditions in peer map
         {
-            let peer_standing_0_from_memory =
-                state.net.peer_map.lock_guard()[&peer_address_0].clone();
+            let peer_standing_0_from_memory = state.net.peer_map[&peer_address_0].clone();
             assert_eq!(0, peer_standing_0_from_memory.standing.standing);
         }
 
         {
-            let peer_still_standing_1_from_memory =
-                state.net.peer_map.lock_guard()[&peer_address_1].clone();
+            let peer_still_standing_1_from_memory = state.net.peer_map[&peer_address_1].clone();
             assert_eq!(0, peer_still_standing_1_from_memory.standing.standing);
         }
 

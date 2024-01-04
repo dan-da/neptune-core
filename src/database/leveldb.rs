@@ -12,8 +12,8 @@ where
     fn new(db_path: &Path, options: Options) -> Result<Self>
     where
         Self: Sized;
-    fn batch_write(&mut self, entries: impl IntoIterator<Item = (Key, Value)>);
+    fn batch_write(&self, entries: impl IntoIterator<Item = (Key, Value)>);
     fn get(&self, key: Key) -> Option<Value>;
-    fn put(&mut self, key: Key, value: Value);
-    fn delete(&mut self, key: Key) -> Option<Value>;
+    fn put(&self, key: Key, value: Value);
+    fn delete(&self, key: Key) -> Option<Value>;
 }

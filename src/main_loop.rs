@@ -357,7 +357,7 @@ impl MainLoopHandler {
                 // PoW family exceeds our tip and if the height difference is beyond a threshold value.
                 // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
                 // the client into synchronization mode.
-                let global_state = self.global_state_lock.lock_guard().await;
+                let mut global_state = self.global_state_lock.lock_guard_mut().await;
                 let our_block_tip_header: BlockHeader = global_state
                     .chain
                     .light_state()
@@ -372,7 +372,7 @@ impl MainLoopHandler {
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
-                    global_state.net.syncing.set(true);
+                    global_state.net.syncing = true;
                 }
             }
             PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -388,14 +388,14 @@ impl MainLoopHandler {
                 // Get out of sync mode if needed. Note that we do not need to hold
                 // a lock on any state, as it's only this thread (main thread) that
                 // is allowed to update the `BlockchainState` or the `syncing` state.
-                let global_state = self.global_state_lock.lock_guard().await;
+                let mut global_state = self.global_state_lock.lock_guard_mut().await;
                 let tip_header: BlockHeader = global_state
                     .chain
                     .light_state()
                     .header_clone() // todo: avoid this clone
                     .await;
 
-                if global_state.net.syncing.get() {
+                if global_state.net.syncing {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         &tip_header,
                         &main_loop_state.sync_state,
@@ -403,7 +403,7 @@ impl MainLoopHandler {
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
-                        global_state.net.syncing.set(false);
+                        global_state.net.syncing = false;
                     }
                 }
             }
@@ -507,7 +507,7 @@ impl MainLoopHandler {
         }
 
         // Get out of sync mode if needed
-        if global_state.net.syncing.get() {
+        if global_state.net.syncing {
             let stay_in_sync_mode = stay_in_sync_mode(
                 &last_block.header,
                 &main_loop_state.sync_state,
@@ -515,7 +515,7 @@ impl MainLoopHandler {
             );
             if !stay_in_sync_mode {
                 info!("Exiting sync mode");
-                global_state.net.syncing.set(false);
+                global_state.net.syncing = false;
             }
         }
 
@@ -613,10 +613,7 @@ impl MainLoopHandler {
     ) -> Result<()> {
         let global_state = self.global_state_lock.lock_guard().await;
 
-        let connected_peers: Vec<PeerInfo> = global_state
-            .net
-            .peer_map
-            .lock(|pm| pm.values().cloned().collect());
+        let connected_peers: Vec<PeerInfo> = global_state.net.peer_map.values().cloned().collect();
 
         // Check if we are connected to too many peers
         if connected_peers.len() > global_state.cli.max_peers as usize {
@@ -781,7 +778,7 @@ impl MainLoopHandler {
         let global_state = self.global_state_lock.lock_guard().await;
 
         // Check if we are in sync mode
-        if !global_state.net.syncing.get() {
+        if !global_state.net.syncing {
             return Ok(());
         }
 
@@ -1074,7 +1071,7 @@ impl MainLoopHandler {
 
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
-        if global_state.net.syncing.get() {
+        if global_state.net.syncing {
             debug!("Not syncing MS membership proofs because we are syncing");
             return Ok(());
         }

@@ -4,6 +4,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::task;
 use twenty_first::leveldb::{
     batch::WriteBatch,
@@ -12,7 +13,6 @@ use twenty_first::leveldb::{
 };
 use twenty_first::leveldb_sys::Compression;
 use twenty_first::storage::level_db::DB;
-use twenty_first::sync::AtomicRw;
 
 pub struct RustyLevelDB<Key, Value>
 where
@@ -68,13 +68,13 @@ where
         value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap())
     }
 
-    fn put(&mut self, key: Key, value: Value) {
+    fn put(&self, key: Key, value: Value) {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
         let value_bytes: Vec<u8> = bincode::serialize(&value).unwrap();
         self.database.put(&key_bytes, &value_bytes).unwrap();
     }
 
-    fn batch_write(&mut self, entries: impl IntoIterator<Item = (Key, Value)>) {
+    fn batch_write(&self, entries: impl IntoIterator<Item = (Key, Value)>) {
         let batch = WriteBatch::new();
         for (key, value) in entries.into_iter() {
             let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap();
@@ -85,7 +85,7 @@ where
         self.database.write(&batch, true).unwrap();
     }
 
-    fn delete(&mut self, key: Key) -> Option<Value> {
+    fn delete(&self, key: Key) -> Option<Value> {
         let key_bytes: Vec<u8> = bincode::serialize(&key).unwrap(); // add safety
         let value_bytes: Option<Vec<u8>> = self.database.get(&key_bytes).unwrap();
         let value_object = value_bytes.map(|bytes| bincode::deserialize(&bytes).unwrap());
@@ -99,7 +99,7 @@ where
 }
 
 #[derive(Clone)]
-pub struct RustyLevelDbAsync<Key, Value>(AtomicRw<RustyLevelDB<Key, Value>>)
+pub struct RustyLevelDbAsync<Key, Value>(Arc<RustyLevelDB<Key, Value>>)
 where
     Key: Serialize + DeserializeOwned,
     Value: Serialize + DeserializeOwned;
@@ -128,10 +128,10 @@ where
         let db =
             task::spawn_blocking(move || RustyLevelDB::new(&path, options_async.into())).await??;
 
-        Ok(Self(AtomicRw::from(db)))
+        Ok(Self(Arc::new(db)))
     }
 
-    /// IMPORTANT:  this iterator is NOT async.  The database is queried
+    /// IMPORTANT:  the returne iterator is NOT async.  The database is queried
     /// synchrously so the caller will block.  Consider using
     /// `spawn_blocking()` task when using this iterator in async code.
     ///
@@ -142,11 +142,11 @@ where
     // todo: can we create a true async iterator?
     // todo: perhaps refactor neptune, so it does not need/use a level-db iterator.
     pub fn iter(&self) -> Box<dyn Iterator<Item = (Key, Value)> + '_> {
-        let lock = self.0.lock_guard();
-        let keys: Vec<_> = lock.database.keys_iter(&ReadOptions::new()).collect();
+        let inner = self.0.clone();
+        let keys: Vec<_> = inner.database.keys_iter(&ReadOptions::new()).collect();
 
         Box::new(keys.into_iter().map(move |k| {
-            let v = lock.database.get_u8(&k).unwrap().unwrap();
+            let v = inner.database.get_u8(&k).unwrap().unwrap();
 
             (
                 bincode::deserialize(&k).unwrap(),
@@ -158,15 +158,13 @@ where
     /// Get database value asynchronously
     pub async fn get(&self, key: Key) -> Option<Value> {
         let inner = self.0.clone();
-        task::spawn_blocking(move || inner.lock(|db| db.get(key)))
-            .await
-            .unwrap()
+        task::spawn_blocking(move || inner.get(key)).await.unwrap()
     }
 
     /// Set database value asynchronously
     pub async fn put(&self, key: Key, value: Value) {
         let inner = self.0.clone();
-        task::spawn_blocking(move || inner.lock_mut(|db| db.put(key, value)))
+        task::spawn_blocking(move || inner.put(key, value))
             .await
             .unwrap()
     }
@@ -177,7 +175,7 @@ where
         entries: impl IntoIterator<Item = (Key, Value)> + Send + Sync + 'static,
     ) {
         let inner = self.0.clone();
-        task::spawn_blocking(move || inner.lock_mut(|db| db.batch_write(entries)))
+        task::spawn_blocking(move || inner.batch_write(entries))
             .await
             .unwrap()
     }
@@ -185,7 +183,7 @@ where
     /// Delete database value asynchronously
     pub async fn delete(&self, key: Key) -> Option<Value> {
         let inner = self.0.clone();
-        task::spawn_blocking(move || inner.lock_mut(|db| db.delete(key)))
+        task::spawn_blocking(move || inner.delete(key))
             .await
             .unwrap()
     }

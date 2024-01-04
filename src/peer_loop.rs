@@ -70,17 +70,18 @@ impl PeerLoopHandler {
     /// Locking:
     ///  * acquires write lock for `peer_map`
     async fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
-        let global_state = self.state.lock_guard().await;
+        let mut global_state = self.state.lock_guard_mut().await;
         warn!(
             "Sanctioning peer {} for {:?}",
             self.peer_address.ip(),
             reason
         );
-        let new_standing = global_state.net.peer_map.lock_mut(|pm| {
-            pm.get_mut(&self.peer_address)
-                .map(|p| p.standing.sanction(reason))
-                .unwrap_or(0)
-        });
+        let new_standing = global_state
+            .net
+            .peer_map
+            .get_mut(&self.peer_address)
+            .map(|p| p.standing.sanction(reason))
+            .unwrap_or(0);
 
         if new_standing < -(global_state.cli.peer_tolerance as PeerStandingNumber) {
             warn!("Banning peer");
@@ -339,19 +340,20 @@ impl PeerLoopHandler {
                 // We are interested in the address on which peers accept ingoing connections,
                 // not in the address in which they are connected to us. We are only interested in
                 // peers that accept incoming connections.
-                let mut peer_info: Vec<(SocketAddr, u128)> = state.net.peer_map.lock(|pm| {
-                    pm.values()
-                        .filter(|peer_info| peer_info.listen_address().is_some())
-                        .take(MAX_PEER_LIST_LENGTH) // limit length of response
-                        .map(|peer_info| {
-                            (
-                                // unwrap is safe bc of above `filter`
-                                peer_info.listen_address().unwrap(),
-                                peer_info.instance_id,
-                            )
-                        })
-                        .collect()
-                });
+                let mut peer_info: Vec<(SocketAddr, u128)> = state
+                    .net
+                    .peer_map
+                    .values()
+                    .filter(|peer_info| peer_info.listen_address().is_some())
+                    .take(MAX_PEER_LIST_LENGTH) // limit length of response
+                    .map(|peer_info| {
+                        (
+                            // unwrap is safe bc of above `filter`
+                            peer_info.listen_address().unwrap(),
+                            peer_info.instance_id,
+                        )
+                    })
+                    .collect();
 
                 // We sort the returned list, so this function is easier to test
                 peer_info.sort_by_cached_key(|x| x.0);
@@ -529,7 +531,7 @@ impl PeerLoopHandler {
                 // Verify that we are in fact in syncing mode
                 // TODO: Seperate peer messages into those allowed under syncing
                 // and those that are not
-                if !state.net.syncing.get() {
+                if !state.net.syncing {
                     warn!("Received a batch of blocks without being in syncing mode");
                     self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
                         .await?;
@@ -599,7 +601,7 @@ impl PeerLoopHandler {
                     // a fork. If we are reconciling, that is handled later, and the information
                     // about that is stored in `highest_shared_block_height`. If we are syncing
                     // we are also not requesting the block but instead updating the sync state.
-                    if state.net.syncing.get() {
+                    if state.net.syncing {
                         self.to_main_tx
                             .send(PeerThreadToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
@@ -917,7 +919,7 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    let syncing = self.state.lock(|s| s.net.syncing.get()).await;
+                                    let syncing = self.state.lock(|s| s.net.syncing).await;
                                     if peer_msg.ignore_during_sync() && syncing {
                                         debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;
@@ -992,7 +994,7 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        let state = self.state.lock_guard().await;
+        let mut state = self.state.lock_guard_mut().await;
         // Check if peer standing exists in database, return default if it does not.
         let standing: PeerStanding = state
             .net
@@ -1018,26 +1020,26 @@ impl PeerLoopHandler {
         // counted the number of entries and checked if instance ID was already connected. But
         // this check could have been invalidated by other threads so we perform it again under
         // a lock.
-        state.net.peer_map.lock_mut(|pm| {
-            if pm
-                .values()
-                .any(|pi| pi.instance_id == self.peer_handshake_data.instance_id)
-            {
-                bail!("Attempted to connect to already connected peer. Aborting connection.");
-            }
 
-            if pm.len() >= state.cli.max_peers as usize {
-                bail!("Attempted to connect to more peers than allowed. Aborting connection.");
-            }
+        if state
+            .net
+            .peer_map
+            .values()
+            .any(|pi| pi.instance_id == self.peer_handshake_data.instance_id)
+        {
+            bail!("Attempted to connect to already connected peer. Aborting connection.");
+        }
 
-            if pm.contains_key(&self.peer_address) {
-                // This shouldn't be possible, unless the peer reports a different instance ID than
-                // for the other connection. Only a malignant client would do that.
-                bail!("Already connected to peer. Aborting connection");
-            }
-            pm.insert(self.peer_address, new_peer);
-            Ok(())
-        })?;
+        if state.net.peer_map.len() >= state.cli.max_peers as usize {
+            bail!("Attempted to connect to more peers than allowed. Aborting connection.");
+        }
+
+        if state.net.peer_map.contains_key(&self.peer_address) {
+            // This shouldn't be possible, unless the peer reports a different instance ID than
+            // for the other connection. Only a malignant client would do that.
+            bail!("Already connected to peer. Aborting connection");
+        }
+        state.net.peer_map.insert(self.peer_address, new_peer);
 
         // This message is used to determine if we are to enter synchronization mode.
         self.to_main_tx
@@ -1116,7 +1118,7 @@ mod peer_loop_tests {
 
         assert_eq!(
             2,
-            state.net.peer_map.lock_guard().len(),
+            state.net.peer_map.len(),
             "peer map length must be back to 2 after goodbye"
         );
 
@@ -1130,13 +1132,7 @@ mod peer_loop_tests {
             get_test_genesis_setup(Network::Alpha, 2).await?;
         let state = state_lock.lock_guard().await;
 
-        let mut peer_infos = state
-            .net
-            .peer_map
-            .lock_guard()
-            .clone()
-            .into_values()
-            .collect::<Vec<_>>();
+        let mut peer_infos = state.net.peer_map.clone().into_values().collect::<Vec<_>>();
         peer_infos.sort_by_cached_key(|x| x.connected_address);
         let (peer_address0, instance_id0) =
             (peer_infos[0].connected_address, peer_infos[0].instance_id);
@@ -1165,7 +1161,7 @@ mod peer_loop_tests {
 
         assert_eq!(
             2,
-            state.net.peer_map.lock_guard().len(),
+            state.net.peer_map.len(),
             "peer map must have length 2 after saying goodbye to peer 2"
         );
 
@@ -1385,7 +1381,7 @@ mod peer_loop_tests {
         };
         drop(to_main_tx);
 
-        if !state.net.peer_map.lock_guard().is_empty() {
+        if !state.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1575,7 +1571,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock_guard().is_empty() {
+        if !state.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1641,7 +1637,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock_guard().is_empty() {
+        if !state.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1797,7 +1793,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock_guard().is_empty() {
+        if !state.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1871,7 +1867,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock_guard().is_empty() {
+        if !state.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1964,7 +1960,7 @@ mod peer_loop_tests {
             _ => bail!("Must receive remove of peer block max height"),
         }
 
-        if !state.net.peer_map.lock_guard().is_empty() {
+        if !state.net.peer_map.is_empty() {
             bail!("peer map must be empty after closing connection gracefully");
         }
 
@@ -1982,13 +1978,8 @@ mod peer_loop_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 1).await?;
         let state = state_lock.lock_guard().await;
-        let peer_infos: Vec<PeerInfo> = state
-            .net
-            .peer_map
-            .lock_guard()
-            .clone()
-            .into_values()
-            .collect::<Vec<_>>();
+        let peer_infos: Vec<PeerInfo> =
+            state.net.peer_map.clone().into_values().collect::<Vec<_>>();
 
         let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new(random());
@@ -2064,7 +2055,7 @@ mod peer_loop_tests {
 
         assert_eq!(
             1,
-            state.net.peer_map.lock_guard().len(),
+            state.net.peer_map.len(),
             "One peer must remain in peer list after peer_1 closed gracefully"
         );
 

@@ -5,7 +5,6 @@ use crate::models::peer::{self, PeerStanding};
 use anyhow::Result;
 use std::net::IpAddr;
 use std::{collections::HashMap, net::SocketAddr};
-use twenty_first::sync;
 
 pub const BANNED_IPS_DB_NAME: &str = "banned_ips";
 
@@ -17,7 +16,7 @@ type PeerMap = HashMap<SocketAddr, peer::PeerInfo>;
 pub struct NetworkingState {
     // Stores info about the peers that the client is connected to
     // Peer threads may update their own entries into this map.
-    pub peer_map: sync::AtomicRw<PeerMap>,
+    pub peer_map: PeerMap,
 
     // `peer_databases` are used to persist IPs with their standing.
     // The peer threads may update their own entries into this map.
@@ -26,7 +25,7 @@ pub struct NetworkingState {
     // This value is only true if instance is running an archival node
     // that is currently downloading blocks to catch up.
     // Only the main thread may update this flag
-    pub syncing: sync::AtomicRw<bool>,
+    pub syncing: bool,
 
     // Read-only value set during startup
     pub instance_id: u128,
@@ -35,17 +34,9 @@ pub struct NetworkingState {
 impl NetworkingState {
     pub fn new(peer_map: PeerMap, peer_databases: PeerDatabases, syncing: bool) -> Self {
         Self {
-            peer_map: sync::AtomicRw::from((
-                peer_map,
-                Some("NetworkingState::peer_map"),
-                Some(crate::LOG_LOCK_EVENT_CB),
-            )),
+            peer_map,
             peer_databases,
-            syncing: sync::AtomicRw::from((
-                syncing,
-                Some("NetworkingState::syncing"),
-                Some(crate::LOG_LOCK_EVENT_CB),
-            )),
+            syncing,
             instance_id: rand::random(),
         }
     }
