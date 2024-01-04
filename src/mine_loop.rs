@@ -454,7 +454,8 @@ mod mine_loop_tests {
         // Verify that a block template made with transaction from the mempool is a valid block
         let premine_receiver_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, None).await;
-        let premine_receiver_global_state = premine_receiver_global_state_lock.lock_guard().await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state_lock.lock_guard_mut().await;
         assert!(
             premine_receiver_global_state.mempool.is_empty(),
             "Mempool must be empty at startup"

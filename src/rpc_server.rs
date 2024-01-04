@@ -1,5 +1,6 @@
 use anyhow::Result;
 use futures::executor;
+use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::SocketAddr;

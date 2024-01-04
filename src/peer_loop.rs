@@ -793,7 +793,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 if let Some(transaction) = state.mempool.get(transaction_identifier) {
-                    peer.send(PeerMessage::Transaction(Box::new(transaction)))
+                    peer.send(PeerMessage::Transaction(Box::new(transaction.clone())))
                         .await?;
                 }
 
@@ -2125,7 +2125,7 @@ mod peer_loop_tests {
         // In this scenario the peer is informed of a transaction that it already knows
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 1).await?;
-        let state = state_lock.lock_guard().await;
+        let mut state = state_lock.lock_guard_mut().await;
 
         let transaction_1 = make_mock_transaction(vec![], vec![]);
 

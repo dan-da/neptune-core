@@ -89,16 +89,16 @@ fn now() -> Duration {
 /// assert_eq!(transaction, stored_transaction)
 /// ```
 #[derive(Debug, Clone)]
-pub struct Mempool {
-    internal: sync::AtomicRw<MempoolInternal>,
+pub struct MempoolLock {
+    internal: sync::AtomicRw<Mempool>,
 }
 
-impl Mempool {
+impl MempoolLock {
     pub fn new(max_total_size: ByteSize) -> Self {
-        let mempool_internal = MempoolInternal::new(max_total_size);
-        Mempool {
+        let mempool = Mempool::new(max_total_size);
+        Self {
             internal: sync::AtomicRw::from((
-                mempool_internal,
+                mempool,
                 Some("mempool"),
                 Some(crate::LOG_LOCK_EVENT_CB),
             )),
@@ -200,7 +200,7 @@ impl Mempool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, GetSize)]
-struct MempoolInternal {
+pub struct Mempool {
     max_total_size: usize,
     // Maintain for constant lookup
     tx_dictionary: HashMap<Digest, Transaction>,
@@ -209,8 +209,8 @@ struct MempoolInternal {
     queue: DoublePriorityQueue<Digest, FeeDensity>,
 }
 
-impl MempoolInternal {
-    fn new(max_total_size: ByteSize) -> Self {
+impl Mempool {
+    pub fn new(max_total_size: ByteSize) -> Self {
         let table = Default::default();
         let queue = Default::default();
         let max_total_size = max_total_size.0.try_into().unwrap();
@@ -221,11 +221,11 @@ impl MempoolInternal {
         }
     }
 
-    fn contains(&self, transaction_id: Digest) -> bool {
+    pub fn contains(&self, transaction_id: Digest) -> bool {
         self.tx_dictionary.contains_key(&transaction_id)
     }
 
-    fn get(&self, transaction_id: Digest) -> Option<&Transaction> {
+    pub fn get(&self, transaction_id: Digest) -> Option<&Transaction> {
         self.tx_dictionary.get(&transaction_id)
     }
 
@@ -256,7 +256,7 @@ impl MempoolInternal {
 
     /// Insert a transaction into the mempool. It is the caller's responsibility to verify
     /// that the transaction is valid and confirmable.
-    fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
+    pub fn insert(&mut self, transaction: &Transaction) -> Option<Digest> {
         {
             // Early exit on transactions too long into the future.
             let horizon =
@@ -304,7 +304,7 @@ impl MempoolInternal {
         None
     }
 
-    fn remove(&mut self, transaction_id: Digest) -> Option<Transaction> {
+    pub fn remove(&mut self, transaction_id: Digest) -> Option<Transaction> {
         if let rv @ Some(_) = self.tx_dictionary.remove(&transaction_id) {
             self.queue.remove(&transaction_id);
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -314,15 +314,15 @@ impl MempoolInternal {
         None
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.tx_dictionary.len()
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.tx_dictionary.is_empty()
     }
 
-    fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
+    pub fn get_transactions_for_block(&self, mut remaining_storage: usize) -> Vec<Transaction> {
         let mut transactions = vec![];
         let mut _fee_acc = Amount::zero();
 
@@ -353,7 +353,7 @@ impl MempoolInternal {
 
     /// Computes in θ(lg N)
     #[allow(dead_code)]
-    fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
+    pub fn pop_max(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_max() {
             let transaction = self.tx_dictionary.remove(&transaction_digest).unwrap();
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -364,7 +364,7 @@ impl MempoolInternal {
     }
 
     /// Computes in θ(lg N)
-    fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
+    pub fn pop_min(&mut self) -> Option<(Transaction, FeeDensity)> {
         if let Some((transaction_digest, fee_density)) = self.queue.pop_min() {
             let transaction = self.tx_dictionary.remove(&transaction_digest).unwrap();
             debug_assert_eq!(self.tx_dictionary.len(), self.queue.len());
@@ -377,7 +377,7 @@ impl MempoolInternal {
     /// Modelled after [HashMap::retain][HashMap::retain]
     /// [HashMap::retain]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.retain
     /// Computes in O(capacity) >= O(N)
-    fn retain<F>(&mut self, mut predicate: F)
+    pub fn retain<F>(&mut self, mut predicate: F)
     where
         F: FnMut(LookupItem) -> bool,
     {
@@ -398,7 +398,7 @@ impl MempoolInternal {
         self.shrink_to_fit()
     }
 
-    fn prune_stale_transactions(&mut self) {
+    pub fn prune_stale_transactions(&mut self) {
         let cutoff = now() - Duration::from_secs(MEMPOOL_TX_THRESHOLD_AGE_IN_SECS);
 
         let keep = |(_transaction_id, transaction): LookupItem| -> bool {
@@ -411,7 +411,7 @@ impl MempoolInternal {
     /// This function remove from the mempool all those transactions that become invalid because
     /// of this newly mined block. It also updates all mutator set data for the monitored
     /// transactions that were not removed due to being included in the block.
-    fn update_with_block(&mut self, block: &Block) {
+    pub fn update_with_block(&mut self, block: &Block) {
         // Check if the sets of inserted indices in the block transaction
         // and transactions in the mempool are disjoint.
         // Removes the transaction from the mempool if they are not as this would
@@ -509,7 +509,7 @@ mod tests {
 
     #[tokio::test]
     pub async fn insert_then_get_then_remove_then_get() {
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         let network = Network::Alpha;
         let wallet_state = get_mock_wallet_state(None, network).await;
         let transaction =
@@ -520,7 +520,7 @@ mod tests {
         assert!(mempool.contains(transaction_digest));
 
         let transaction_get_option = mempool.get(transaction_digest);
-        assert_eq!(Some(transaction.clone()), transaction_get_option);
+        assert_eq!(Some(&transaction), transaction_get_option);
         assert!(mempool.contains(transaction_digest));
 
         let transaction_remove_option = mempool.remove(transaction_digest);
@@ -534,7 +534,7 @@ mod tests {
 
     // Create a mempool with n transactions.
     async fn setup(transactions_count: u32, network: Network) -> Mempool {
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         let wallet_state = get_mock_wallet_state(None, network).await;
         for i in 0..transactions_count {
             let t = make_mock_transaction_with_wallet(
@@ -584,7 +584,7 @@ mod tests {
     #[tokio::test]
     async fn prune_stale_transactions() {
         let wallet_state = get_mock_wallet_state(None, Network::Alpha).await;
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         assert!(
             mempool.is_empty(),
             "Mempool must be empty after initialization"
@@ -697,7 +697,7 @@ mod tests {
             .await?;
 
         // Add this transaction to the mempool
-        let mempool = Mempool::new(ByteSize::gb(1));
+        let mut mempool = Mempool::new(ByteSize::gb(1));
         mempool.insert(&tx_by_preminer);
 
         // Create another transaction that's valid to be included in block 2, but isn't actually
@@ -800,7 +800,7 @@ mod tests {
     async fn conflicting_txs_preserve_highest_fee() -> Result<()> {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state_lock = get_mock_global_state(Network::Alpha, 2, None).await;
-        let preminer_state = preminer_state_lock.lock_guard().await;
+        let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;
         let premine_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_address = premine_spending_key.to_address();
@@ -826,7 +826,7 @@ mod tests {
 
         assert_eq!(1, preminer_state.mempool.len());
         assert_eq!(
-            tx_by_preminer_low_fee,
+            &tx_by_preminer_low_fee,
             preminer_state
                 .mempool
                 .get(Hash::hash(&tx_by_preminer_low_fee))
@@ -841,7 +841,7 @@ mod tests {
         preminer_state.mempool.insert(&tx_by_preminer_high_fee);
         assert_eq!(1, preminer_state.mempool.len());
         assert_eq!(
-            tx_by_preminer_high_fee,
+            &tx_by_preminer_high_fee,
             preminer_state
                 .mempool
                 .get(Hash::hash(&tx_by_preminer_high_fee))
@@ -856,7 +856,7 @@ mod tests {
         preminer_state.mempool.insert(&tx_by_preminer_medium_fee);
         assert_eq!(1, preminer_state.mempool.len());
         assert_eq!(
-            tx_by_preminer_high_fee,
+            &tx_by_preminer_high_fee,
             preminer_state
                 .mempool
                 .get(Hash::hash(&tx_by_preminer_high_fee))
@@ -873,10 +873,9 @@ mod tests {
         let tx_count_small = 10;
         let mempool_small = setup(10, Network::Alpha).await;
         let size_gs_small = mempool_small.get_size();
-        let size_serialized_small =
-            bincode::serialize(&mempool_small.internal.lock_guard().tx_dictionary)
-                .unwrap()
-                .len();
+        let size_serialized_small = bincode::serialize(&mempool_small.tx_dictionary)
+            .unwrap()
+            .len();
         assert!(size_gs_small >= size_serialized_small);
         println!(
             "size of mempool with {tx_count_small} empty txs reported as: {}",
@@ -890,10 +889,9 @@ mod tests {
         let tx_count_big = 100;
         let mempool_big = setup(tx_count_big, Network::Alpha).await;
         let size_gs_big = mempool_big.get_size();
-        let size_serialized_big =
-            bincode::serialize(&mempool_big.internal.lock_guard().tx_dictionary)
-                .unwrap()
-                .len();
+        let size_serialized_big = bincode::serialize(&mempool_big.tx_dictionary)
+            .unwrap()
+            .len();
         assert!(size_gs_big >= size_serialized_big);
         assert!(size_gs_big >= 5 * size_gs_small);
         println!("size of mempool with {tx_count_big} empty txs reported as: {size_gs_big}",);

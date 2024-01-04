@@ -427,7 +427,7 @@ impl MainLoopHandler {
                     pt2m_transaction.transaction.kernel.mutator_set_hash
                 );
 
-                let global_state = self.global_state_lock.lock_guard().await;
+                let mut global_state = self.global_state_lock.lock_guard_mut().await;
                 if pt2m_transaction.confirmable_for_block
                     != global_state.chain.light_state().hash().await
                 {
@@ -471,7 +471,7 @@ impl MainLoopHandler {
             BlockToProcess::Received(b) => b.clone(),
         };
 
-        let global_state = self.global_state_lock.lock_guard().await;
+        let mut global_state = self.global_state_lock.lock_guard_mut().await;
         let (tip_hash, tip_proof_of_work_family) = global_state
             .chain
             .light_state()
@@ -1036,7 +1036,7 @@ impl MainLoopHandler {
                 // Handle mempool cleanup, i.e. removing stale/too old txs from mempool
                 _ = &mut mempool_cleanup_timer => {
                     debug!("Timer: mempool-cleaner job");
-                    self.global_state_lock.lock(|s| s.mempool.prune_stale_transactions()).await;
+                    self.global_state_lock.lock_mut(|s| s.mempool.prune_stale_transactions()).await;
 
                     // Reset the timer to run this branch again in P seconds
                     mempool_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + mempool_cleanup_timer_interval);
@@ -1123,7 +1123,7 @@ impl MainLoopHandler {
 
                 // insert transaction into mempool
                 self.global_state_lock
-                    .lock(|s| s.mempool.insert(&transaction))
+                    .lock_mut(|s| s.mempool.insert(&transaction))
                     .await;
 
                 // do not shut down
