@@ -22,7 +22,7 @@ use crate::models::channel::RPCServerToMain;
 use crate::models::peer::PeerInfo;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_status::WalletStatus;
-use crate::models::state::{GlobalState, UtxoReceiverData};
+use crate::models::state::{GlobalStateLock, UtxoReceiverData};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DashBoardOverviewDataFromClient {
@@ -134,19 +134,21 @@ pub trait RPC {
 #[derive(Clone)]
 pub struct NeptuneRPCServer {
     pub socket_address: SocketAddr,
-    pub state: GlobalState,
+    pub state: GlobalStateLock,
     pub rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
 impl NeptuneRPCServer {
-    fn confirmations_internal(&self) -> Option<BlockHeight> {
+    async fn confirmations_internal(&self) -> Option<BlockHeight> {
 
-        match executor::block_on(self.state.get_latest_balance_height()) {
+        let state = self.state.lock_guard().await;
+
+        match executor::block_on(state.get_latest_balance_height()) {
             Some(latest_balance_height) => {
                 let tip_block_header =
-                    executor::block_on(self.state.chain.light_state().header_partial());
+                    executor::block_on(state.chain.light_state().header_partial());
 
-                assert!(tip_block_header.height >= latest_balance_height);
+                    assert!(tip_block_header.height >= latest_balance_height);
 
                 // subtract latest balance height from chain tip.
                 // note: BlockHeight is u64 internally and BlockHeight::sub() returns i128.
@@ -162,12 +164,13 @@ impl NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     async fn get_network(self, _: context::Context) -> Network {
-        self.state.cli.network
+        self.state.lock_guard().await.cli.network
     }
 
     async fn get_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
-        let listen_for_peers_ip = self.state.cli.listen_addr;
-        let listen_for_peers_socket = self.state.cli.peer_port;
+        let state = self.state.lock_guard().await;
+        let listen_for_peers_ip = state.cli.listen_addr;
+        let listen_for_peers_socket = state.cli.peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
         Some(socket_address)
     }
@@ -176,24 +179,26 @@ impl RPC for NeptuneRPCServer {
         // let mut databases = executor::block_on(self.state.block_databases.lock());
         // let lookup_res = databases.latest_block_header.get(());
         let latest_block_header =
-            executor::block_on(self.state.chain.light_state().header_clone());
+            executor::block_on(self.state.lock_guard().await.chain.light_state().header_clone());
         latest_block_header.height
     }
 
     async fn get_confirmations(self, _: context::Context) -> Option<BlockHeight> {
-        self.confirmations_internal()
+        self.confirmations_internal().await
     }
 
     async fn head(self, _: context::Context) -> Digest {
-        executor::block_on(self.state.chain.light_state().hash())
+        executor::block_on(self.state.lock_guard().await.chain.light_state().hash())
     }
 
     async fn heads(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
+        let state = self.state.lock_guard().await;
+
         let latest_block_digest =
-            executor::block_on(self.state.chain.light_state().hash());
+            executor::block_on(state.chain.light_state().hash());
 
         let head_hashes = executor::block_on(
-            self.state
+            state
                 .chain
                 .archival_state()
                 .get_ancestor_block_digests(latest_block_digest, n),
@@ -204,7 +209,7 @@ impl RPC for NeptuneRPCServer {
 
     async fn get_peer_info(self, _: context::Context) -> Vec<PeerInfo> {
         let peer_map = self
-            .state
+            .state.lock_guard().await
             .net
             .peer_map
             .lock(|pm| pm.values().cloned().collect());
@@ -249,23 +254,23 @@ impl RPC for NeptuneRPCServer {
 
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: Amount) -> bool {
         // test inequality
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        let wallet_status = executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
         amount <= wallet_status.synced_unspent_amount
     }
 
     async fn get_synced_balance(self, _context: tarpc::context::Context) -> Amount {
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        let wallet_status = executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
         wallet_status.synced_unspent_amount
     }
 
     async fn get_wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
+        let wallet_status = executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
         wallet_status
     }
 
     async fn get_tip_header(self, _: context::Context) -> BlockHeader {
         let latest_block_block_header =
-            executor::block_on(self.state.chain.light_state().header_clone());
+            executor::block_on(self.state.lock_guard().await.chain.light_state().header_clone());
         latest_block_block_header
     }
 
@@ -275,7 +280,7 @@ impl RPC for NeptuneRPCServer {
         block_digest: Digest,
     ) -> Option<BlockHeader> {
         let res = executor::block_on(
-            self.state
+            self.state.lock_guard().await
                 .chain
                 .archival_state()
                 .get_block_header(block_digest),
@@ -287,7 +292,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> generation_address::ReceivingAddress {
-        self.state
+        self.state.lock_guard().await
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -295,18 +300,18 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn get_mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
-        self.state.mempool.len()
+        self.state.lock_guard().await.mempool.len()
     }
 
     async fn get_mempool_size(self, _context: tarpc::context::Context) -> usize {
-        self.state.mempool.get_size()
+        self.state.lock_guard().await.mempool.get_size()
     }
 
     async fn get_history(
         self,
         _context: tarpc::context::Context,
     ) -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)> {
-        let history = executor::block_on(self.state.get_balance_history());
+        let history = executor::block_on(self.state.lock_guard().await.get_balance_history());
 
         // sort
         let mut display_history: Vec<(Digest, BlockHeight, Duration, Amount, Sign)> = history
@@ -323,18 +328,20 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
-        let tip_header = executor::block_on(self.state.chain.light_state().header_clone());
-        let wallet_status = executor::block_on(self.state.get_wallet_status_for_tip());
-        let syncing = self.state.net.syncing.get();
-        let mempool_size = self.state.mempool.get_size();
-        let mempool_tx_count = self.state.mempool.len();
+        let state = self.state.lock_guard().await;
+        let tip_header = executor::block_on(state.chain.light_state().header_clone());
+        let wallet_status = executor::block_on(state.get_wallet_status_for_tip());
+        let syncing = state.net.syncing.get();
+        let mempool_size = state.mempool.get_size();
+        let mempool_tx_count = state.mempool.len();
 
-        // Return `None` if we fail to acquire the lock
-        let peer_count = Some(self.state.net.peer_map.lock(|pm| pm.len()));
+            // Return `None` if we fail to acquire the lock
+            let peer_count = Some(state.net.peer_map.lock(|pm| pm.len()));
 
-        let is_mining = Some(self.state.mining.lock(|m| *m));
+            let is_mining = Some(state.mining.lock(|m| *m));
+            drop(state);
 
-        let confirmations = self.confirmations_internal();
+        let confirmations = self.confirmations_internal().await;
 
         DashBoardOverviewDataFromClient {
             tip_header,
@@ -351,26 +358,32 @@ impl RPC for NeptuneRPCServer {
     // endpoints for changing stuff
 
     async fn clear_all_standings(self, _: context::Context) {
-        self.state.net.peer_map.lock_mut(|pm| {
+        let state = self.state.lock_guard().await;
+        state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(_, peerinfo)| {
                 peerinfo.standing.clear_standing();
             });
-        });
+            // iterates and modifies standing field for all connected peers
+            state.clear_all_standings_in_database()
+        }).await;
 
         // iterates and modifies standing field for all connected peers
-        executor::block_on(self.state.clear_all_standings_in_database());
+        executor::block_on(state.clear_all_standings_in_database());
     }
 
     async fn clear_ip_standing(self, _: context::Context, ip: IpAddr) {
-        self.state.net.peer_map.lock_mut(|pm| {
+        let state = self.state.lock_guard().await;
+        state.net.peer_map.lock_mut(|pm| {
             pm.iter_mut().for_each(|(socketaddr, peerinfo)| {
                 if socketaddr.ip() == ip {
                     peerinfo.standing.clear_standing();
                 }
             });
-        });
+            //Also clears this IP's standing in database, whether it is connected or not.
+            state.clear_ip_standing_in_database(ip)
+        }).await;
         //Also clears this IP's standing in database, whether it is connected or not.
-        executor::block_on(self.state.clear_ip_standing_in_database(ip));
+        executor::block_on(state.clear_ip_standing_in_database(ip));
     }
 
     async fn send(
@@ -385,14 +398,17 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
-        let block_height =
-            executor::block_on(self.state.chain.light_state().header_partial()).height;
+        let block_height = executor::block_on(async {
+            let state = self.state.lock_guard().await;
+            state.chain.light_state().header_partial().await
+        })
+        .height;
         let receiver_privacy_digest = address.privacy_digest;
-        let sender_randomness = self
-            .state
-            .wallet_state
-            .wallet_secret
-            .generate_sender_randomness(block_height, receiver_privacy_digest);
+        let sender_randomness = executor::block_on(self.state.lock(|s| {
+            s.wallet_state
+                .wallet_secret
+                .generate_sender_randomness(block_height, receiver_privacy_digest)
+        }));
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
@@ -418,14 +434,16 @@ impl RPC for NeptuneRPCServer {
         .to_vec();
 
         // Pause miner if we are mining
-        let was_mining = self.state.mining.lock(|m| *m);
+        let was_mining = executor::block_on(self.state.lock(|s| s.mining.lock(|m| *m)));
         if was_mining {
             let _ =
                 executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
         }
 
-        let transaction_result =
-            executor::block_on(self.state.create_transaction(receiver_data, fee));
+        let transaction_result = executor::block_on(async {
+            let state = self.state.lock_guard().await;
+            state.create_transaction(receiver_data, fee).await
+        });
 
         let transaction = match transaction_result {
             Ok(tx) => tx,
@@ -463,7 +481,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn pause_miner(self, _context: tarpc::context::Context) {
-        if self.state.cli.mine {
+        if self.state.lock_guard().await.cli.mine {
             let _ =
                 executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
         } else {
@@ -472,7 +490,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn restart_miner(self, _context: tarpc::context::Context) {
-        if self.state.cli.mine {
+        if self.state.lock_guard().await.cli.mine {
             let _ = executor::block_on(
                 self.rpc_server_to_main_tx
                     .send(RPCServerToMain::RestartMiner),
@@ -487,15 +505,16 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
     ) -> usize {
         let prune_count_res = executor::block_on(async move {
-            let tip_block_header = self.state.chain.light_state().header_clone().await;
+            let state = self.state.lock_guard().await;
+            let tip_block_header = state.chain.light_state().header_clone().await;
             const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
-            self.state
+            state
                 .wallet_state
                 .prune_abandoned_monitored_utxos_with_lock(
                     DEFAULT_MUTXO_PRUNE_DEPTH,
                     &tip_block_header,
-                    self.state.chain.archival_state(),
+                    state.chain.archival_state(),
                 )
                 .await
         });
@@ -555,8 +574,15 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
         // Create initial conditions
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
+        let (
+            _peer_broadcast_tx,
+            _from_main_rx_clone,
+            _to_main_tx,
+            mut _to_main_rx,
+            state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Alpha, 2).await?;
+        let state = state_lock.lock_guard().await;
         let peer_address_0 =
             state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].connected_address;
         let peer_address_1 =
@@ -601,7 +627,7 @@ mod rpc_server_tests {
                 tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
             let rpc_server = NeptuneRPCServer {
                 socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                state: state.clone(),
+                state: state_lock.clone(),
                 rpc_server_to_main_tx: dummy_tx,
             };
             rpc_server
@@ -635,8 +661,15 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (_peer_broadcast_tx, _from_main_rx_clone, _to_main_tx, mut _to_main_rx, state, _hsd) =
-            get_test_genesis_setup(Network::Alpha, 2).await?;
+        let (
+            _peer_broadcast_tx,
+            _from_main_rx_clone,
+            _to_main_tx,
+            mut _to_main_rx,
+            state_lock,
+            _hsd,
+        ) = get_test_genesis_setup(Network::Alpha, 2).await?;
+        let state = state_lock.lock_guard().await;
         let peer_address_0 =
             state.net.peer_map.lock_guard().values().collect::<Vec<_>>()[0].connected_address;
         let peer_address_1 =
@@ -685,7 +718,7 @@ mod rpc_server_tests {
         let (dummy_tx, _rx) = tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
         let rpc_server = NeptuneRPCServer {
             socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-            state: state.clone(),
+            state: state_lock.clone(),
             rpc_server_to_main_tx: dummy_tx.clone(),
         };
         rpc_server.clear_all_standings(context::current()).await;

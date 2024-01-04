@@ -73,8 +73,8 @@ use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::GlobalState;
 use crate::models::state::UtxoReceiverData;
+use crate::models::state::{GlobalState, GlobalStateLock};
 use crate::util_types::mutator_set::addition_record::pseudorandom_addition_record;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::chunk_dictionary::pseudorandom_chunk_dictionary;
@@ -195,7 +195,7 @@ pub async fn get_mock_global_state(
     network: Network,
     peer_count: u8,
     wallet: Option<WalletSecret>,
-) -> GlobalState {
+) -> GlobalStateLock {
     let (archival_state, peer_db, _data_dir) = make_unit_test_archival_state(network).await;
 
     let syncing = false;
@@ -215,7 +215,7 @@ pub async fn get_mock_global_state(
     let mempool = Mempool::new(ByteSize::gb(1));
     let cli_args: cli_args::Args = Default::default();
 
-    GlobalState::new(
+    GlobalStateLock::new(
         get_mock_wallet_state(wallet, network).await,
         blockchain_state,
         networking_state,
@@ -238,7 +238,7 @@ pub async fn get_test_genesis_setup(
     broadcast::Receiver<MainToPeerThread>,
     mpsc::Sender<PeerThreadToMain>,
     mpsc::Receiver<PeerThreadToMain>,
-    GlobalState,
+    GlobalStateLock,
     HandshakeData,
 )> {
     let (peer_broadcast_tx, mut _from_main_rx1) =

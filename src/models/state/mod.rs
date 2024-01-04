@@ -3,6 +3,7 @@ use itertools::Itertools;
 use num_traits::{CheckedSub, Zero};
 use std::cmp::max;
 use std::net::IpAddr;
+use std::ops::Deref;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 use twenty_first::shared_math::b_field_element::BFieldElement;
@@ -50,6 +51,49 @@ pub mod mempool;
 pub mod networking_state;
 pub mod shared;
 pub mod wallet;
+
+#[derive(Debug, Clone)]
+pub struct GlobalStateLock(sync_tokio::AtomicRw<GlobalState>);
+
+impl From<GlobalState> for GlobalStateLock {
+    fn from(global_state: GlobalState) -> Self {
+        Self(sync_tokio::AtomicRw::from((
+            global_state,
+            Some("GlobalState"),
+            Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
+        )))
+    }
+}
+
+impl GlobalStateLock {
+    pub fn new(
+        wallet_state: WalletState,
+        chain: BlockchainState,
+        net: NetworkingState,
+        cli: cli_args::Args,
+        mempool: Mempool,
+        mining: bool,
+    ) -> Self {
+        let global_state = GlobalState::new(wallet_state, chain, net, cli, mempool, mining);
+        Self::from(global_state)
+    }
+
+    // pub async fn chain_light_state(&self) -> &crate::LightState {
+    //     self.lock(|s| s.chain.light_state()).await
+    // }
+
+    // pub async fn chain_archival_state(&self) -> &crate::ArchivalState {
+    //     self.lock(|s| s.chain.archival_state()).await
+    // }
+}
+
+impl Deref for GlobalStateLock {
+    type Target = sync_tokio::AtomicRw<GlobalState>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// `GlobalState` handles all state of a Neptune node that is shared across its threads.
 ///
@@ -917,7 +961,8 @@ mod global_state_tests {
     async fn premine_recipient_can_spend_genesis_block_output() {
         let network = Network::Alpha;
         let other_wallet = WalletSecret::new(wallet::generate_secret_key());
-        let global_state = get_mock_global_state(network, 2, None).await;
+        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let global_state = global_state_lock.lock_guard().await;
         let twenty_amount: Amount = 20.into();
         let twenty_coins = twenty_amount.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
@@ -1003,7 +1048,8 @@ mod global_state_tests {
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Alpha;
-        let global_state = get_mock_global_state(network, 2, None).await;
+        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let global_state = global_state_lock.lock_guard().await;
         let other_receiver_address = WalletSecret::new(random())
             .nth_generation_spending_key(0)
             .to_address();
@@ -1078,7 +1124,8 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let network = Network::RegTest;
-        let global_state = get_mock_global_state(network, 2, None).await;
+        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let global_state = global_state_lock.lock_guard().await;
 
         let other_receiver_wallet_secret = WalletSecret::new(random());
         let other_receiver_address = other_receiver_wallet_secret
@@ -1143,7 +1190,8 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let network = Network::RegTest;
-        let global_state = get_mock_global_state(network, 2, None).await;
+        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let global_state = global_state_lock.lock_guard().await;
         let own_spending_key = global_state
             .wallet_state
             .wallet_secret
@@ -1248,7 +1296,8 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let network = Network::RegTest;
-        let global_state = get_mock_global_state(network, 2, None).await;
+        let global_state_lock = get_mock_global_state(network, 2, None).await;
+        let global_state = global_state_lock.lock_guard().await;
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
         let own_spending_key = wallet_secret.nth_generation_spending_key(0);
         let own_receiving_address = own_spending_key.to_address();

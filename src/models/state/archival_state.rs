@@ -893,7 +893,9 @@ mod archival_state_tests {
         let genesis_wallet_state = get_mock_wallet_state(None, network).await;
         let wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = wallet.nth_generation_spending_key(0).to_address();
-        let genesis_receiver_global_state = get_mock_global_state(network, 0, Some(wallet)).await;
+        let genesis_receiver_global_state_lock =
+            get_mock_global_state(network, 0, Some(wallet)).await;
+        let genesis_receiver_global_state = genesis_receiver_global_state_lock.lock_guard().await;
 
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis_receiver_global_state
@@ -1037,7 +1039,8 @@ mod archival_state_tests {
         let genesis_wallet_state = get_mock_wallet_state(None, network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
-        let global_state = get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
+        let global_state_lock =
+            get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
 
         // 1. Create new block 1 with one input and four outputs and store it to disk
         let (mut block_1a, _, _) = make_mock_block_with_valid_pow(
@@ -1070,6 +1073,7 @@ mod archival_state_tests {
                 pubscript_input: vec![],
             },
         ];
+        let global_state = global_state_lock.lock_guard().await;
         let sender_tx = global_state
             .create_transaction(receiver_data, Into::<Amount>::into(4))
             .await
@@ -1155,8 +1159,10 @@ mod archival_state_tests {
         let genesis_wallet_state = get_mock_wallet_state(None, Network::Alpha).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
-        let global_state = get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
+        let global_state_lock =
+            get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
 
+        let global_state = global_state_lock.lock_guard().await;
         let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
         let mut previous_block = genesis_block.clone();
 
@@ -1319,7 +1325,7 @@ mod archival_state_tests {
         let genesis_block = Block::genesis_block();
         let (mut block_1_a, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, own_receiving_address);
-        let global_state = get_mock_global_state(network, 42, Some(genesis_wallet)).await;
+        let global_state_lock = get_mock_global_state(network, 42, Some(genesis_wallet)).await;
 
         // Verify that block_1 that only contains the coinbase output is valid
         assert!(block_1_a.has_proof_of_work(&genesis_block));
@@ -1337,6 +1343,7 @@ mod archival_state_tests {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
             },
         };
+        let global_state = global_state_lock.lock_guard().await;
         let sender_tx = global_state
             .create_transaction(vec![receiver_data], one_money)
             .await
@@ -1359,16 +1366,16 @@ mod archival_state_tests {
         let genesis_spending_key = genesis_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let genesis_state =
+        let genesis_state_lock =
             get_mock_global_state(network, 3, Some(genesis_wallet_state.wallet_secret)).await;
 
         let wallet_secret_alice = WalletSecret::new(random());
         let alice_spending_key = wallet_secret_alice.nth_generation_spending_key(0);
-        let alice_state = get_mock_global_state(network, 3, Some(wallet_secret_alice)).await;
+        let alice_state_lock = get_mock_global_state(network, 3, Some(wallet_secret_alice)).await;
 
         let wallet_secret_bob = WalletSecret::new(random());
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
-        let bob_state = get_mock_global_state(network, 3, Some(wallet_secret_bob)).await;
+        let bob_state_lock = get_mock_global_state(network, 3, Some(wallet_secret_bob)).await;
 
         let genesis_block = Block::genesis_block();
 
@@ -1423,6 +1430,7 @@ mod archival_state_tests {
                 },
             },
         ];
+        let genesis_state = genesis_state_lock.lock_guard().await;
         let tx_to_alice_and_bob = genesis_state
             .create_transaction(
                 [
@@ -1434,14 +1442,16 @@ mod archival_state_tests {
             )
             .await
             .unwrap();
+        drop(genesis_state);
 
         // Absorb and verify validity
         block_1.accumulate_transaction(tx_to_alice_and_bob);
         assert!(block_1.is_valid(&genesis_block));
 
         // Update chain states
-        for state in [&genesis_state, &alice_state, &bob_state] {
-            add_block(state, block_1.clone()).await.unwrap();
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let state = state_lock.lock_guard().await;
+            add_block(&state, block_1.clone()).await.unwrap();
             state
                 .chain
                 .archival_state()
@@ -1451,6 +1461,7 @@ mod archival_state_tests {
         }
 
         // Update wallets
+        let genesis_state = genesis_state_lock.lock_guard().await;
         genesis_state
             .wallet_state
             .expected_utxos
@@ -1476,6 +1487,7 @@ mod archival_state_tests {
                 .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
         );
 
+        let alice_state = alice_state_lock.lock_guard().await;
         for rec_data in receiver_data_for_alice {
             alice_state
                 .wallet_state
@@ -1494,6 +1506,7 @@ mod archival_state_tests {
             .await
             .unwrap();
 
+        let bob_state = bob_state_lock.lock_guard().await;
         for rec_data in receiver_data_for_bob {
             bob_state
                 .wallet_state
@@ -1606,8 +1619,10 @@ mod archival_state_tests {
         assert!(block_2.is_valid(&block_1));
 
         // Update chain states
-        for state in [&genesis_state, &alice_state, &bob_state] {
-            add_block(state, block_2.clone()).await.unwrap();
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let state = state_lock.lock_guard().await;
+
+            add_block(&state, block_2.clone()).await.unwrap();
             state
                 .chain
                 .archival_state()

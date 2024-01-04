@@ -713,8 +713,9 @@ mod wallet_tests {
         let own_address = own_spending_key.to_address();
         let genesis_block = Block::genesis_block();
         let premine_wallet = get_mock_wallet_state(None, network).await.wallet_secret;
-        let premine_receiver_global_state =
+        let premine_receiver_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
+        let premine_receiver_global_state = premine_receiver_global_state_lock.lock_guard().await;
         let preminers_original_balance = premine_receiver_global_state
             .get_wallet_status_for_tip()
             .await
