@@ -51,7 +51,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::Instant;
 use tokio_serde::formats::*;
-use tracing::info;
+use tracing::{info, trace};
 use twenty_first::sync::{LockCallbackFn, LockEvent};
 
 use crate::models::channel::{MainToMiner, MainToPeerThread, MinerToMain, PeerThreadToMain};
@@ -321,16 +321,7 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
 }
 const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 
-// This is a callback fn passed to AtomicRw, AtomicMutex
-// and called when a lock is acquired.  This way
-// we can track which threads+tasks are acquiring
-// which locks for reads and/or mutations.
-pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
-    let tokio_id = match tokio::task::try_id() {
-        Some(id) => format!("{}", id),
-        None => "?".to_string(),
-    };
-
+pub(crate) fn current_thread_id() -> u64 {
     // workaround: parse thread_id debug output into a u64.
     // (because ThreadId::as_u64() is unstable)
     let thread_id_dbg: String = format!("{:?}", std::thread::current().id());
@@ -346,29 +337,40 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
         .collect::<Vec<u8>>();
     let nums = String::from_utf8_lossy(nums_u8).to_string();
 
-    let thread_id = nums.parse::<u64>().unwrap();
+    nums.parse::<u64>().unwrap()
+}
+
+// This is a callback fn passed to AtomicRw, AtomicMutex
+// and called when a lock is acquired.  This way
+// we can track which threads+tasks are acquiring
+// which locks for reads and/or mutations.
+pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
+    let tokio_id = match tokio::task::try_id() {
+        Some(id) => format!("{}", id),
+        None => "?".to_string(),
+    };
 
     match lock_event {
-        sync_tokio::LockEvent::Acquire{info, acquired} =>
-            println!(
-                "tokio lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
-                info.name().unwrap_or("?"),
-                info.lock_type(),
-                acquired,
-                thread_id,
-                std::thread::current().name().unwrap_or("?"),
-                tokio_id,
-            ),
-        sync_tokio::LockEvent::Release{info, acquired} =>
-            println!(
-                "tokio lock `{}` of type `{}` released for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
-                info.name().unwrap_or("?"),
-                info.lock_type(),
-                acquired,
-                thread_id,
-                std::thread::current().name().unwrap_or("?"),
-                tokio_id,
-            )
+        sync_tokio::LockEvent::Acquire { ref info, acquired } => trace!(
+            ?lock_event,
+            "tokio lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+            info.name().unwrap_or("?"),
+            info.lock_type(),
+            acquired,
+            current_thread_id(),
+            std::thread::current().name().unwrap_or("?"),
+            tokio_id,
+        ),
+        sync_tokio::LockEvent::Release { ref info, acquired } => trace!(
+            ?lock_event,
+            "tokio lock `{}` of type `{}` released for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+            info.name().unwrap_or("?"),
+            info.lock_type(),
+            acquired,
+            current_thread_id(),
+            std::thread::current().name().unwrap_or("?"),
+            tokio_id,
+        ),
     }
 }
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
