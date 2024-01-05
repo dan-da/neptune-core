@@ -455,8 +455,11 @@ impl RPC for NeptuneRPCServer {
         }
 
         let transaction_result = executor::block_on(async {
-            let state = self.state.lock_guard().await;
-            state.create_transaction(receiver_data, fee).await
+            self.state
+                .lock_guard_mut()
+                .await
+                .create_transaction(receiver_data, fee)
+                .await
         });
 
         let transaction = match transaction_result {

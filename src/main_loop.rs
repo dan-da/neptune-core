@@ -1038,7 +1038,7 @@ impl MainLoopHandler {
                 // Handle incoming UTXO notification cleanup, i.e. removing stale/too old UTXO notification from pool
                 _ = &mut utxo_notification_cleanup_timer => {
                     debug!("Timer: UTXO notification pool cleanup job");
-                    self.global_state_lock.lock(|s| s.wallet_state.expected_utxos.prune_stale_utxo_notifications()).await;
+                    self.global_state_lock.lock_mut(|s| s.wallet_state.expected_utxos.prune_stale_utxo_notifications()).await;
 
                     utxo_notification_cleanup_timer.as_mut().reset(tokio::time::Instant::now() + utxo_notification_cleanup_timer_interval);
                 }

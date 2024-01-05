@@ -585,8 +585,9 @@ mod block_tests {
         // has a wallet which receives a premine-UTXO.
         let network = Network::Alpha;
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let global_state = global_state_lock.lock_guard().await;
-        let spending_key = global_state
+        let spending_key = global_state_lock
+            .lock_guard()
+            .await
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -612,7 +613,9 @@ mod block_tests {
             sender_randomness: random(),
             utxo: new_utxo,
         };
-        let new_tx = global_state
+        let new_tx = global_state_lock
+            .lock_guard_mut()
+            .await
             .create_transaction(vec![reciever_data], 1.into())
             .await
             .unwrap();

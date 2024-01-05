@@ -1020,8 +1020,9 @@ mod archival_state_tests {
                 pubscript_input: vec![],
             },
         ];
-        let global_state = global_state_lock.lock_guard().await;
-        let sender_tx = global_state
+        let sender_tx = global_state_lock
+            .lock_guard_mut()
+            .await
             .create_transaction(receiver_data, Into::<Amount>::into(4))
             .await
             .unwrap();
@@ -1277,8 +1278,9 @@ mod archival_state_tests {
                 lock_script_hash: LockScript::anyone_can_spend().hash(),
             },
         };
-        let global_state = global_state_lock.lock_guard().await;
-        let sender_tx = global_state
+        let sender_tx = global_state_lock
+            .lock_guard_mut()
+            .await
             .create_transaction(vec![receiver_data], one_money)
             .await
             .unwrap();
@@ -1365,8 +1367,9 @@ mod archival_state_tests {
             },
         ];
         {
-            let genesis_state = genesis_state_lock.lock_guard().await;
-            let tx_to_alice_and_bob = genesis_state
+            let tx_to_alice_and_bob = genesis_state_lock
+                .lock_guard_mut()
+                .await
                 .create_transaction(
                     [
                         receiver_data_for_alice.clone(),
@@ -1510,7 +1513,7 @@ mod archival_state_tests {
             },
         ];
         let tx_from_alice = alice_state_lock
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .create_transaction(receiver_data_from_alice.clone(), Into::<Amount>::into(1))
             .await
@@ -1548,7 +1551,7 @@ mod archival_state_tests {
             },
         ];
         let tx_from_bob = bob_state_lock
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .create_transaction(receiver_data_from_bob.clone(), Into::<Amount>::into(2))
             .await
@@ -1613,7 +1616,7 @@ mod archival_state_tests {
         // Update genesis wallet and verify that all ingoing UTXOs are recorded
         for rec_data in receiver_data_from_alice {
             genesis_state_lock
-                .lock_guard()
+                .lock_guard_mut()
                 .await
                 .wallet_state
                 .expected_utxos
@@ -1627,7 +1630,7 @@ mod archival_state_tests {
         }
         for rec_data in receiver_data_from_bob {
             genesis_state_lock
-                .lock_guard()
+                .lock_guard_mut()
                 .await
                 .wallet_state
                 .expected_utxos
@@ -1640,7 +1643,7 @@ mod archival_state_tests {
                 .unwrap();
         }
         genesis_state_lock
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
             .expected_utxos

@@ -64,7 +64,7 @@ impl ExpectedUtxo {
 }
 
 #[derive(Clone, Debug, GetSize)]
-struct UtxoNotificationPoolInternal {
+pub struct UtxoNotificationPool {
     max_total_size: usize,
     max_unconfirmed_notification_count_per_peer: usize,
     notifications: HashMap<AdditionRecord, ExpectedUtxo>,
@@ -76,9 +76,9 @@ struct UtxoNotificationPoolInternal {
 }
 
 #[derive(Clone, Debug)]
-pub struct UtxoNotificationPool(sync::AtomicRw<UtxoNotificationPoolInternal>);
+pub struct UtxoNotificationPoolLock(sync::AtomicRw<UtxoNotificationPool>);
 
-impl UtxoNotificationPoolInternal {
+impl UtxoNotificationPool {
     fn pop_min(&mut self) -> Option<(ExpectedUtxo, Credibility)> {
         if let Some((utxo_digest, credibility)) = self.queue.pop_min() {
             let expected_utxo = self.notifications.remove(&utxo_digest).unwrap();
@@ -324,10 +324,9 @@ impl UtxoNotificationPoolInternal {
     }
 }
 
-impl UtxoNotificationPool {
+impl UtxoNotificationPoolLock {
     pub fn new(max_total_size: ByteSize, max_notification_count_per_peer: usize) -> Self {
-        let inner =
-            UtxoNotificationPoolInternal::new(max_total_size, max_notification_count_per_peer);
+        let inner = UtxoNotificationPool::new(max_total_size, max_notification_count_per_peer);
         Self(sync::AtomicRw::from((
             inner,
             Some("UtxoNotificationPool"),
@@ -452,7 +451,7 @@ mod wallet_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn utxo_notification_insert_remove_scan() {
-        let notification_pool = UtxoNotificationPool::new(ByteSize::kb(1), 100);
+        let mut notification_pool = UtxoNotificationPool::new(ByteSize::kb(1), 100);
         assert!(notification_pool.is_empty());
         assert!(notification_pool.len().is_zero());
         let mock_utxo = Utxo {
@@ -479,7 +478,7 @@ mod wallet_state_tests {
         assert_eq!(1, notification_pool.len());
         assert_eq!(
             1,
-            notification_pool.0.lock_guard().peer_id_to_expected_utxos[&peer_instance_id].len()
+            notification_pool.peer_id_to_expected_utxos[&peer_instance_id].len()
         );
 
         let mock_tx_containing_expected_utxo =
@@ -504,8 +503,6 @@ mod wallet_state_tests {
         assert!(notification_pool.is_empty());
         assert!(
             !notification_pool
-                .0
-                .lock_guard()
                 .peer_id_to_expected_utxos
                 .contains_key(&peer_instance_id),
             "Key for peer must be deleted after removal of expected UTXO"
@@ -516,7 +513,7 @@ mod wallet_state_tests {
     #[tokio::test]
     async fn utxo_notification_peer_spam_test() {
         let max_number_of_stored_utxos_per_peer = 100;
-        let notification_pool =
+        let mut notification_pool =
             UtxoNotificationPool::new(ByteSize::mb(1), max_number_of_stored_utxos_per_peer);
 
         let spamming_peer: InstanceId = random();
@@ -609,11 +606,11 @@ mod wallet_state_tests {
             .unwrap();
         assert_eq!(
             101,
-            notification_pool.0.lock_guard().peer_id_to_expected_utxos[&spamming_peer].len()
+            notification_pool.peer_id_to_expected_utxos[&spamming_peer].len()
         );
         assert_eq!(
             1,
-            notification_pool.0.lock_guard().peer_id_to_expected_utxos[&non_spamming_peer].len()
+            notification_pool.peer_id_to_expected_utxos[&non_spamming_peer].len()
         );
 
         // Verify that `pop_min` returns the UTXO notification with lowest credibility
@@ -634,7 +631,7 @@ mod wallet_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn prune_stale_utxo_notifications_test() {
-        let notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
+        let mut notification_pool = UtxoNotificationPool::new(ByteSize::mb(1), 100);
         let mock_utxo = Utxo {
             lock_script_hash: LockScript::anyone_can_spend().hash(),
             coins: Into::<Amount>::into(14).to_native_coins(),
@@ -669,8 +666,6 @@ mod wallet_state_tests {
         // Manipulate the time this entry was inserted
         let two_weeks_as_sec = 60 * 60 * 24 * 7 * 2;
         notification_pool
-            .0
-            .lock_guard_mut()
             .notifications
             .get_mut(&addition_records[0])
             .unwrap()
@@ -687,15 +682,11 @@ mod wallet_state_tests {
         // Manipulate the time of two more entries
         let eight_weeks_as_secs = 60 * 60 * 24 * 7 * 8;
         notification_pool
-            .0
-            .lock_guard_mut()
             .notifications
             .get_mut(&addition_records[1])
             .unwrap()
             .notification_received = SystemTime::now() - Duration::from_secs(eight_weeks_as_secs);
         notification_pool
-            .0
-            .lock_guard_mut()
             .notifications
             .get_mut(&addition_records[3])
             .unwrap()

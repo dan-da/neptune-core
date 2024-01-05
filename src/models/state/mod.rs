@@ -290,7 +290,7 @@ impl GlobalState {
     /// Returns the transaction and a vector containing the sender
     /// randomness for each output UTXO.
     pub async fn create_transaction(
-        &self,
+        &mut self,
         receiver_data: Vec<UtxoReceiverData>,
         fee: Amount,
     ) -> Result<Transaction> {
@@ -899,7 +899,6 @@ mod global_state_tests {
         let network = Network::Alpha;
         let other_wallet = WalletSecret::new(wallet::generate_secret_key());
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let global_state = global_state_lock.lock_guard().await;
         let twenty_amount: Amount = 20.into();
         let twenty_coins = twenty_amount.to_native_coins();
         let recipient_address = other_wallet.nth_generation_spending_key(0).to_address();
@@ -920,7 +919,9 @@ mod global_state_tests {
             pubscript,
             pubscript_input,
         }];
-        let tx: Transaction = global_state
+        let tx: Transaction = global_state_lock
+            .lock_guard_mut()
+            .await
             .create_transaction(receiver_data, 1.into())
             .await
             .unwrap();
@@ -964,7 +965,9 @@ mod global_state_tests {
             });
         }
 
-        let new_tx: Transaction = global_state
+        let new_tx: Transaction = global_state_lock
+            .lock_guard_mut()
+            .await
             .create_transaction(other_receiver_data, 1.into())
             .await
             .unwrap();
