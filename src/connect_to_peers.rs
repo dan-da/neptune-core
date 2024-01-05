@@ -549,8 +549,7 @@ mod connect_tests {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::SelfConnect))");
         }
 
-        let mut state = state_lock.lock_guard_mut().await;
-        state.cli.max_peers = 1;
+        state_lock.lock_mut(|s| s.cli.max_peers = 1).await;
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -563,10 +562,12 @@ mod connect_tests {
                 "Must return ConnectionStatus::Refused(ConnectionRefusedReason::MaxPeerNumberExceeded))"
             );
         }
-        state.cli.max_peers = 100;
+        state_lock.lock_mut(|s| s.cli.max_peers = 100).await;
 
         // Attempt to connect to already connected peer
-        let connected_peer: PeerInfo = state.net.peer_map.values().collect::<Vec<_>>()[0].clone();
+        let connected_peer: PeerInfo = state_lock
+            .lock(|s| s.net.peer_map.values().collect::<Vec<_>>()[0].clone())
+            .await;
         let mut mutated_other_handshake = other_handshake.clone();
         mutated_other_handshake.instance_id = connected_peer.instance_id;
         status = check_if_connection_is_allowed(
@@ -584,7 +585,7 @@ mod connect_tests {
 
         // Verify that banned peers are rejected by this check
         // First check that peers can be banned by command-line arguments
-        state.cli.ban.push(peer_sa.ip());
+        state_lock.lock_mut(|s| s.cli.ban.push(peer_sa.ip())).await;
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -596,7 +597,7 @@ mod connect_tests {
             bail!("Must return ConnectionStatus::Refused(ConnectionRefusedReason::BadStanding)) on CLI-ban");
         }
 
-        state.cli.ban.pop();
+        state_lock.lock_mut(|s| s.cli.ban.pop()).await;
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -617,9 +618,12 @@ mod connect_tests {
             ))),
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
-        state
-            .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
-            .await;
+        {
+            let state = state_lock.lock_guard().await;
+            state
+                .write_peer_standing_on_decrease(peer_sa.ip(), bad_standing)
+                .await;
+        }
         status = check_if_connection_is_allowed(
             state_lock.clone(),
             &own_handshake,
@@ -662,11 +666,11 @@ mod connect_tests {
             ))?)
             .read(&to_bytes(&PeerMessage::Bye)?)
             .build();
-        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state, _hsd) =
+        let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 0).await?;
         answer_peer(
             mock,
-            state.clone(),
+            state_lock.clone(),
             get_dummy_socket_address(0),
             from_main_rx_clone,
             to_main_tx,
@@ -675,7 +679,7 @@ mod connect_tests {
         .await?;
 
         // Verify that peer map is empty after connection has been closed
-        match state.lock(|s| s.net.peer_map.keys().len()).await {
+        match state_lock.lock(|s| s.net.peer_map.keys().len()).await {
             0 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };
@@ -831,10 +835,8 @@ mod connect_tests {
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 2).await?;
 
-        let mut state = state_lock.lock_guard_mut().await;
-
         // set max_peers to 2 to ensure failure on next connection attempt
-        state.cli.max_peers = 2;
+        state_lock.lock_mut(|s| s.cli.max_peers = 2).await;
 
         let (_, _, _latest_block_header) = get_dummy_latest_block(None);
         let answer = answer_peer(
@@ -889,10 +891,12 @@ mod connect_tests {
             timestamp_of_latest_sanction: Some(SystemTime::now()),
         };
         let peer_address = get_dummy_socket_address(3);
-        let state = state_lock.lock_guard_mut().await;
-        state
-            .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
-            .await;
+        {
+            let state = state_lock.lock_guard_mut().await;
+            state
+                .write_peer_standing_on_decrease(peer_address.ip(), bad_standing)
+                .await;
+        }
 
         let answer = answer_peer(
             mock,
@@ -909,7 +913,7 @@ mod connect_tests {
         );
 
         // Verify that peer map is empty after connection has been refused
-        match state.net.peer_map.keys().len() {
+        match state_lock.lock(|s| s.net.peer_map.keys().len()).await {
             3 => (),
             _ => bail!("Incorrect number of maps in peer map"),
         };

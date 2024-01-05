@@ -354,22 +354,32 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
     };
 
     match lock_event {
-        sync_tokio::LockEvent::Acquire { ref info, acquired } => trace!(
+        sync_tokio::LockEvent::TryAcquire { ref info, acquisition } => trace!(
             ?lock_event,
-            "tokio lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+            "TryAcquire tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
             info.name().unwrap_or("?"),
             info.lock_type(),
-            acquired,
+            acquisition,
             current_thread_id(),
             std::thread::current().name().unwrap_or("?"),
             tokio_id,
         ),
-        sync_tokio::LockEvent::Release { ref info, acquired } => trace!(
+        sync_tokio::LockEvent::Acquire { ref info, acquisition } => trace!(
             ?lock_event,
-            "tokio lock `{}` of type `{}` released for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
+            "Acquired tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
             info.name().unwrap_or("?"),
             info.lock_type(),
-            acquired,
+            acquisition,
+            current_thread_id(),
+            std::thread::current().name().unwrap_or("?"),
+            tokio_id,
+        ),
+        sync_tokio::LockEvent::Release { ref info, acquisition } => trace!(
+            ?lock_event,
+            "Released tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
+            info.name().unwrap_or("?"),
+            info.lock_type(),
+            acquisition,
             current_thread_id(),
             std::thread::current().name().unwrap_or("?"),
             tokio_id,

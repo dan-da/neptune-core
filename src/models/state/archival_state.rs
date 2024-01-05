@@ -1395,81 +1395,92 @@ mod archival_state_tests {
                 .unwrap();
         }
 
-        // Update wallets
-        let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
-        genesis_state
-            .wallet_state
-            .expected_utxos
-            .add_expected_utxo(
-                cb_utxo,
-                cb_output_randomness,
-                genesis_spending_key.privacy_preimage,
-                UtxoNotifier::OwnMiner,
-            )
-            .unwrap();
-        genesis_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
-            .await
-            .unwrap();
-        assert_eq!(
-            3,
+        {
+            // Update wallets
+            let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
             genesis_state
                 .wallet_state
-                .wallet_db
-                .monitored_utxos()
-                .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
-        );
-
-        let mut alice_state = alice_state_lock.lock_guard_mut().await;
-        for rec_data in receiver_data_for_alice {
-            alice_state
-                .wallet_state
                 .expected_utxos
                 .add_expected_utxo(
-                    rec_data.utxo.clone(),
-                    rec_data.sender_randomness,
-                    alice_spending_key.privacy_preimage,
-                    UtxoNotifier::Cli,
+                    cb_utxo,
+                    cb_output_randomness,
+                    genesis_spending_key.privacy_preimage,
+                    UtxoNotifier::OwnMiner,
                 )
                 .unwrap();
+            genesis_state
+                .wallet_state
+                .update_wallet_state_with_new_block(&block_1)
+                .await
+                .unwrap();
+            assert_eq!(
+                3,
+                genesis_state
+                    .wallet_state
+                    .wallet_db
+                    .monitored_utxos()
+                    .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
+            );
         }
-        alice_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
-            .await
-            .unwrap();
 
-        let mut bob_state = bob_state_lock.lock_guard_mut().await;
-        for rec_data in receiver_data_for_bob {
+        {
+            let mut alice_state = alice_state_lock.lock_guard_mut().await;
+            for rec_data in receiver_data_for_alice {
+                alice_state
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        rec_data.utxo.clone(),
+                        rec_data.sender_randomness,
+                        alice_spending_key.privacy_preimage,
+                        UtxoNotifier::Cli,
+                    )
+                    .unwrap();
+            }
+            alice_state
+                .wallet_state
+                .update_wallet_state_with_new_block(&block_1)
+                .await
+                .unwrap();
+        }
+
+        {
+            let mut bob_state = bob_state_lock.lock_guard_mut().await;
+            for rec_data in receiver_data_for_bob {
+                bob_state
+                    .wallet_state
+                    .expected_utxos
+                    .add_expected_utxo(
+                        rec_data.utxo.clone(),
+                        rec_data.sender_randomness,
+                        bob_spending_key.privacy_preimage,
+                        UtxoNotifier::Cli,
+                    )
+                    .unwrap();
+            }
             bob_state
                 .wallet_state
-                .expected_utxos
-                .add_expected_utxo(
-                    rec_data.utxo.clone(),
-                    rec_data.sender_randomness,
-                    bob_spending_key.privacy_preimage,
-                    UtxoNotifier::Cli,
-                )
+                .update_wallet_state_with_new_block(&block_1)
+                .await
                 .unwrap();
         }
-        bob_state
-            .wallet_state
-            .update_wallet_state_with_new_block(&block_1)
-            .await
-            .unwrap();
 
         // Now Alice should have a balance of 100 and Bob a balance of 200
+
         assert_eq!(
             Into::<Amount>::into(100),
-            alice_state
+            alice_state_lock
+                .lock_guard()
+                .await
                 .get_wallet_status_for_tip()
                 .await
                 .synced_unspent_amount
         );
         assert_eq!(
             Into::<Amount>::into(200),
-            bob_state
+            bob_state_lock
+                .lock_guard()
+                .await
                 .get_wallet_status_for_tip()
                 .await
                 .synced_unspent_amount
@@ -1498,7 +1509,9 @@ mod archival_state_tests {
                 pubscript_input: vec![],
             },
         ];
-        let tx_from_alice = alice_state
+        let tx_from_alice = alice_state_lock
+            .lock_guard()
+            .await
             .create_transaction(receiver_data_from_alice.clone(), Into::<Amount>::into(1))
             .await
             .unwrap();
@@ -1534,7 +1547,9 @@ mod archival_state_tests {
                 pubscript_input: vec![],
             },
         ];
-        let tx_from_bob = bob_state
+        let tx_from_bob = bob_state_lock
+            .lock_guard()
+            .await
             .create_transaction(receiver_data_from_bob.clone(), Into::<Amount>::into(2))
             .await
             .unwrap();
@@ -1566,22 +1581,30 @@ mod archival_state_tests {
         }
 
         // Update wallets and verify that Alice and Bob's balances are zero
-        alice_state
+        alice_state_lock
+            .lock_guard_mut()
+            .await
             .wallet_state
             .update_wallet_state_with_new_block(&block_2)
             .await
             .unwrap();
-        bob_state
+        bob_state_lock
+            .lock_guard_mut()
+            .await
             .wallet_state
             .update_wallet_state_with_new_block(&block_2)
             .await
             .unwrap();
-        assert!(alice_state
+        assert!(alice_state_lock
+            .lock_guard()
+            .await
             .get_wallet_status_for_tip()
             .await
             .synced_unspent_amount
             .is_zero());
-        assert!(bob_state
+        assert!(bob_state_lock
+            .lock_guard()
+            .await
             .get_wallet_status_for_tip()
             .await
             .synced_unspent_amount
@@ -1589,7 +1612,9 @@ mod archival_state_tests {
 
         // Update genesis wallet and verify that all ingoing UTXOs are recorded
         for rec_data in receiver_data_from_alice {
-            genesis_state
+            genesis_state_lock
+                .lock_guard()
+                .await
                 .wallet_state
                 .expected_utxos
                 .add_expected_utxo(
@@ -1601,7 +1626,9 @@ mod archival_state_tests {
                 .unwrap();
         }
         for rec_data in receiver_data_from_bob {
-            genesis_state
+            genesis_state_lock
+                .lock_guard()
+                .await
                 .wallet_state
                 .expected_utxos
                 .add_expected_utxo(
@@ -1612,7 +1639,9 @@ mod archival_state_tests {
                 )
                 .unwrap();
         }
-        genesis_state
+        genesis_state_lock
+            .lock_guard()
+            .await
             .wallet_state
             .expected_utxos
             .add_expected_utxo(
@@ -1622,7 +1651,9 @@ mod archival_state_tests {
                 UtxoNotifier::Cli,
             )
             .unwrap();
-        genesis_state
+        genesis_state_lock
+            .lock_guard_mut()
+            .await
             .wallet_state
             .update_wallet_state_with_new_block(&block_2)
             .await
@@ -1631,7 +1662,7 @@ mod archival_state_tests {
         // Verify that states and wallets can be updated successfully
         assert_eq!(
             9,
-            genesis_state
+            genesis_state_lock.lock_guard().await
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
@@ -1639,7 +1670,9 @@ mod archival_state_tests {
         );
 
         // Verify that mutator sets are updated correctly and that last block is block 2
-        for state in [&genesis_state, &alice_state, &bob_state] {
+        for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
+            let state = state_lock.lock_guard().await;
+
             assert_eq!(
                 block_2.body.next_mutator_set_accumulator,
                 state

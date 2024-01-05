@@ -581,6 +581,7 @@ mod rpc_server_tests {
         Ok(())
     }
 
+    #[allow(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
@@ -616,9 +617,11 @@ mod rpc_server_tests {
         state
             .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
+        drop(state);
 
         // Verify expected initial conditions
         {
+            let state = state_lock.lock_guard().await;
             let peer_standing_0 = state
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
@@ -629,6 +632,7 @@ mod rpc_server_tests {
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
             assert_ne!(None, peer_standing_1.unwrap().latest_sanction);
+            drop(state);
 
             // Clear standing of #0
             let (dummy_tx, _rx) =
@@ -644,6 +648,7 @@ mod rpc_server_tests {
         }
         // Verify expected resulting conditions in database
         {
+            let state = state_lock.lock_guard().await;
             let peer_standing_0 = state
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
@@ -663,6 +668,8 @@ mod rpc_server_tests {
         }
         Ok(())
     }
+
+    #[allow(clippy::shadow_unrelated)]
     #[traced_test]
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
@@ -699,9 +706,13 @@ mod rpc_server_tests {
             .write_peer_standing_on_decrease(peer_address_1.ip(), standing_1)
             .await;
 
+        drop(state);
+
         // Verify expected initial conditions
         {
-            let peer_standing_0 = state
+            let peer_standing_0 = state_lock
+                .lock_guard_mut()
+                .await
                 .get_peer_standing_from_database(peer_address_0.ip())
                 .await;
             assert_ne!(0, peer_standing_0.unwrap().standing);
@@ -709,7 +720,9 @@ mod rpc_server_tests {
         }
 
         {
-            let peer_standing_1 = state
+            let peer_standing_1 = state_lock
+                .lock_guard_mut()
+                .await
                 .get_peer_standing_from_database(peer_address_1.ip())
                 .await;
             assert_ne!(0, peer_standing_1.unwrap().standing);
@@ -724,6 +737,8 @@ mod rpc_server_tests {
             rpc_server_to_main_tx: dummy_tx.clone(),
         };
         rpc_server.clear_all_standings(context::current()).await;
+
+        let state = state_lock.lock_guard().await;
 
         // Verify expected resulting conditions in database
         {

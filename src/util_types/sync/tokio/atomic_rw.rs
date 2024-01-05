@@ -188,6 +188,7 @@ impl<T> AtomicRw<T> {
     /// # })
     /// ```
     pub async fn lock_guard(&self) -> AtomicRwReadGuard<T> {
+        self.try_acquire_read_cb();
         let guard = self.inner.read().await;
         AtomicRwReadGuard::new(guard, &self.lock_callback_info)
     }
@@ -206,6 +207,7 @@ impl<T> AtomicRw<T> {
     /// # })
     /// ```
     pub async fn lock_guard_mut(&self) -> AtomicRwWriteGuard<T> {
+        self.try_acquire_write_cb();
         let guard = self.inner.write().await;
         AtomicRwWriteGuard::new(guard, &self.lock_callback_info)
     }
@@ -228,6 +230,7 @@ impl<T> AtomicRw<T> {
     where
         F: FnOnce(&T) -> R,
     {
+        self.try_acquire_read_cb();
         let inner_guard = self.inner.read().await;
         let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info);
         f(&guard)
@@ -251,6 +254,7 @@ impl<T> AtomicRw<T> {
     where
         F: FnOnce(&mut T) -> R,
     {
+        self.try_acquire_write_cb();
         let inner_guard = self.inner.write().await;
         let mut guard = AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info);
         f(&mut guard)
@@ -276,6 +280,7 @@ impl<T> AtomicRw<T> {
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
+        self.try_acquire_read_cb();
         let inner_guard = self.inner.read().await;
         let guard = AtomicRwReadGuard::new(inner_guard, &self.lock_callback_info);
         f(&guard).await
@@ -301,9 +306,28 @@ impl<T> AtomicRw<T> {
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
     pub async fn lock_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
+        self.try_acquire_write_cb();
         let inner_guard = self.inner.write().await;
         let mut guard = AtomicRwWriteGuard::new(inner_guard, &self.lock_callback_info);
         f(&mut guard).await
+    }
+
+    fn try_acquire_read_cb(&self) {
+        if let Some(cb) = self.lock_callback_info.lock_callback_fn {
+            cb(LockEvent::TryAcquire {
+                info: self.lock_callback_info.lock_info_owned.as_lock_info(),
+                acquisition: LockAcquisition::Read,
+            });
+        }
+    }
+
+    fn try_acquire_write_cb(&self) {
+        if let Some(cb) = self.lock_callback_info.lock_callback_fn {
+            cb(LockEvent::TryAcquire {
+                info: self.lock_callback_info.lock_info_owned.as_lock_info(),
+                acquisition: LockAcquisition::Write,
+            });
+        }
     }
 }
 
@@ -320,7 +344,7 @@ impl<'a, T> AtomicRwReadGuard<'a, T> {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquired: LockAcquisition::Read,
+                acquisition: LockAcquisition::Read,
             });
         }
         Self {
@@ -336,7 +360,7 @@ impl<'a, T> Drop for AtomicRwReadGuard<'a, T> {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquired: LockAcquisition::Read,
+                acquisition: LockAcquisition::Read,
             });
         }
     }
@@ -362,7 +386,7 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquired: LockAcquisition::Write,
+                acquisition: LockAcquisition::Write,
             });
         }
         Self {
@@ -378,7 +402,7 @@ impl<'a, T> Drop for AtomicRwWriteGuard<'a, T> {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquired: LockAcquisition::Write,
+                acquisition: LockAcquisition::Write,
             });
         }
     }

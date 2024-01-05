@@ -189,6 +189,7 @@ impl<T> AtomicMutex<T> {
     /// # })
     /// ```
     pub async fn lock_guard(&self) -> AtomicMutexGuard<T> {
+        self.try_acquire_read_cb();
         let guard = self.inner.lock().await;
         AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Read)
     }
@@ -207,6 +208,7 @@ impl<T> AtomicMutex<T> {
     /// # })
     /// ```
     pub async fn lock_guard_mut(&self) -> AtomicMutexGuard<T> {
+        self.try_acquire_write_cb();
         let guard = self.inner.lock().await;
         AtomicMutexGuard::new(guard, &self.lock_callback_info, LockAcquisition::Write)
     }
@@ -229,6 +231,7 @@ impl<T> AtomicMutex<T> {
     where
         F: FnOnce(&T) -> R,
     {
+        self.try_acquire_read_cb();
         let inner_guard = self.inner.lock().await;
         let guard =
             AtomicMutexGuard::new(inner_guard, &self.lock_callback_info, LockAcquisition::Read);
@@ -253,6 +256,7 @@ impl<T> AtomicMutex<T> {
     where
         F: FnOnce(&mut T) -> R,
     {
+        self.try_acquire_write_cb();
         let inner_guard = self.inner.lock().await;
         let mut guard = AtomicMutexGuard::new(
             inner_guard,
@@ -282,6 +286,7 @@ impl<T> AtomicMutex<T> {
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
     pub async fn lock_async<R>(&self, f: impl FnOnce(&T) -> BoxFuture<'_, R>) -> R {
+        self.try_acquire_read_cb();
         let inner_guard = self.inner.lock().await;
         let guard =
             AtomicMutexGuard::new(inner_guard, &self.lock_callback_info, LockAcquisition::Read);
@@ -308,6 +313,7 @@ impl<T> AtomicMutex<T> {
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
     pub async fn lock_mut_async<R>(&self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
+        self.try_acquire_write_cb();
         let inner_guard = self.inner.lock().await;
         let mut guard = AtomicMutexGuard::new(
             inner_guard,
@@ -315,6 +321,24 @@ impl<T> AtomicMutex<T> {
             LockAcquisition::Write,
         );
         f(&mut guard).await
+    }
+
+    fn try_acquire_read_cb(&self) {
+        if let Some(cb) = self.lock_callback_info.lock_callback_fn {
+            cb(LockEvent::TryAcquire {
+                info: self.lock_callback_info.lock_info_owned.as_lock_info(),
+                acquisition: LockAcquisition::Read,
+            });
+        }
+    }
+
+    fn try_acquire_write_cb(&self) {
+        if let Some(cb) = self.lock_callback_info.lock_callback_fn {
+            cb(LockEvent::TryAcquire {
+                info: self.lock_callback_info.lock_info_owned.as_lock_info(),
+                acquisition: LockAcquisition::Write,
+            });
+        }
     }
 }
 
@@ -324,25 +348,25 @@ impl<T> AtomicMutex<T> {
 pub struct AtomicMutexGuard<'a, T> {
     guard: MutexGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
-    acquired: LockAcquisition,
+    acquisition: LockAcquisition,
 }
 
 impl<'a, T> AtomicMutexGuard<'a, T> {
     fn new(
         guard: MutexGuard<'a, T>,
         lock_callback_info: &'a LockCallbackInfo,
-        acquired: LockAcquisition,
+        acquisition: LockAcquisition,
     ) -> Self {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquired,
+                acquisition,
             });
         }
         Self {
             guard,
             lock_callback_info,
-            acquired,
+            acquisition,
         }
     }
 }
@@ -353,7 +377,7 @@ impl<'a, T> Drop for AtomicMutexGuard<'a, T> {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
                 info: lock_callback_info.lock_info_owned.as_lock_info(),
-                acquired: self.acquired,
+                acquisition: self.acquisition,
             });
         }
     }
