@@ -1182,12 +1182,8 @@ mod peer_loop_tests {
 
         // Although the database is empty, `get_latest_block` still returns the genesis block,
         // since that block is hardcoded.
-        let mut different_genesis_block: Block = state
-            .clone()
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await;
+        let mut different_genesis_block: Block =
+            state.chain.archival_state().get_latest_block().await;
         different_genesis_block.header.nonce[2].increment();
         different_genesis_block.hash = Hash::hash(&different_genesis_block.header);
         let a_wallet_secret = WalletSecret::new(random());

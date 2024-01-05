@@ -895,7 +895,8 @@ mod archival_state_tests {
         let own_receiving_address = wallet.nth_generation_spending_key(0).to_address();
         let genesis_receiver_global_state_lock =
             get_mock_global_state(network, 0, Some(wallet)).await;
-        let genesis_receiver_global_state = genesis_receiver_global_state_lock.lock_guard().await;
+        let mut genesis_receiver_global_state =
+            genesis_receiver_global_state_lock.lock_guard_mut().await;
 
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis_receiver_global_state
@@ -1162,7 +1163,7 @@ mod archival_state_tests {
         let global_state_lock =
             get_mock_global_state(Network::RegTest, 42, Some(genesis_wallet)).await;
 
-        let global_state = global_state_lock.lock_guard().await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
         let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
         let mut previous_block = genesis_block.clone();
 
@@ -1462,7 +1463,7 @@ mod archival_state_tests {
         }
 
         // Update wallets
-        let genesis_state = genesis_state_lock.lock_guard().await;
+        let mut genesis_state = genesis_state_lock.lock_guard_mut().await;
         genesis_state
             .wallet_state
             .expected_utxos
@@ -1484,11 +1485,10 @@ mod archival_state_tests {
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
-                .await
                 .len(), "Genesis receiver must have 3 UTXOs after block 1: change from transaction, coinbase from block 1, and the spent premine UTXO"
         );
 
-        let alice_state = alice_state_lock.lock_guard().await;
+        let mut alice_state = alice_state_lock.lock_guard_mut().await;
         for rec_data in receiver_data_for_alice {
             alice_state
                 .wallet_state
@@ -1507,7 +1507,7 @@ mod archival_state_tests {
             .await
             .unwrap();
 
-        let bob_state = bob_state_lock.lock_guard().await;
+        let mut bob_state = bob_state_lock.lock_guard_mut().await;
         for rec_data in receiver_data_for_bob {
             bob_state
                 .wallet_state
@@ -1702,7 +1702,6 @@ mod archival_state_tests {
                 .wallet_state
                 .wallet_db
                 .monitored_utxos()
-                .await
                 .len(), "Genesis receiver must have 9 UTXOs after block 2: 3 after block 1, and 6 added by block 2"
         );
 

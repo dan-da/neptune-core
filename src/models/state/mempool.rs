@@ -626,14 +626,15 @@ mod tests {
         // has a wallet which receives a premine-UTXO.
         let premine_receiver_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, None).await;
-        let premine_receiver_global_state = premine_receiver_global_state_lock.lock_guard().await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &premine_receiver_global_state.wallet_state.wallet_secret;
         let premine_receiver_spending_key = premine_wallet_secret.nth_generation_spending_key(0);
         let premine_receiver_address = premine_receiver_spending_key.to_address();
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, Some(other_wallet_secret.clone())).await;
-        let other_global_state = other_global_state_lock.lock_guard().await;
+        let mut other_global_state = other_global_state_lock.lock_guard_mut().await;
         let other_receiver_spending_key = other_wallet_secret.nth_generation_spending_key(0);
         let other_receiver_address = other_receiver_spending_key.to_address();
 

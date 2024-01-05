@@ -310,7 +310,7 @@ mod wallet_tests {
     ///  * acquires read lock for `wallet_db`
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...
-        wallet_state.wallet_db.monitored_utxos().await.get_all()
+        wallet_state.wallet_db.monitored_utxos().get_all()
     }
 
     #[tokio::test]
@@ -318,7 +318,7 @@ mod wallet_tests {
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
         let network = Network::Testnet;
-        let wallet_state_premine_recipient = get_mock_wallet_state(None, network).await;
+        let mut wallet_state_premine_recipient = get_mock_wallet_state(None, network).await;
         let monitored_utxos_premine_wallet =
             get_monitored_utxos(&wallet_state_premine_recipient).await;
         assert_eq!(
@@ -391,7 +391,7 @@ mod wallet_tests {
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let network = Network::Testnet;
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state =
+        let mut own_wallet_state =
             get_mock_wallet_state(Some(own_wallet_secret.clone()), network).await;
         let other_wallet_secret = WalletSecret::new(generate_secret_key());
         let other_recipient_address = other_wallet_secret
@@ -509,7 +509,7 @@ mod wallet_tests {
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
         let network = Network::Testnet;
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -706,7 +706,7 @@ mod wallet_tests {
         // actually tested.
         let network = Network::Alpha;
         let own_wallet_secret = WalletSecret::new(generate_secret_key());
-        let own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
+        let mut own_wallet_state = get_mock_wallet_state(Some(own_wallet_secret), network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
@@ -715,7 +715,8 @@ mod wallet_tests {
         let premine_wallet = get_mock_wallet_state(None, network).await.wallet_secret;
         let premine_receiver_global_state_lock =
             get_mock_global_state(Network::Alpha, 2, Some(premine_wallet)).await;
-        let premine_receiver_global_state = premine_receiver_global_state_lock.lock_guard().await;
+        let mut premine_receiver_global_state =
+            premine_receiver_global_state_lock.lock_guard_mut().await;
         let preminers_original_balance = premine_receiver_global_state
             .get_wallet_status_for_tip()
             .await

@@ -29,7 +29,7 @@ use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::wallet::WalletSecret;
-use crate::models::state::{GlobalState, GlobalStateLock};
+use crate::models::state::GlobalStateLock;
 use crate::rpc_server::RPC;
 use anyhow::{Context, Result};
 use config_models::cli_args;
@@ -124,7 +124,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
     let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size);
-    let state = GlobalState::new(
+    let state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
@@ -132,7 +132,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         mempool,
         false,
     );
-    let state_lock = GlobalStateLock::from(state.clone());
+    let mut state = state_lock.lock_guard_mut().await;
     let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
     info!(
         "Most known canonical block has height {}",

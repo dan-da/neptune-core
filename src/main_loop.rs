@@ -1067,7 +1067,7 @@ impl MainLoopHandler {
     /// Locking:
     ///  * acquires read lock for `latest_block`
     async fn resync_membership_proofs(&self) -> Result<()> {
-        let global_state = self.global_state_lock.lock_guard().await;
+        let mut global_state = self.global_state_lock.lock_guard_mut().await;
 
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
@@ -1150,10 +1150,10 @@ impl MainLoopHandler {
     ///  * acquires write lock for `wallet_db`
     ///  * acquires write lock for `archival_mutator_set`
     async fn flush_databases(&self) -> Result<()> {
-        let global_state = self.global_state_lock.lock_guard_mut().await;
+        let mut global_state = self.global_state_lock.lock_guard_mut().await;
 
         // flush wallet databases
-        global_state.wallet_state.wallet_db.persist().await;
+        global_state.wallet_state.wallet_db.persist();
 
         let hash = global_state
             .chain

@@ -13,7 +13,7 @@ use twenty_first::{
 
 use super::monitored_utxo::MonitoredUtxo;
 
-pub(in super::super) struct RustyWalletDatabaseInner {
+pub struct RustyWalletDatabase {
     // Holds references to monitored_utxos, sync_label, counter
     // so they can be all written to levelDB as a single atomic batch write.
     schema: DbtSchema<RustyReader>,
@@ -28,7 +28,7 @@ pub(in super::super) struct RustyWalletDatabaseInner {
     counter: DbtSingleton<u64>,
 }
 
-impl RustyWalletDatabaseInner {
+impl RustyWalletDatabase {
     pub fn connect(db: DB) -> Self {
         let mut schema = DbtSchema::<RustyReader>::new(
             Arc::new(RustyReader { db }),
@@ -75,13 +75,13 @@ impl RustyWalletDatabaseInner {
 }
 
 #[derive(Clone)]
-pub struct RustyWalletDatabase {
-    pub(in super::super) inner: sync_tokio::AtomicRw<RustyWalletDatabaseInner>,
+pub struct RustyWalletDatabaseLock {
+    pub(in super::super) inner: sync_tokio::AtomicRw<RustyWalletDatabase>,
 }
 
-impl RustyWalletDatabase {
+impl RustyWalletDatabaseLock {
     pub fn connect(db: DB) -> Self {
-        let inner = RustyWalletDatabaseInner::connect(db);
+        let inner = RustyWalletDatabase::connect(db);
         Self {
             inner: sync_tokio::AtomicRw::from(inner),
         }
@@ -117,7 +117,7 @@ impl RustyWalletDatabase {
     }
 }
 
-impl StorageWriter for RustyWalletDatabaseInner {
+impl StorageWriter for RustyWalletDatabase {
     /// Locking:
     ///  * acquires read lock for DbtSchema `tables`
     fn persist(&mut self) {

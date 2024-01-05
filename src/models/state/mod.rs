@@ -111,7 +111,7 @@ impl DerefMut for GlobalStateLock {
 /// `GlobalState` handles all state of a Neptune node that is shared across its threads.
 ///
 /// Some fields are only written to by certain threads.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GlobalState {
     /// The `WalletState` may be updated by the main thread and the RPC server.
     pub wallet_state: WalletState,
@@ -194,7 +194,7 @@ impl GlobalState {
     /// Locking: acquires wallet_db read lock
     async fn get_latest_balance_height_internal(&self) -> Option<BlockHeight> {
         let current_tip_digest = self.chain.light_state().hash().await;
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
         if monitored_utxos.is_empty() {
             return None;
@@ -243,7 +243,7 @@ impl GlobalState {
     pub async fn get_balance_history(&self) -> Vec<(Digest, Duration, BlockHeight, Amount, Sign)> {
         let current_tip_digest = self.chain.light_state().hash().await;
 
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
         // let num_monitored_utxos = monitored_utxos.len();
         let mut history = vec![];
@@ -577,34 +577,7 @@ impl GlobalState {
     ///  * acquires read and write lock `wallet_db`
     ///  * acquires read lock for `archival_mutator_set`
     ///  * acquires read lock for `latest_block`
-    pub(crate) async fn restore_monitored_utxos_from_recovery_data(&self) -> Result<()> {
-        // Obtain a (static) mutex lock for entering this fn
-        // which performs read+write
-        //
-        // This lock serializes the read+write, so we guarantee
-        // that each writer thread calling this fn is writing based
-        // on the most recent state.
-        //
-        // Yet we keep the write-lock section as short as possible
-        // to maximize concurrency of any reader threads.
-        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
-            std::sync::OnceLock::new();
-        let atomic_update_section = ATOMIC_MUTEX
-            .get_or_init(|| {
-                sync_tokio::AtomicMutex::from((
-                    (),
-                    Some("restore_monitored_utxos_from_recovery_data"),
-                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
-                ))
-            })
-            .lock_guard_mut()
-            .await;
-
-        // note: RwLock read locks do not block eachother so we don't
-        // really need to worry about a `canonical order`
-        let wallet_db = self.wallet_state.wallet_db.inner.lock_guard().await;
-        let monitored_utxos = wallet_db.monitored_utxos();
-
+    pub(crate) async fn restore_monitored_utxos_from_recovery_data(&mut self) -> Result<()> {
         let ams_lock = self
             .chain
             .archival_state()
@@ -627,6 +600,7 @@ impl GlobalState {
         // Loop over all `incoming_utxos` and check if they have a corresponding
         // monitored UTXO in the database.
         let mut recovery_data_for_missing_mutxos = vec![];
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
         let mutxo_count = monitored_utxos.len();
         '_outer: for (j, incoming_utxo) in incoming_utxos.into_iter().enumerate() {
             // The outer loop can take a long time to run. So we inform the user how far we have progressed.
@@ -715,19 +689,10 @@ impl GlobalState {
             restored_mutxos += 1;
         }
 
-        drop(wallet_db); // drop read lock before acquiring write lock.
-
         // note: we could just call wallet_db.persist(), but this makes it
         // clearer we are acquiring write lock.
-        self.wallet_state
-            .wallet_db
-            .inner
-            .lock_guard_mut()
-            .await
-            .persist();
+        self.wallet_state.wallet_db.persist();
         info!("Successfully restored {restored_mutxos} monitored UTXOs to wallet database");
-
-        drop(atomic_update_section); // finish atomic read+write section.
 
         Ok(())
     }
@@ -735,33 +700,11 @@ impl GlobalState {
     /// Locking:
     ///  * acquires read and write lock for `wallet_db`
     pub async fn resync_membership_proofs_from_stored_blocks(
-        &self,
+        &mut self,
         tip_hash: Digest,
     ) -> Result<()> {
-        // Obtain a mutex lock for entering this fn
-        // which performs read+write
-        //
-        // This lock serializes the read+write, so we guarantee
-        // that each writer thread calling this fn is writing based
-        // on the most recent state.
-        //
-        // Yet we keep the write-lock section as short as possible
-        // to maximize concurrency of any reader threads.
-        static ATOMIC_MUTEX: std::sync::OnceLock<sync_tokio::AtomicMutex<()>> =
-            std::sync::OnceLock::new();
-        let atomic_update_section = ATOMIC_MUTEX
-            .get_or_init(|| {
-                sync_tokio::AtomicMutex::from((
-                    (),
-                    Some("resync_membership_proofs_from_stored_blocks"),
-                    Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
-                ))
-            })
-            .lock_guard_mut()
-            .await;
-
         // loop over all monitored utxos
-        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos().await;
+        let monitored_utxos = self.wallet_state.wallet_db.monitored_utxos();
 
         // note: iter_mut_lock holds a write-lock, so it should be dropped
         // immediately after use.
@@ -912,16 +855,8 @@ impl GlobalState {
         drop(iter_mut_lock); // <---- releases write lock.
 
         // Update sync label and persist
-        self.wallet_state
-            .wallet_db
-            .inner
-            .lock_mut(|db| {
-                db.set_sync_label(tip_hash);
-                db.persist();
-            })
-            .await;
-
-        drop(atomic_update_section); // end of atomic read+write section.
+        self.wallet_state.wallet_db.set_sync_label(tip_hash);
+        self.wallet_state.wallet_db.persist();
 
         Ok(())
     }
@@ -944,7 +879,7 @@ mod global_state_tests {
         wallet_state: &WalletState,
         tip_block: &Block,
     ) -> bool {
-        let monitored_utxos = wallet_state.wallet_db.monitored_utxos().await;
+        let monitored_utxos = wallet_state.wallet_db.monitored_utxos();
         for (_idx, monitored_utxo) in monitored_utxos.iter() {
             let current_mp = monitored_utxo.get_membership_proof_for_block(tip_block.hash);
 
@@ -1058,7 +993,7 @@ mod global_state_tests {
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let network = Network::Alpha;
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let global_state = global_state_lock.lock_guard().await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
         let other_receiver_address = WalletSecret::new(random())
             .nth_generation_spending_key(0)
             .to_address();
@@ -1076,7 +1011,7 @@ mod global_state_tests {
 
         // Delete everything from monitored UTXO (the premined UTXO)
         {
-            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
+            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
             assert!(
                 monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element before emptying it"
@@ -1095,7 +1030,7 @@ mod global_state_tests {
             .await
             .unwrap();
         {
-            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
+            let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
             assert!(
                 monitored_utxos.len().is_one(),
                 "MUTXO must have genesis element after recovering it"
@@ -1134,7 +1069,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let global_state = global_state_lock.lock_guard().await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
 
         let other_receiver_wallet_secret = WalletSecret::new(random());
         let other_receiver_address = other_receiver_wallet_secret
@@ -1200,7 +1135,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let global_state = global_state_lock.lock_guard().await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
         let own_spending_key = global_state
             .wallet_state
             .wallet_secret
@@ -1284,7 +1219,7 @@ mod global_state_tests {
 
         // Verify that the MUTXO from block 1a is considered abandoned, and that the one from
         // genesis block is not.
-        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
+        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
         assert!(
             !monitored_utxos
                 .get(0)
@@ -1306,7 +1241,7 @@ mod global_state_tests {
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let network = Network::RegTest;
         let global_state_lock = get_mock_global_state(network, 2, None).await;
-        let global_state = global_state_lock.lock_guard().await;
+        let mut global_state = global_state_lock.lock_guard_mut().await;
         let wallet_secret = global_state.wallet_state.wallet_secret.clone();
         let own_spending_key = wallet_secret.nth_generation_spending_key(0);
         let own_receiving_address = own_spending_key.to_address();
@@ -1486,7 +1421,7 @@ mod global_state_tests {
         );
 
         // Also check that UTXO from 1a is considered abandoned
-        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos().await;
+        let monitored_utxos = global_state.wallet_state.wallet_db.monitored_utxos();
         assert!(
             !monitored_utxos
                 .get(0)
