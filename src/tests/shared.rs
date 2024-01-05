@@ -272,7 +272,7 @@ pub async fn add_block_to_light_state(
 }
 
 pub async fn add_block_to_archival_state(
-    archival_state: &ArchivalState,
+    archival_state: &mut ArchivalState,
     new_block: Block,
 ) -> Result<()> {
     let tip_digest: Option<Digest> = archival_state

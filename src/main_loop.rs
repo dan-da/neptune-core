@@ -551,7 +551,7 @@ impl MainLoopHandler {
             // update the mutator set with the UTXOs from this block
             global_state
                 .chain
-                .archival_state()
+                .archival_state_mut()
                 .update_mutator_set(&new_block)
                 .await?;
 
@@ -1161,14 +1161,14 @@ impl MainLoopHandler {
         // persist archival_mutator_set, with sync label
         global_state
             .chain
-            .archival_state()
+            .archival_state_mut()
             .archival_mutator_set
-            .inner
-            .lock_mut(|ams| {
-                ams.set_sync_label(hash);
-                ams.persist();
-            })
-            .await;
+            .set_sync_label(hash);
+        global_state
+            .chain
+            .archival_state_mut()
+            .archival_mutator_set
+            .persist();
 
         debug!("Persisted all databases");
 

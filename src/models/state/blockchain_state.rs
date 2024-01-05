@@ -3,7 +3,7 @@ use super::{archival_state::ArchivalState, light_state::LightState};
 // silence possible clippy bug / false positive.
 // see: https://github.com/rust-lang/rust-clippy/issues/9798
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BlockchainState {
     Archival(BlockchainArchivalState),
     Light(LightState),
@@ -51,7 +51,7 @@ impl BlockchainState {
 /// The `BlockchainState` contains database access to block headers.
 ///
 /// It is divided into `ArchivalState` and `LightState`.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BlockchainArchivalState {
     /// The `archival_state` locks require an await to be taken, so archival_state
     /// locks must always be taken before light state locks. Due to the policy of
