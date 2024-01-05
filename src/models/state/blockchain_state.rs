@@ -1,5 +1,8 @@
 use super::{archival_state::ArchivalState, light_state::LightState};
 
+// silence possible clippy bug / false positive.
+// see: https://github.com/rust-lang/rust-clippy/issues/9798
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum BlockchainState {
     Archival(BlockchainArchivalState),

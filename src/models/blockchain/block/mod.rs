@@ -65,6 +65,32 @@ impl From<Block> for TransferBlock {
 }
 
 impl Block {
+    #[inline]
+    pub async fn hash(&self) -> Digest {
+        self.hash
+    }
+
+    #[inline]
+    pub async fn header_partial(&self) -> BlockHeaderPartial {
+        (&self.header).into()
+    }
+
+    #[inline]
+    pub async fn header_clone(&self) -> BlockHeader {
+        self.header.clone()
+    }
+
+    pub async fn block_clone(&self) -> Block {
+        self.clone()
+    }
+
+    #[inline]
+    pub async fn set_block(&mut self, block: Block) {
+        self.hash = block.hash;
+        self.header = block.header;
+        self.body = block.body;
+    }
+
     pub fn get_mining_reward(block_height: BlockHeight) -> Amount {
         let mut reward: Amount = Amount(U32s::new([100, 0, 0, 0]));
         let generation = block_height.get_generation();

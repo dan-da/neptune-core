@@ -161,10 +161,8 @@ impl GlobalState {
     }
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
-        let block_lock = self.chain.light_state().inner.lock_guard().await;
-        self.wallet_state
-            .get_wallet_status_from_lock(&block_lock)
-            .await
+        let block = self.chain.light_state();
+        self.wallet_state.get_wallet_status_from_lock(block).await
     }
 
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
@@ -1005,7 +1003,7 @@ mod global_state_tests {
         )
         .await
         .unwrap();
-        add_block_to_light_state(global_state.chain.light_state(), mock_block_1.clone())
+        add_block_to_light_state(global_state.chain.light_state_mut(), mock_block_1.clone())
             .await
             .unwrap();
 

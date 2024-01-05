@@ -874,7 +874,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .light_state()
+                .light_state_mut()
                 .set_block(new_block.clone())
                 .await;
             latest_block = new_block;
@@ -923,7 +923,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .light_state()
+            .light_state_mut()
             .set_block(block_3a.clone())
             .await;
         assert!(
@@ -970,7 +970,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .light_state()
+            .light_state_mut()
             .set_block(block_3b.clone())
             .await;
         assert!(
@@ -1020,7 +1020,7 @@ mod tests {
                 .unwrap();
             own_global_state
                 .chain
-                .light_state()
+                .light_state_mut()
                 .set_block(new_block.clone())
                 .await;
             latest_block = new_block;
@@ -1069,7 +1069,7 @@ mod tests {
             .unwrap();
         own_global_state
             .chain
-            .light_state()
+            .light_state_mut()
             .set_block(block_12.clone())
             .await;
         assert!(

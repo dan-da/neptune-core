@@ -207,7 +207,7 @@ pub async fn get_mock_global_state(
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
     let (block, _, _) = get_dummy_latest_block(None);
-    let light_state: LightState = LightState::new(block);
+    let light_state: LightState = LightState::from(block);
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
         archival_state,
@@ -257,12 +257,13 @@ pub async fn get_test_genesis_setup(
     ))
 }
 
-pub async fn add_block_to_light_state(light_state: &LightState, new_block: Block) -> Result<()> {
-    let mut light_state_locked = light_state.inner.lock_guard_mut().await;
-
-    let previous_pow_family = light_state_locked.header.proof_of_work_family;
+pub async fn add_block_to_light_state(
+    light_state: &mut LightState,
+    new_block: Block,
+) -> Result<()> {
+    let previous_pow_family = light_state.header.proof_of_work_family;
     if previous_pow_family < new_block.header.proof_of_work_family {
-        *light_state_locked = new_block;
+        light_state.set_block(new_block).await;
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
     }
@@ -318,17 +319,15 @@ pub fn unit_test_data_directory(network: Network) -> Result<DataDirectory> {
 }
 
 /// Helper function for tests to update state with a new block
-pub async fn add_block(state: &GlobalState, new_block: Block) -> Result<()> {
-    let mut light_state_locked = state.chain.light_state().inner.lock_guard_mut().await;
-
-    let previous_pow_family = light_state_locked.header.proof_of_work_family;
+pub async fn add_block(state: &mut GlobalState, new_block: Block) -> Result<()> {
+    let previous_pow_family = state.chain.light_state().header.proof_of_work_family;
     state
         .chain
         .archival_state()
         .write_block(Box::new(new_block.clone()), Some(previous_pow_family))
         .await?;
     if previous_pow_family < new_block.header.proof_of_work_family {
-        *light_state_locked = new_block;
+        state.chain.light_state_mut().set_block(new_block).await;
     }
 
     Ok(())

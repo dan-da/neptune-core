@@ -648,12 +648,11 @@ mod tests {
             .wallet_state
             .update_wallet_state_with_new_block(&block_1)
             .await?;
-        *premine_receiver_global_state
+        premine_receiver_global_state
             .chain
-            .light_state()
-            .inner
-            .lock_guard_mut()
-            .await = block_1.clone();
+            .light_state_mut()
+            .set_block(block_1.clone())
+            .await;
         other_global_state
             .wallet_state
             .expected_utxos
@@ -668,12 +667,11 @@ mod tests {
             .wallet_state
             .update_wallet_state_with_new_block(&block_1)
             .await?;
-        *other_global_state
+        other_global_state
             .chain
-            .light_state()
-            .inner
-            .lock_guard_mut()
-            .await = block_1.clone();
+            .light_state_mut()
+            .set_block(block_1.clone())
+            .await;
 
         // Create a transaction that's valid to be included in block 2
         let mut output_utxos_generated_by_me: Vec<UtxoReceiverData> = vec![];

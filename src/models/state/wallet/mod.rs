@@ -793,7 +793,7 @@ mod wallet_tests {
         own_wallet_state
             .update_wallet_state_with_new_block(&block_1)
             .await?;
-        add_block(&premine_receiver_global_state, block_1.clone())
+        add_block(&mut premine_receiver_global_state, block_1.clone())
             .await
             .unwrap();
         premine_receiver_global_state
@@ -852,7 +852,7 @@ mod wallet_tests {
             own_wallet_state
                 .update_wallet_state_with_new_block(&next_block)
                 .await?;
-            add_block(&premine_receiver_global_state, block_1.clone())
+            add_block(&mut premine_receiver_global_state, block_1.clone())
                 .await
                 .unwrap();
             premine_receiver_global_state
@@ -921,7 +921,7 @@ mod wallet_tests {
         own_wallet_state
             .update_wallet_state_with_new_block(&block_2_b)
             .await?;
-        add_block(&premine_receiver_global_state, block_2_b.clone())
+        add_block(&mut premine_receiver_global_state, block_2_b.clone())
             .await
             .unwrap();
         premine_receiver_global_state

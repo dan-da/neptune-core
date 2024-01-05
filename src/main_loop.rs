@@ -472,12 +472,10 @@ impl MainLoopHandler {
         };
 
         let mut global_state = self.global_state_lock.lock_guard_mut().await;
-        let (tip_hash, tip_proof_of_work_family) = global_state
-            .chain
-            .light_state()
-            .inner
-            .lock(|b| (b.hash, b.header.proof_of_work_family))
-            .await;
+        let (tip_hash, tip_proof_of_work_family) = (
+            global_state.chain.light_state().hash,
+            global_state.chain.light_state().header.proof_of_work_family,
+        );
 
         // The peer threads also check this condition, if block is more canonical than current
         // tip, but we have to check it again since the block update might have already been applied
@@ -581,7 +579,7 @@ impl MainLoopHandler {
         //       may see inconsistencies, is that ok for this?
         global_state
             .chain
-            .light_state()
+            .light_state_mut()
             .set_block(*last_block.clone())
             .await;
 
@@ -785,13 +783,11 @@ impl MainLoopHandler {
         info!("Running sync");
 
         // Check when latest batch of blocks was requested
-        let (current_block_hash, current_block_height, current_block_proof_of_work_family) =
-            global_state
-                .chain
-                .light_state()
-                .inner
-                .lock(|b| (b.hash, b.header.height, b.header.proof_of_work_family))
-                .await;
+        let (current_block_hash, current_block_height, current_block_proof_of_work_family) = (
+            global_state.chain.light_state().hash,
+            global_state.chain.light_state().header.height,
+            global_state.chain.light_state().header.proof_of_work_family,
+        );
 
         let (peer_to_sanction, try_new_request): (Option<SocketAddr>, bool) = main_loop_state
             .sync_state

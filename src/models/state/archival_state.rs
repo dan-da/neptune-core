@@ -908,7 +908,7 @@ mod archival_state_tests {
         );
 
         {
-            add_block(&genesis_receiver_global_state, mock_block_1.clone()).await?;
+            add_block(&mut genesis_receiver_global_state, mock_block_1.clone()).await?;
             genesis_receiver_global_state
                 .chain
                 .archival_state()
@@ -955,7 +955,7 @@ mod archival_state_tests {
             mock_block_2.accumulate_transaction(sender_tx);
 
             // Remove an element from the mutator set, verify that the active window DB is updated.
-            add_block(&genesis_receiver_global_state, mock_block_2.clone()).await?;
+            add_block(&mut genesis_receiver_global_state, mock_block_2.clone()).await?;
             genesis_receiver_global_state
                 .chain
                 .archival_state()
@@ -1220,12 +1220,11 @@ mod archival_state_tests {
                         Some(next_block.header.proof_of_work_family),
                     )
                     .await?;
-                *global_state
+                global_state
                     .chain
-                    .light_state()
-                    .inner
-                    .lock_guard_mut()
-                    .await = next_block.clone();
+                    .light_state_mut()
+                    .set_block(next_block.clone())
+                    .await;
 
                 // 2. Update mutator set with produced block
                 global_state
@@ -1452,8 +1451,8 @@ mod archival_state_tests {
 
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
-            let state = state_lock.lock_guard().await;
-            add_block(&state, block_1.clone()).await.unwrap();
+            let mut state = state_lock.lock_guard_mut().await;
+            add_block(&mut state, block_1.clone()).await.unwrap();
             state
                 .chain
                 .archival_state()
@@ -1621,9 +1620,9 @@ mod archival_state_tests {
 
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {
-            let state = state_lock.lock_guard().await;
+            let mut state = state_lock.lock_guard_mut().await;
 
-            add_block(&state, block_2.clone()).await.unwrap();
+            add_block(&mut state, block_2.clone()).await.unwrap();
             state
                 .chain
                 .archival_state()
