@@ -24,35 +24,54 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 ///
 /// # Examples
 /// ```
-/// # use neptune_core::util_types::sync::tokio::AtomicRw;
+/// # use neptune_core::util_types::sync::tokio::{AtomicRw, LockEvent, LockCallbackFn};
 /// struct Car {
 ///     year: u16,
 /// };
 ///
-/// pub fn log_lock_acquired(is_mut: bool, name: Option<&str>) {
-///     let tokio_id = match tokio::task::try_id() {
-///         Some(id) => format!("{}", id),
-///         None => "[None]".to_string(),
+/// pub fn log_lock_event(lock_event: LockEvent) {
+///     let (event, info, acquisition) =
+///     match lock_event {
+///         LockEvent::TryAcquire{info, acquisition} => ("TryAcquire", info, acquisition),
+///         LockEvent::Acquire{info, acquisition} => ("Acquire", info, acquisition),
+///         LockEvent::Release{info, acquisition} => ("Release", info, acquisition),
 ///     };
+///
 ///     println!(
-///         "thread {{name: `{}`, id: {:?}}}, tokio task {} acquired lock `{}` for {}",
+///         "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, `{:?}`",
+///         event,
+///         info.name().unwrap_or("?"),
+///         info.lock_type(),
+///         acquisition,
 ///         std::thread::current().name().unwrap_or("?"),
 ///         std::thread::current().id(),
-///         tokio_id,
-///         name.unwrap_or("?"),
-///         if is_mut { "write" } else { "read" }
 ///     );
 /// }
-/// const LOG_LOCK_ACQUIRED_CB: fn(is_mut: bool, name: Option<&str>) = log_lock_acquired;
+/// const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 ///
 /// # tokio_test::block_on(async {
-/// let atomic_car = AtomicRw::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_LOCK_ACQUIRED_CB)));
+/// let atomic_car = AtomicRw::<Car>::from((Car{year: 2016}, Some("car"), Some(LOG_LOCK_EVENT_CB)));
 /// atomic_car.lock(|c| {println!("year: {}", c.year)}).await;
 /// atomic_car.lock_mut(|mut c| {c.year = 2023}).await;
 /// # })
 /// ```
 ///
 /// results in:
+/// ```text
+/// TryAcquire lock `car` of type `RwLock` for `Read` by
+///     |-- thread main, `ThreadId(1)`
+/// Acquire lock `car` of type `RwLock` for `Read` by
+///     |-- thread main, `ThreadId(1)`
+/// year: 2016
+/// Release lock `car` of type `RwLock` for `Read` by
+///     |-- thread main, `ThreadId(1)`
+/// TryAcquire lock `car` of type `RwLock` for `Write` by
+///     |-- thread main, `ThreadId(1)`
+/// Acquire lock `car` of type `RwLock` for `Write` by
+///     |-- thread main, `ThreadId(1)`
+/// Release lock `car` of type `RwLock` for `Write` by
+///     |-- thread main, `ThreadId(1)`
+/// ```
 #[derive(Debug)]
 pub struct AtomicRw<T> {
     inner: Arc<RwLock<T>>,
@@ -79,7 +98,7 @@ impl<T> From<T> for AtomicRw<T> {
 }
 impl<T> From<(T, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from an optional name and an optional callback function, which
-    /// is called when a lock is acquired.
+    /// is called when a lock event occurs.
     #[inline]
     fn from(v: (T, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
@@ -90,7 +109,7 @@ impl<T> From<(T, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
 }
 impl<T> From<(T, Option<&str>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from a name ref and an optional callback function, which
-    /// is called when a lock is acquired.
+    /// is called when a lock event occurs.
     #[inline]
     fn from(v: (T, Option<&str>, Option<LockCallbackFn>)) -> Self {
         Self {
@@ -125,7 +144,7 @@ impl<T> From<RwLock<T>> for AtomicRw<T> {
 impl<T> From<(RwLock<T>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from an RwLock<T> plus an optional name
     /// and an optional callback function, which is called
-    /// when a lock is acquired.
+    /// when a lock event occurs.
     #[inline]
     fn from(v: (RwLock<T>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
@@ -154,7 +173,7 @@ impl<T> From<Arc<RwLock<T>>> for AtomicRw<T> {
 impl<T> From<(Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)> for AtomicRw<T> {
     /// Create from an `Arc<RwLock<T>>` plus an optional name and
     /// an optional callback function, which is called when a lock
-    /// is acquired.
+    /// event occurs.
     #[inline]
     fn from(v: (Arc<RwLock<T>>, Option<String>, Option<LockCallbackFn>)) -> Self {
         Self {
@@ -333,7 +352,7 @@ impl<T> AtomicRw<T> {
 
 /// A wrapper for [RwLockReadGuard](tokio::sync::RwLockReadGuard) that
 /// can optionally call a callback to notify when the
-/// lock is acquired or released.
+/// lock event occurs.
 pub struct AtomicRwReadGuard<'a, T> {
     guard: RwLockReadGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
@@ -375,7 +394,7 @@ impl<'a, T> Deref for AtomicRwReadGuard<'a, T> {
 
 /// A wrapper for [RwLockWriteGuard](tokio::sync::RwLockWriteGuard) that
 /// can optionally call a callback to notify when the
-/// lock is acquired or released.
+/// lock event occurs.
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,

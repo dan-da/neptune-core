@@ -273,7 +273,7 @@ where
 }
 
 // This is a callback fn passed to AtomicRw, AtomicMutex
-// and called when a lock is acquired.  This way
+// and called when a lock event occurs.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
 pub(crate) fn log_lock_event(lock_event: LockEvent) {
@@ -282,45 +282,31 @@ pub(crate) fn log_lock_event(lock_event: LockEvent) {
         None => "?".to_string(),
     };
 
-    // workaround: parse thread_id debug output into a u64.
-    // (because ThreadId::as_u64() is unstable)
-    let thread_id_dbg: String = format!("{:?}", std::thread::current().id());
-    let nums_u8 = &thread_id_dbg
-        .chars()
-        .filter_map(|c| {
-            if c.is_ascii_digit() {
-                Some(c as u8)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<u8>>();
-    let nums = String::from_utf8_lossy(nums_u8).to_string();
-
-    let thread_id = nums.parse::<u64>().unwrap();
-
-    match lock_event {
-        LockEvent::Acquire{info, acquired} =>
-            println!(
-                "lock `{}` of type `{}` acquired for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
-                info.name().unwrap_or("?"),
-                info.lock_type(),
-                acquired,
-                thread_id,
-                std::thread::current().name().unwrap_or("?"),
-                tokio_id,
-            ),
-        LockEvent::Release{info, acquired} =>
-            println!(
-                "lock `{}` of type `{}` released for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}",
-                info.name().unwrap_or("?"),
-                info.lock_type(),
-                acquired,
-                thread_id,
-                std::thread::current().name().unwrap_or("?"),
-                tokio_id,
-            )
-    }
+    let (event_type, info, acquisition) = match lock_event {
+        LockEvent::TryAcquire {
+            ref info,
+            acquisition,
+        } => ("TryAcquire", info, acquisition),
+        LockEvent::Acquire {
+            ref info,
+            acquisition,
+        } => ("Acquire", info, acquisition),
+        LockEvent::Release {
+            ref info,
+            acquisition,
+        } => ("Release", info, acquisition),
+    };
+    trace!(
+            ?lock_event,
+            "{} lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
+            event_type,
+            info.name().unwrap_or("?"),
+            info.lock_type(),
+            acquisition,
+            current_thread_id(),
+            std::thread::current().name().unwrap_or("?"),
+            tokio_id,
+    );
 }
 const LOG_LOCK_EVENT_CB: LockCallbackFn = log_lock_event;
 
@@ -344,7 +330,7 @@ pub(crate) fn current_thread_id() -> u64 {
 }
 
 // This is a callback fn passed to AtomicRw, AtomicMutex
-// and called when a lock is acquired.  This way
+// and called when a lock event occurs.  This way
 // we can track which threads+tasks are acquiring
 // which locks for reads and/or mutations.
 pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
@@ -353,37 +339,30 @@ pub(crate) fn log_tokio_lock_event(lock_event: sync_tokio::LockEvent) {
         None => "?".to_string(),
     };
 
-    match lock_event {
-        sync_tokio::LockEvent::TryAcquire { ref info, acquisition } => trace!(
+    let (event_type, info, acquisition) = match lock_event {
+        sync_tokio::LockEvent::TryAcquire {
+            ref info,
+            acquisition,
+        } => ("TryAcquire", info, acquisition),
+        sync_tokio::LockEvent::Acquire {
+            ref info,
+            acquisition,
+        } => ("Acquire", info, acquisition),
+        sync_tokio::LockEvent::Release {
+            ref info,
+            acquisition,
+        } => ("Release", info, acquisition),
+    };
+    trace!(
             ?lock_event,
-            "TryAcquire tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
+            "{} tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
+            event_type,
             info.name().unwrap_or("?"),
             info.lock_type(),
             acquisition,
             current_thread_id(),
             std::thread::current().name().unwrap_or("?"),
             tokio_id,
-        ),
-        sync_tokio::LockEvent::Acquire { ref info, acquisition } => trace!(
-            ?lock_event,
-            "Acquired tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
-            info.name().unwrap_or("?"),
-            info.lock_type(),
-            acquisition,
-            current_thread_id(),
-            std::thread::current().name().unwrap_or("?"),
-            tokio_id,
-        ),
-        sync_tokio::LockEvent::Release { ref info, acquisition } => trace!(
-            ?lock_event,
-            "Released tokio lock `{}` of type `{}` for `{}` by\n\t|-- thread {}, (`{}`)\n\t|-- tokio task {}\n\t|--",
-            info.name().unwrap_or("?"),
-            info.lock_type(),
-            acquisition,
-            current_thread_id(),
-            std::thread::current().name().unwrap_or("?"),
-            tokio_id,
-        ),
-    }
+    );
 }
 const LOG_TOKIO_LOCK_EVENT_CB: sync_tokio::LockCallbackFn = log_tokio_lock_event;
