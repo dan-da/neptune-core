@@ -338,11 +338,14 @@ impl WalletState {
                     _block_timestamp_confirmed,
                     block_height_confirmed,
                 )) => {
+                    // note: we use block_on() when calling the async fn because
+                    // iter is holding a sync lock, which can't span async calls.
+
                     let depth = current_tip.height - block_height_confirmed + 1;
                     depth >= block_depth_threshhold as i128
-                        && monitored_utxo
-                            .was_abandoned(current_tip_info.0, archival_state)
-                            .await
+                        && futures::executor::block_on(
+                            monitored_utxo.was_abandoned(current_tip_info.0, archival_state),
+                        )
                 }
                 None => false,
             };
