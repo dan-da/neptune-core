@@ -53,14 +53,14 @@ pub struct MainLoopHandler {
 impl MainLoopHandler {
     pub fn new(
         incoming_peer_listener: TcpListener,
-        state: GlobalStateLock,
+        global_state_lock: GlobalStateLock,
         main_to_peer_broadcast_tx: broadcast::Sender<MainToPeerThread>,
         peer_thread_to_main_tx: mpsc::Sender<PeerThreadToMain>,
         main_to_miner_tx: watch::Sender<MainToMiner>,
     ) -> Self {
         Self {
             incoming_peer_listener,
-            global_state_lock: state,
+            global_state_lock,
             main_to_miner_tx,
             main_to_peer_broadcast_tx,
             peer_thread_to_main_tx,
@@ -356,8 +356,8 @@ impl MainLoopHandler {
                 // PoW family exceeds our tip and if the height difference is beyond a threshold value.
                 // TODO: If we are not checking the PoW claims of the tip this can be abused by forcing
                 // the client into synchronization mode.
-                let mut global_state = self.global_state_lock.lock_guard_mut().await;
-                let our_block_tip_header: BlockHeader = global_state
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                let our_block_tip_header: BlockHeader = global_state_mut
                     .chain
                     .light_state()
                     .header_clone() // todo: avoid this clone
@@ -365,13 +365,13 @@ impl MainLoopHandler {
                 if enter_sync_mode(
                     our_block_tip_header,
                     claimed_state,
-                    global_state.cli.max_number_of_blocks_before_syncing / 3,
+                    global_state_mut.cli.max_number_of_blocks_before_syncing / 3,
                 ) {
                     info!(
                     "Entering synchronization mode due to peer {} indicating tip height {}; pow family: {:?}",
                     socket_addr, claimed_max_height, claimed_max_pow_family
                 );
-                    global_state.net.syncing = true;
+                    global_state_mut.net.syncing = true;
                 }
             }
             PeerThreadToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -387,22 +387,22 @@ impl MainLoopHandler {
                 // Get out of sync mode if needed. Note that we do not need to hold
                 // a lock on any state, as it's only this thread (main thread) that
                 // is allowed to update the `BlockchainState` or the `syncing` state.
-                let mut global_state = self.global_state_lock.lock_guard_mut().await;
-                let tip_header: BlockHeader = global_state
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
+                let tip_header: BlockHeader = global_state_mut
                     .chain
                     .light_state()
                     .header_clone() // todo: avoid this clone
                     .await;
 
-                if global_state.net.syncing {
+                if global_state_mut.net.syncing {
                     let stay_in_sync_mode = stay_in_sync_mode(
                         &tip_header,
                         &main_loop_state.sync_state,
-                        global_state.cli.max_number_of_blocks_before_syncing,
+                        global_state_mut.cli.max_number_of_blocks_before_syncing,
                     );
                     if !stay_in_sync_mode {
                         info!("Exiting sync mode");
-                        global_state.net.syncing = false;
+                        global_state_mut.net.syncing = false;
                     }
                 }
             }
@@ -426,16 +426,18 @@ impl MainLoopHandler {
                     pt2m_transaction.transaction.kernel.mutator_set_hash
                 );
 
-                let mut global_state = self.global_state_lock.lock_guard_mut().await;
+                let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                 if pt2m_transaction.confirmable_for_block
-                    != global_state.chain.light_state().hash().await
+                    != global_state_mut.chain.light_state().hash().await
                 {
                     warn!("main loop got unmined transaction with bad mutator set data, discarding transaction");
                     return Ok(());
                 }
 
                 // Insert into mempool
-                global_state.mempool.insert(&pt2m_transaction.transaction);
+                global_state_mut
+                    .mempool
+                    .insert(&pt2m_transaction.transaction);
 
                 // send notification to peers
                 let transaction_notification: TransactionNotification =
@@ -470,10 +472,14 @@ impl MainLoopHandler {
             BlockToProcess::Received(b) => b.clone(),
         };
 
-        let mut global_state = self.global_state_lock.lock_guard_mut().await;
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         let (tip_hash, tip_proof_of_work_family) = (
-            global_state.chain.light_state().hash,
-            global_state.chain.light_state().header.proof_of_work_family,
+            global_state_mut.chain.light_state().hash,
+            global_state_mut
+                .chain
+                .light_state()
+                .header
+                .proof_of_work_family,
         );
 
         // The peer threads also check this condition, if block is more canonical than current
@@ -504,15 +510,15 @@ impl MainLoopHandler {
         }
 
         // Get out of sync mode if needed
-        if global_state.net.syncing {
+        if global_state_mut.net.syncing {
             let stay_in_sync_mode = stay_in_sync_mode(
                 &last_block.header,
                 &main_loop_state.sync_state,
-                global_state.cli.max_number_of_blocks_before_syncing,
+                global_state_mut.cli.max_number_of_blocks_before_syncing,
             );
             if !stay_in_sync_mode {
                 info!("Exiting sync mode");
-                global_state.net.syncing = false;
+                global_state_mut.net.syncing = false;
             }
         }
 
@@ -528,7 +534,7 @@ impl MainLoopHandler {
                     self_mined_a_block = true;
 
                     // Notify wallet to expect the coinbase UTXO, as we mined this block
-                    global_state
+                    global_state_mut
                         .wallet_state
                         .expected_utxos
                         .add_expected_utxo(
@@ -551,23 +557,23 @@ impl MainLoopHandler {
             );
 
             // update the mutator set with the UTXOs from this block
-            global_state
+            global_state_mut
                 .chain
                 .archival_state_mut()
                 .update_mutator_set(&new_block)
                 .await?;
 
             // update wallet state with relevant UTXOs from this block
-            global_state
+            global_state_mut
                 .wallet_state
                 .update_wallet_state_with_new_block(&new_block)
                 .await?;
 
             // Update mempool with UTXOs from this block. This is done by removing all transaction
             // that became invalid/was mined by this block.
-            global_state.mempool.update_with_block(&new_block);
+            global_state_mut.mempool.update_with_block(&new_block);
 
-            global_state
+            global_state_mut
                 .chain
                 .archival_state()
                 .write_block(Box::new(new_block), Some(tip_proof_of_work_family))
@@ -575,17 +581,17 @@ impl MainLoopHandler {
         }
 
         // Update information about latest block
-        global_state
+        global_state_mut
             .chain
             .light_state_mut()
             .set_block(*last_block.clone())
             .await;
 
         // Flush databases
-        global_state.flush_databases().await?;
+        global_state_mut.flush_databases().await?;
 
-        let mining = global_state.cli.mine;
-        drop(global_state);
+        let mining = global_state_mut.cli.mine;
+        drop(global_state_mut);
 
         // Inform miner to work on a new block
         if mining {
@@ -1070,18 +1076,18 @@ impl MainLoopHandler {
     /// Locking:
     ///  * acquires read lock for `latest_block`
     async fn resync_membership_proofs(&self) -> Result<()> {
-        let mut global_state = self.global_state_lock.lock_guard_mut().await;
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
         // Do not fix memberhip proofs if node is in sync mode, as we would otherwise
         // have to sync many times, instead of just *one* time once we have caught up.
-        if global_state.net.syncing {
+        if global_state_mut.net.syncing {
             debug!("Not syncing MS membership proofs because we are syncing");
             return Ok(());
         }
 
         // is it necessary?
-        let current_tip_digest = global_state.chain.light_state().hash().await;
-        if global_state
+        let current_tip_digest = global_state_mut.chain.light_state().hash().await;
+        if global_state_mut
             .wallet_state
             .is_synced_to(current_tip_digest)
             .await
@@ -1091,9 +1097,9 @@ impl MainLoopHandler {
         }
 
         // do we have blocks?
-        let we_have_blocks = global_state.chain.is_archival_node();
+        let we_have_blocks = global_state_mut.chain.is_archival_node();
         if we_have_blocks {
-            return global_state
+            return global_state_mut
                 .resync_membership_proofs_from_stored_blocks(current_tip_digest)
                 .await;
         }
