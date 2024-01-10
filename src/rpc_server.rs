@@ -1,5 +1,4 @@
 use anyhow::Result;
-use futures::executor;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -143,10 +142,9 @@ impl NeptuneRPCServer {
     async fn confirmations_internal(&self) -> Option<BlockHeight> {
         let state = self.state.lock_guard().await;
 
-        match executor::block_on(state.get_latest_balance_height()) {
+        match state.get_latest_balance_height().await {
             Some(latest_balance_height) => {
-                let tip_block_header =
-                    executor::block_on(state.chain.light_state().header_partial());
+                let tip_block_header = state.chain.light_state().header_partial().await;
 
                 assert!(tip_block_header.height >= latest_balance_height);
 
@@ -176,17 +174,14 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn block_height(self, _: context::Context) -> BlockHeight {
-        // let mut databases = executor::block_on(self.state.block_databases.lock());
-        // let lookup_res = databases.latest_block_header.get(());
-        let latest_block_header = executor::block_on(
-            self.state
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .header_clone(),
-        );
-        latest_block_header.height
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header_clone()
+            .await
+            .height
     }
 
     async fn get_confirmations(self, _: context::Context) -> Option<BlockHeight> {
@@ -194,13 +189,19 @@ impl RPC for NeptuneRPCServer {
     }
 
     async fn head(self, _: context::Context) -> Digest {
-        executor::block_on(self.state.lock_guard().await.chain.light_state().hash())
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .hash()
+            .await
     }
 
     async fn heads(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
         let state = self.state.lock_guard().await;
 
-        let latest_block_digest = executor::block_on(state.chain.light_state().hash());
+        let latest_block_digest = state.chain.light_state().hash().await;
 
         state
             .chain
@@ -258,33 +259,41 @@ impl RPC for NeptuneRPCServer {
 
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: Amount) -> bool {
         // test inequality
-        let wallet_status =
-            executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
+        let wallet_status = self
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
         amount <= wallet_status.synced_unspent_amount
     }
 
     async fn get_synced_balance(self, _context: tarpc::context::Context) -> Amount {
-        let wallet_status =
-            executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
+        let wallet_status = self
+            .state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await;
         wallet_status.synced_unspent_amount
     }
 
     async fn get_wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
-        let wallet_status =
-            executor::block_on(self.state.lock_guard().await.get_wallet_status_for_tip());
-        wallet_status
+        self.state
+            .lock_guard()
+            .await
+            .get_wallet_status_for_tip()
+            .await
     }
 
     async fn get_tip_header(self, _: context::Context) -> BlockHeader {
-        let latest_block_block_header = executor::block_on(
-            self.state
-                .lock_guard()
-                .await
-                .chain
-                .light_state()
-                .header_clone(),
-        );
-        latest_block_block_header
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .light_state()
+            .header_clone()
+            .await
     }
 
     async fn get_header(
@@ -292,15 +301,13 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         block_digest: Digest,
     ) -> Option<BlockHeader> {
-        let res = executor::block_on(
-            self.state
-                .lock_guard()
-                .await
-                .chain
-                .archival_state()
-                .get_block_header(block_digest),
-        );
-        res
+        self.state
+            .lock_guard()
+            .await
+            .chain
+            .archival_state()
+            .get_block_header(block_digest)
+            .await
     }
 
     async fn get_receiving_address(
@@ -328,7 +335,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> Vec<(Digest, BlockHeight, Duration, Amount, Sign)> {
-        let history = executor::block_on(self.state.lock_guard().await.get_balance_history());
+        let history = self.state.lock_guard().await.get_balance_history().await;
 
         // sort
         let mut display_history: Vec<(Digest, BlockHeight, Duration, Amount, Sign)> = history
@@ -412,17 +419,15 @@ impl RPC for NeptuneRPCServer {
 
         let coins = amount.to_native_coins();
         let utxo = Utxo::new(address.lock_script(), coins);
-        let block_height = executor::block_on(async {
-            let state = self.state.lock_guard().await;
-            state.chain.light_state().header_partial().await
-        })
-        .height;
+
+        let state = self.state.lock_guard().await;
+        let block_height = state.chain.light_state().header_partial().await.height;
         let receiver_privacy_digest = address.privacy_digest;
-        let sender_randomness = executor::block_on(self.state.lock(|s| {
-            s.wallet_state
-                .wallet_secret
-                .generate_sender_randomness(block_height, receiver_privacy_digest)
-        }));
+        let sender_randomness = state
+            .wallet_state
+            .wallet_secret
+            .generate_sender_randomness(block_height, receiver_privacy_digest);
+        drop(state);
 
         // 1. Build transaction object
         // TODO: Allow user to set fee here. Don't set it automatically as we want the user
@@ -448,19 +453,20 @@ impl RPC for NeptuneRPCServer {
         .to_vec();
 
         // Pause miner if we are mining
-        let was_mining = executor::block_on(self.state.mining());
+        let was_mining = self.state.mining().await;
         if was_mining {
-            let _ =
-                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::PauseMiner)
+                .await;
         }
 
-        let transaction_result = executor::block_on(async {
-            self.state
-                .lock_guard_mut()
-                .await
-                .create_transaction(receiver_data, fee)
-                .await
-        });
+        let transaction_result = self
+            .state
+            .lock_guard_mut()
+            .await
+            .create_transaction(receiver_data, fee)
+            .await;
 
         let transaction = match transaction_result {
             Ok(tx) => tx,
@@ -468,17 +474,17 @@ impl RPC for NeptuneRPCServer {
         };
 
         // 2. Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = executor::block_on(
-            self.rpc_server_to_main_tx
-                .send(RPCServerToMain::Send(Box::new(transaction.clone()))),
-        );
+        let response: Result<(), SendError<RPCServerToMain>> = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::Send(Box::new(transaction.clone())))
+            .await;
 
         // Restart mining if it was paused
         if was_mining {
-            let _ = executor::block_on(
-                self.rpc_server_to_main_tx
-                    .send(RPCServerToMain::RestartMiner),
-            );
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::RestartMiner)
+                .await;
         }
 
         if response.is_ok() {
@@ -490,8 +496,10 @@ impl RPC for NeptuneRPCServer {
 
     async fn shutdown(self, _: context::Context) -> bool {
         // 1. Send shutdown message to main
-        let response =
-            executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::Shutdown));
+        let response = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::Shutdown)
+            .await;
 
         // 2. Send acknowledgement to client.
         response.is_ok()
@@ -499,8 +507,10 @@ impl RPC for NeptuneRPCServer {
 
     async fn pause_miner(self, _context: tarpc::context::Context) {
         if self.state.lock_guard().await.cli.mine {
-            let _ =
-                executor::block_on(self.rpc_server_to_main_tx.send(RPCServerToMain::PauseMiner));
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::PauseMiner)
+                .await;
         } else {
             info!("Cannot pause miner since it was never started");
         }
@@ -508,30 +518,28 @@ impl RPC for NeptuneRPCServer {
 
     async fn restart_miner(self, _context: tarpc::context::Context) {
         if self.state.lock_guard().await.cli.mine {
-            let _ = executor::block_on(
-                self.rpc_server_to_main_tx
-                    .send(RPCServerToMain::RestartMiner),
-            );
+            let _ = self
+                .rpc_server_to_main_tx
+                .send(RPCServerToMain::RestartMiner)
+                .await;
         } else {
             info!("Cannot restart miner since it was never started");
         }
     }
 
     async fn prune_abandoned_monitored_utxos(self, _context: tarpc::context::Context) -> usize {
-        let prune_count_res = executor::block_on(async move {
-            let state = self.state.lock_guard().await;
-            let tip_block_header = state.chain.light_state().header_clone().await;
-            const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
+        let state = self.state.lock_guard().await;
+        let tip_block_header = state.chain.light_state().header_clone().await;
+        const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
-            state
-                .wallet_state
-                .prune_abandoned_monitored_utxos_with_lock(
-                    DEFAULT_MUTXO_PRUNE_DEPTH,
-                    &tip_block_header,
-                    state.chain.archival_state(),
-                )
-                .await
-        });
+        let prune_count_res = state
+            .wallet_state
+            .prune_abandoned_monitored_utxos_with_lock(
+                DEFAULT_MUTXO_PRUNE_DEPTH,
+                &tip_block_header,
+                state.chain.archival_state(),
+            )
+            .await;
 
         match prune_count_res {
             Ok(prune_count) => {
