@@ -415,21 +415,11 @@ pub async fn mine(
                 latest_block = *new_block_info.block.to_owned();
                 to_main.send(MinerToMain::NewBlockFound(new_block_info)).await?;
 
-                // Wait until `main_loop` has updated `global_state` before proceding. Otherwise, we would use
-                // a deprecated version of the mempool to build the next block. We don't mark the from-main loop
-                // received value as read yet as this would open up for race conditions if `main_loop` received
-                // a block from a peer at the same time as this block was found.
-                let _wait = from_main.changed().await;
-                let msg = from_main.borrow().clone();
-                debug!("Got {:?} msg from main after finding block", msg);
-                if !matches!(msg, MainToMiner::ReadyToMineNextBlock) {
-                    error!("Got bad message from `main_loop`: {:?}", msg);
-
-                    // TODO: Handle this case
-                    // We found a new block but the main thread updated with a block
-                    // before our could be registered. We should mine on the one
-                    // received from the main loop and not the one we found here.
-                }
+                // note: we previously waited here for a ReadyToMineNextBlock message
+                // as a way to ensure the mempool state is updated.  However now
+                // the now the GlobalState lock protects the mempool and updates are
+                // atomic, so once we receive another NewBlock msg and can acquire
+                // a GlobalState lock we are ready to go.
             }
         }
     }

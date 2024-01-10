@@ -39,7 +39,7 @@ pub type PeerStandingNumber = i32;
 /// since this needs to be a mutable variable in most methods.
 pub struct PeerLoopHandler {
     to_main_tx: mpsc::Sender<PeerThreadToMain>,
-    state: GlobalStateLock,
+    global_state_lock: GlobalStateLock,
     peer_address: SocketAddr,
     peer_handshake_data: HandshakeData,
     inbound_connection: bool,
@@ -49,7 +49,7 @@ pub struct PeerLoopHandler {
 impl PeerLoopHandler {
     pub fn new(
         to_main_tx: mpsc::Sender<PeerThreadToMain>,
-        state: GlobalStateLock,
+        global_state_lock: GlobalStateLock,
         peer_address: SocketAddr,
         peer_handshake_data: HandshakeData,
         inbound_connection: bool,
@@ -57,7 +57,7 @@ impl PeerLoopHandler {
     ) -> Self {
         Self {
             to_main_tx,
-            state,
+            global_state_lock,
             peer_address,
             peer_handshake_data,
             inbound_connection,
@@ -70,20 +70,20 @@ impl PeerLoopHandler {
     /// Locking:
     ///  * acquires write lock for `peer_map`
     async fn punish(&self, reason: PeerSanctionReason) -> Result<()> {
-        let mut global_state = self.state.lock_guard_mut().await;
+        let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
         warn!(
             "Sanctioning peer {} for {:?}",
             self.peer_address.ip(),
             reason
         );
-        let new_standing = global_state
+        let new_standing = global_state_mut
             .net
             .peer_map
             .get_mut(&self.peer_address)
             .map(|p| p.standing.sanction(reason))
             .unwrap_or(0);
 
-        if new_standing < -(global_state.cli.peer_tolerance as PeerStandingNumber) {
+        if new_standing < -(global_state_mut.cli.peer_tolerance as PeerStandingNumber) {
             warn!("Banning peer");
             bail!("Banning peer");
         }
@@ -195,7 +195,7 @@ impl PeerLoopHandler {
         let parent_digest = received_block.header.prev_block_digest;
         debug!("Fetching parent block");
         let parent_block = self
-            .state
+            .global_state_lock
             .lock_guard()
             .await
             .chain
@@ -232,7 +232,7 @@ impl PeerLoopHandler {
                     == received_block.header.height
                     && peer_state.fork_reconciliation_blocks.len() + 1
                         < self
-                            .state
+                            .global_state_lock
                             .lock_guard()
                             .await
                             .cli
@@ -337,7 +337,7 @@ impl PeerLoopHandler {
         );
         match msg {
             PeerMessage::Bye => {
-                // Note that the current peer is not removed from the state.peer_map here
+                // Note that the current peer is not removed from the global_state.peer_map here
                 // but that this is done by the caller.
                 info!("Got bye. Closing connection to peer");
                 Ok(true)
@@ -347,7 +347,7 @@ impl PeerLoopHandler {
                 // not in the address in which they are connected to us. We are only interested in
                 // peers that accept incoming connections.
                 let mut peer_info: Vec<(SocketAddr, u128)> = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .net
@@ -402,7 +402,7 @@ impl PeerLoopHandler {
                 }
 
                 let incoming_block_is_heavier = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -436,7 +436,7 @@ impl PeerLoopHandler {
                 let mut peers_most_canonical_block: Option<Block> = None;
                 // todo: avoid cloning
                 let tip_header = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -446,7 +446,7 @@ impl PeerLoopHandler {
                 for digest in most_canonical_digests {
                     debug!("Looking up block {} in batch request", digest);
                     let block_candidate = self
-                        .state
+                        .global_state_lock
                         .lock_guard()
                         .await
                         .chain
@@ -459,7 +459,7 @@ impl PeerLoopHandler {
                         // chain. Also check if it's the genesis block.
 
                         if self
-                            .state
+                            .global_state_lock
                             .lock_guard()
                             .await
                             .chain
@@ -487,21 +487,21 @@ impl PeerLoopHandler {
                 // to that height plus the batch size.
                 let responded_batch_size = cmp::min(
                     requested_batch_size,
-                    self.state
+                    self.global_state_lock
                         .lock_guard()
                         .await
                         .cli
                         .max_number_of_blocks_before_syncing
                         / 2,
                 );
-                let state = self.state.lock_guard().await;
+                let global_state = self.global_state_lock.lock_guard().await;
                 let responded_batch_size = cmp::max(responded_batch_size, MINIMUM_BLOCK_BATCH_SIZE);
                 let mut returned_blocks: Vec<TransferBlock> =
                     Vec::with_capacity(responded_batch_size);
 
                 let mut parent_block_header: BlockHeader = peers_most_canonical_block.header;
                 while returned_blocks.len() < responded_batch_size {
-                    let children = state
+                    let children = global_state
                         .chain
                         .archival_state()
                         .get_children_blocks(&parent_block_header)
@@ -514,7 +514,7 @@ impl PeerLoopHandler {
                     } else {
                         let mut canonical: BlockHeader = children[0].clone();
                         for child in children {
-                            if state
+                            if global_state
                                 .chain
                                 .archival_state()
                                 .block_belongs_to_canonical_chain(&child, &tip_header)
@@ -527,7 +527,7 @@ impl PeerLoopHandler {
                         canonical
                     };
 
-                    let canonical_child: Block = state
+                    let canonical_child: Block = global_state
                         .chain
                         .archival_state()
                         .get_block(Hash::hash(&header_of_canonical_child))
@@ -562,7 +562,7 @@ impl PeerLoopHandler {
                 // Verify that we are in fact in syncing mode
                 // TODO: Seperate peer messages into those allowed under syncing
                 // and those that are not
-                if !self.state.lock_guard().await.net.syncing {
+                if !self.global_state_lock.lock_guard().await.net.syncing {
                     warn!("Received a batch of blocks without being in syncing mode");
                     self.punish(PeerSanctionReason::ReceivedBatchBlocksOutsideOfSync)
                         .await?;
@@ -574,7 +574,7 @@ impl PeerLoopHandler {
                 // only valid for archival nodes.
                 let first_blocks_parent_digest: Digest = t_blocks[0].header.prev_block_digest;
                 let most_canonical_own_block_match: Option<Block> = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -610,7 +610,7 @@ impl PeerLoopHandler {
 
                 // todo: can we avoid this clone?
                 let block_header = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -631,7 +631,7 @@ impl PeerLoopHandler {
                 peer_state_info.highest_shared_block_height = block_notification.height;
                 {
                     let block_is_new = self
-                        .state
+                        .global_state_lock
                         .lock_guard()
                         .await
                         .chain
@@ -645,7 +645,7 @@ impl PeerLoopHandler {
                     // a fork. If we are reconciling, that is handled later, and the information
                     // about that is stored in `highest_shared_block_height`. If we are syncing
                     // we are also not requesting the block but instead updating the sync state.
-                    if self.state.lock_guard().await.net.syncing {
+                    if self.global_state_lock.lock_guard().await.net.syncing {
                         self.to_main_tx
                             .send(PeerThreadToMain::AddPeerMaxBlockHeight((
                                 self.peer_address,
@@ -665,7 +665,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::BlockRequestByHash(block_digest) => {
                 match self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -688,7 +688,7 @@ impl PeerLoopHandler {
                 debug!("Got BlockRequestByHeight of height {}", block_height);
 
                 let block_headers: Vec<BlockHeader> = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -708,11 +708,11 @@ impl PeerLoopHandler {
                 // If more than one block is found, we need to find the one that's canonical
                 let mut canonical_chain_block_header = block_headers[0].clone();
                 if block_headers.len() > 1 {
-                    let state = self.state.lock_guard().await;
+                    let global_state = self.global_state_lock.lock_guard().await;
                     // todo: can we avoid this clone?
-                    let tip_header = state.chain.light_state().header_clone().await;
+                    let tip_header = global_state.chain.light_state().header_clone().await;
                     for block_header in block_headers {
-                        if state
+                        if global_state
                             .chain
                             .archival_state()
                             .block_belongs_to_canonical_chain(&block_header, &tip_header)
@@ -724,7 +724,7 @@ impl PeerLoopHandler {
                 }
 
                 let canonical_chain_block: Block = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .chain
@@ -776,7 +776,7 @@ impl PeerLoopHandler {
                 // if transaction is not confirmable, punish
                 let confirmable = transaction.is_confirmable_relative_to(
                     &self
-                        .state
+                        .global_state_lock
                         .lock_guard()
                         .await
                         .chain
@@ -826,7 +826,7 @@ impl PeerLoopHandler {
                 let pt2m_transaction = PeerThreadToMainTransaction {
                     transaction: *transaction.to_owned(),
                     confirmable_for_block: self
-                        .state
+                        .global_state_lock
                         .lock_guard()
                         .await
                         .chain
@@ -843,7 +843,7 @@ impl PeerLoopHandler {
             PeerMessage::TransactionNotification(transaction_notification) => {
                 // 1. Ignore if we already know this transaction.
                 let transaction_is_known = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .mempool
@@ -866,7 +866,7 @@ impl PeerLoopHandler {
             }
             PeerMessage::TransactionRequest(transaction_identifier) => {
                 if let Some(transaction) = self
-                    .state
+                    .global_state_lock
                     .lock_guard()
                     .await
                     .mempool
@@ -917,7 +917,7 @@ impl PeerLoopHandler {
 
                 let request_batch_size = std::cmp::min(
                     STANDARD_BLOCK_BATCH_SIZE,
-                    self.state
+                    self.global_state_lock
                         .lock(|s| s.cli.max_number_of_blocks_before_syncing)
                         .await,
                 );
@@ -996,7 +996,7 @@ impl PeerLoopHandler {
                                     break;
                                 }
                                 Some(peer_msg) => {
-                                    let syncing = self.state.lock(|s| s.net.syncing).await;
+                                    let syncing = self.global_state_lock.lock(|s| s.net.syncing).await;
                                     if peer_msg.ignore_during_sync() && syncing {
                                         debug!("Ignoring {} message during syncing, from {}", peer_msg.get_type(), self.peer_address);
                                         continue;
@@ -1071,9 +1071,9 @@ impl PeerLoopHandler {
         <S as Sink<PeerMessage>>::Error: std::error::Error + Sync + Send + 'static,
         <S as TryStream>::Error: std::error::Error,
     {
-        let state = self.state.lock_guard().await;
+        let global_state = self.global_state_lock.lock_guard().await;
         // Check if peer standing exists in database, return default if it does not.
-        let standing: PeerStanding = state
+        let standing: PeerStanding = global_state
             .net
             .peer_databases
             .peer_standings
@@ -1098,7 +1098,7 @@ impl PeerLoopHandler {
         // this check could have been invalidated by other threads so we perform it again under
         // a lock.
 
-        if state
+        if global_state
             .net
             .peer_map
             .values()
@@ -1107,18 +1107,18 @@ impl PeerLoopHandler {
             bail!("Attempted to connect to already connected peer. Aborting connection.");
         }
 
-        if state.net.peer_map.len() >= state.cli.max_peers as usize {
+        if global_state.net.peer_map.len() >= global_state.cli.max_peers as usize {
             bail!("Attempted to connect to more peers than allowed. Aborting connection.");
         }
 
-        if state.net.peer_map.contains_key(&self.peer_address) {
+        if global_state.net.peer_map.contains_key(&self.peer_address) {
             // This shouldn't be possible, unless the peer reports a different instance ID than
             // for the other connection. Only a malignant client would do that.
             bail!("Already connected to peer. Aborting connection");
         }
-        drop(state);
+        drop(global_state);
 
-        self.state
+        self.global_state_lock
             .lock_mut(|s| s.net.peer_map.insert(self.peer_address, new_peer))
             .await;
 
@@ -1137,7 +1137,7 @@ impl PeerLoopHandler {
         // If peer indicates more canonical block, request a block notification to catch up ASAP
         if self.peer_handshake_data.tip_header.proof_of_work_family
             > self
-                .state
+                .global_state_lock
                 .lock_guard()
                 .await
                 .chain
@@ -1152,8 +1152,12 @@ impl PeerLoopHandler {
         let res = self.run(peer, from_main_rx, &mut peer_state).await;
         debug!("Exited peer loop for {}", self.peer_address);
 
-        close_peer_connected_callback(self.state.clone(), self.peer_address, &self.to_main_tx)
-            .await?;
+        close_peer_connected_callback(
+            self.global_state_lock.clone(),
+            self.peer_address,
+            &self.to_main_tx,
+        )
+        .await?;
 
         debug!("Ending peer loop for {}", self.peer_address);
 
@@ -1435,16 +1439,20 @@ mod peer_loop_tests {
         let network = Network::Alpha;
         let (peer_broadcast_tx, _from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let mut state = state_lock.lock_guard_mut().await;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address = get_dummy_socket_address(0);
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
 
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address);
-        add_block(&mut state, block_1.clone()).await?;
-        drop(state);
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let mock_peer_messages = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_1.into()))),
@@ -1496,8 +1504,12 @@ mod peer_loop_tests {
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let mut state = state_lock.lock_guard_mut().await;
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1510,13 +1522,13 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
 
-        add_block(&mut state, block_1.clone()).await?;
-        add_block(&mut state, block_2_a.clone()).await?;
-        add_block(&mut state, block_3_a.clone()).await?;
-        add_block(&mut state, block_2_b.clone()).await?;
-        add_block(&mut state, block_3_b.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_2_a.clone()).await?;
+        add_block(&mut global_state_mut, block_3_a.clone()).await?;
+        add_block(&mut global_state_mut, block_2_b.clone()).await?;
+        add_block(&mut global_state_mut, block_3_b.clone()).await?;
 
-        drop(state);
+        drop(global_state_mut);
 
         let mut mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestBatch(vec![genesis_block.hash], 14)),
@@ -1578,8 +1590,12 @@ mod peer_loop_tests {
         let network = Network::Alpha;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, _to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let mut state = state_lock.lock_guard_mut().await;
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
         let peer_address = get_dummy_socket_address(0);
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
@@ -1592,13 +1608,13 @@ mod peer_loop_tests {
         let (block_3_b, _, _) =
             make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address);
 
-        add_block(&mut state, block_1.clone()).await?;
-        add_block(&mut state, block_2_a.clone()).await?;
-        add_block(&mut state, block_3_a.clone()).await?;
-        add_block(&mut state, block_2_b.clone()).await?;
-        add_block(&mut state, block_3_b.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_2_a.clone()).await?;
+        add_block(&mut global_state_mut, block_3_a.clone()).await?;
+        add_block(&mut global_state_mut, block_2_b.clone()).await?;
+        add_block(&mut global_state_mut, block_3_b.clone()).await?;
 
-        drop(state);
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::BlockRequestByHeight(2.into())),
@@ -1765,17 +1781,21 @@ mod peer_loop_tests {
         // process as the alternative is that the program will crash because it runs out of RAM.
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(Network::Alpha, 1).await?;
-        let mut state = state_lock.lock_guard_mut().await;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
 
         // Restrict max number of blocks held in memory to 2.
-        state.cli = cli_args::Args {
+        global_state_mut.cli = cli_args::Args {
             max_number_of_blocks_before_syncing: 2,
             ..Default::default()
         };
 
         let (hsd1, peer_address1) = get_dummy_peer_connection_data_genesis(Network::Alpha, 1);
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
-        let own_recipient_address = state
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
+        let own_recipient_address = global_state_mut
             .wallet_state
             .wallet_secret
             .nth_generation_spending_key(0)
@@ -1788,9 +1808,9 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, own_recipient_address);
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, own_recipient_address);
-        add_block(&mut state, block_1.clone()).await?;
+        add_block(&mut global_state_mut, block_1.clone()).await?;
 
-        drop(state);
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1849,9 +1869,13 @@ mod peer_loop_tests {
         let network = Network::Testnet;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let mut state = state_lock.lock_guard_mut().await;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
         let peer_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -1862,8 +1886,8 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
-        add_block(&mut state, block_1.clone()).await?;
-        drop(state);
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -1926,10 +1950,10 @@ mod peer_loop_tests {
         let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let state = state_lock.lock_guard().await;
+        let global_state = state_lock.lock_guard().await;
         let peer_address = get_dummy_socket_address(0);
 
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let genesis_block: Block = global_state.chain.archival_state().get_latest_block().await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -1938,7 +1962,7 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address);
         let (block_3, _, _) =
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
-        drop(state);
+        drop(global_state);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_3.clone().into()))),
@@ -2003,11 +2027,15 @@ mod peer_loop_tests {
         let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, hsd) =
             get_test_genesis_setup(network, 0).await?;
-        let mut state = state_lock.lock_guard_mut().await;
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let peer_socket_address: SocketAddr = get_dummy_socket_address(0);
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
         let (block_1, _, _) =
             make_mock_block_with_valid_pow(&genesis_block.clone(), None, a_recipient_address);
         let (block_2, _, _) =
@@ -2018,8 +2046,8 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
         let (block_5, _, _) =
             make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address);
-        add_block(&mut state, block_1.clone()).await?;
-        drop(state);
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_4.clone().into()))),
@@ -2097,11 +2125,19 @@ mod peer_loop_tests {
         let network = Network::RegTest;
         let (_peer_broadcast_tx, from_main_rx_clone, to_main_tx, mut to_main_rx1, state_lock, _hsd) =
             get_test_genesis_setup(network, 1).await?;
-        let mut state = state_lock.lock_guard_mut().await;
-        let peer_infos: Vec<PeerInfo> =
-            state.net.peer_map.clone().into_values().collect::<Vec<_>>();
+        let mut global_state_mut = state_lock.lock_guard_mut().await;
+        let peer_infos: Vec<PeerInfo> = global_state_mut
+            .net
+            .peer_map
+            .clone()
+            .into_values()
+            .collect::<Vec<_>>();
 
-        let genesis_block: Block = state.chain.archival_state().get_latest_block().await;
+        let genesis_block: Block = global_state_mut
+            .chain
+            .archival_state()
+            .get_latest_block()
+            .await;
         let a_wallet_secret = WalletSecret::new(random());
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
@@ -2112,8 +2148,8 @@ mod peer_loop_tests {
             make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address);
         let (block_4, _, _) =
             make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address);
-        add_block(&mut state, block_1.clone()).await?;
-        drop(state);
+        add_block(&mut global_state_mut, block_1.clone()).await?;
+        drop(global_state_mut);
 
         let (hsd_1, sa_1) = get_dummy_peer_connection_data_genesis(network, 1);
         let expected_peer_list_resp = vec![

@@ -124,7 +124,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     };
     let blockchain_state = BlockchainState::Archival(blockchain_archival_state);
     let mempool = Mempool::new(cli_args.max_mempool_size);
-    let state_lock = GlobalStateLock::new(
+    let global_state_lock = GlobalStateLock::new(
         wallet_state,
         blockchain_state,
         networking_state,
@@ -132,8 +132,11 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
         mempool,
         false,
     );
-    let mut state = state_lock.lock_guard_mut().await;
-    let own_handshake_data: HandshakeData = state.get_own_handshakedata().await;
+    let own_handshake_data: HandshakeData = global_state_lock
+        .lock_guard()
+        .await
+        .get_own_handshakedata()
+        .await;
     info!(
         "Most known canonical block has height {}",
         own_handshake_data.tip_header.height
@@ -141,13 +144,19 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
 
     // Check if we need to restore the wallet database, and if so, do it.
     info!("Checking if we need to restore UTXOs");
-    state.restore_monitored_utxos_from_recovery_data().await?;
+    global_state_lock
+        .lock_guard_mut()
+        .await
+        .restore_monitored_utxos_from_recovery_data()
+        .await?;
     info!("UTXO restoration check complete");
+
+    let global_state = global_state_lock.lock_guard().await;
 
     // Connect to peers, and provide each peer thread with a thread-safe copy of the state
     let mut thread_join_handles = vec![];
-    for peer_address in state.cli.peers.clone() {
-        let peer_state_var = state_lock.clone(); // bump arc refcount
+    for peer_address in global_state.cli.peers.clone() {
+        let peer_state_var = global_state_lock.clone(); // bump arc refcount
         let main_to_peer_broadcast_rx_clone: broadcast::Receiver<MainToPeerThread> =
             main_to_peer_broadcast_tx.subscribe();
         let peer_thread_to_main_tx_clone: mpsc::Sender<PeerThreadToMain> =
@@ -173,8 +182,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     // Start handling of mining. So far we can only mine on the `RegTest` network.
     let (miner_to_main_tx, miner_to_main_rx) = mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
     let (main_to_miner_tx, main_to_miner_rx) = watch::channel::<MainToMiner>(MainToMiner::Empty);
-    let miner_state_lock = state_lock.clone(); // bump arc refcount.
-    if state.cli.mine {
+    let miner_state_lock = global_state_lock.clone(); // bump arc refcount.
+    if global_state.cli.mine {
         let miner_join_handle = tokio::task::Builder::new()
             .name("miner")
             .spawn(async move {
@@ -195,13 +204,15 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     let (rpc_server_to_main_tx, rpc_server_to_main_rx) =
         mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
     let mut rpc_listener = tarpc::serde_transport::tcp::listen(
-        format!("127.0.0.1:{}", state.cli.rpc_port),
+        format!("127.0.0.1:{}", global_state.cli.rpc_port),
         Json::default,
     )
     .await?;
     rpc_listener.config_mut().max_frame_length(usize::MAX);
 
-    let rpc_state_lock = state_lock.clone();
+    drop(global_state);
+
+    let rpc_state_lock = global_state_lock.clone();
 
     async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
         tokio::spawn(fut);
@@ -236,7 +247,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     info!("Starting main loop");
     let main_loop_handler = MainLoopHandler::new(
         incoming_peer_listener,
-        state_lock.clone(),
+        global_state_lock,
         main_to_peer_broadcast_tx,
         peer_thread_to_main_tx,
         main_to_miner_tx,

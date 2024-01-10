@@ -25,7 +25,6 @@ use tokio::task::JoinHandle;
 use tokio::{select, signal, time};
 use tracing::{debug, error, info, warn};
 use twenty_first::amount::u32s::U32s;
-use twenty_first::storage::storage_schema::traits::StorageWriter;
 use twenty_first::util_types::emojihash_trait::Emojihash;
 
 use crate::models::channel::{
@@ -517,6 +516,8 @@ impl MainLoopHandler {
             }
         }
 
+        let mut self_mined_a_block = false;
+
         for new_block_to_process in blocks.into_iter() {
             let new_block = match new_block_to_process {
                 BlockToProcess::SelfMined(new_block_info) => {
@@ -524,6 +525,7 @@ impl MainLoopHandler {
                         "Miner found new block: {}",
                         new_block_info.block.header.height
                     );
+                    self_mined_a_block = true;
 
                     // Notify wallet to expect the coinbase UTXO, as we mined this block
                     global_state
@@ -573,10 +575,6 @@ impl MainLoopHandler {
         }
 
         // Update information about latest block
-        // acquires light_state write lock (briefly)
-        // TODO: shouldn't this be inside above loop, so that latest_block is in sync
-        //       with other data stores for each loop iteration?   else reading threads
-        //       may see inconsistencies, is that ok for this?
         global_state
             .chain
             .light_state_mut()
@@ -584,10 +582,19 @@ impl MainLoopHandler {
             .await;
 
         // Flush databases
-        self.flush_databases().await?;
+        global_state.flush_databases().await?;
+
+        let mining = global_state.cli.mine;
+        drop(global_state);
 
         // Inform miner to work on a new block
-        if global_state.cli.mine {
+        if mining {
+            if self_mined_a_block {
+                // signal to miner that we are ready to resume mining.
+                debug!("Sending ReadyToMineNextBlock from main to mining thread.");
+                self.main_to_miner_tx
+                    .send(MainToMiner::ReadyToMineNextBlock)?;
+            }
             self.main_to_miner_tx
                 .send(MainToMiner::NewBlock(last_block.clone()))?;
         }
@@ -1142,39 +1149,6 @@ impl MainLoopHandler {
         }
     }
 
-    /// Locking:
-    ///  * acquires write lock for `wallet_db`
-    ///  * acquires write lock for `archival_mutator_set`
-    async fn flush_databases(&self) -> Result<()> {
-        let mut global_state = self.global_state_lock.lock_guard_mut().await;
-
-        // flush wallet databases
-        global_state.wallet_state.wallet_db.persist();
-
-        let hash = global_state
-            .chain
-            .archival_state()
-            .get_latest_block()
-            .await
-            .hash;
-
-        // persist archival_mutator_set, with sync label
-        global_state
-            .chain
-            .archival_state_mut()
-            .archival_mutator_set
-            .set_sync_label(hash);
-        global_state
-            .chain
-            .archival_state_mut()
-            .archival_mutator_set
-            .persist();
-
-        debug!("Persisted all databases");
-
-        Ok(())
-    }
-
     async fn graceful_shutdown(&self, thread_handles: Vec<JoinHandle<()>>) -> Result<()> {
         info!("Shutdown initiated.");
 
@@ -1188,7 +1162,7 @@ impl MainLoopHandler {
         debug!("sent bye");
 
         // Flush all databases
-        self.flush_databases().await?;
+        self.global_state_lock.flush_databases().await?;
 
         // wait 0.5 seconds to ensure that child processes have been shut down
         sleep(Duration::new(0, 500 * 1_000_000));

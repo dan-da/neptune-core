@@ -85,6 +85,10 @@ impl GlobalStateLock {
         self.lock_mut(|s| s.mining = mining).await
     }
 
+    pub async fn flush_databases(&self) -> Result<()> {
+        self.lock_guard_mut().await.flush_databases().await
+    }
+
     // pub async fn chain_light_state(&self) -> &crate::LightState {
     //     self.lock(|s| s.chain.light_state()).await
     // }
@@ -850,6 +854,27 @@ impl GlobalState {
         // Update sync label and persist
         self.wallet_state.wallet_db.set_sync_label(tip_hash);
         self.wallet_state.wallet_db.persist();
+
+        Ok(())
+    }
+
+    pub async fn flush_databases(&mut self) -> Result<()> {
+        // flush wallet databases
+        self.wallet_state.wallet_db.persist();
+
+        let hash = self.chain.archival_state().get_latest_block().await.hash;
+
+        // persist archival_mutator_set, with sync label
+        self.chain
+            .archival_state_mut()
+            .archival_mutator_set
+            .set_sync_label(hash);
+        self.chain
+            .archival_state_mut()
+            .archival_mutator_set
+            .persist();
+
+        debug!("Persisted all databases");
 
         Ok(())
     }
