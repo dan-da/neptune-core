@@ -414,7 +414,7 @@ impl WalletState {
                         &utxo_digests,
                         &msa_state.kernel,
                         addition_record,
-                    );
+                    ).await;
                 match updated_mp_indices {
                     Ok(mut indices_of_mutated_mps) => {
                         changed_mps.append(&mut indices_of_mutated_mps)

@@ -5,9 +5,11 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use super::mmr_trait_async::*;
+use super::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::{
-    algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
+    // algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
+    algebraic_hasher::AlgebraicHasher,
 };
 
 use super::{
@@ -24,8 +26,8 @@ pub struct MutatorSetAccumulator {
 impl MutatorSetAccumulator {
     pub fn new() -> Self {
         let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
-            aocl: MmrAccumulator::new(vec![]),
-            swbf_inactive: MmrAccumulator::new(vec![]),
+            aocl: MmrAccumulator::init(vec![], 0),
+            swbf_inactive: MmrAccumulator::init(vec![], 0),
             swbf_active: ActiveWindow::new(),
         };
 
@@ -37,15 +39,7 @@ impl MutatorSetAccumulator {
 
 impl Default for MutatorSetAccumulator {
     fn default() -> Self {
-        let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
-            aocl: MmrAccumulator::new(vec![]),
-            swbf_inactive: MmrAccumulator::new(vec![]),
-            swbf_active: ActiveWindow::new(),
-        };
-
-        Self {
-            kernel: set_commitment,
-        }
+        Self::new()
     }
 }
 

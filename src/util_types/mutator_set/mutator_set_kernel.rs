@@ -13,7 +13,8 @@ use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 use twenty_first::util_types::mmr;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+// use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use super::mmr_trait_async::*;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
@@ -552,7 +553,8 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
 
-    use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+    // use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+    use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
 
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::commit;

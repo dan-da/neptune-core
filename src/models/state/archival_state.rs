@@ -24,6 +24,7 @@ use crate::models::database::{
 };
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::*;
+use crate::util_types::mutator_set::mmr_trait_async::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -200,7 +201,7 @@ impl ArchivalState {
             .ams()
             .kernel
             .aocl
-            .is_empty_async()
+            .is_empty()
             .await
         {
             for addition_record in genesis_block.kernel.body.transaction.kernel.outputs.iter() {
@@ -891,7 +892,7 @@ mod archival_state_tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async()
+                .count_leaves()
                 .await,
             "Archival mutator set must be populated with premine outputs"
         );
@@ -994,7 +995,7 @@ mod archival_state_tests {
                 .chain
                 .archival_state()
                 .archival_mutator_set;
-            assert_ne!(0, ams_ref.ams().kernel.aocl.count_leaves_async().await);
+            assert_ne!(0, ams_ref.ams().kernel.aocl.count_leaves().await);
         }
 
         let now = Duration::from_millis(mock_block_1.kernel.header.timestamp.value());
@@ -1230,7 +1231,7 @@ mod archival_state_tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async()
+                .count_leaves()
                 .await as usize,
             "AOCL leaf count must agree with blockchain after rollback"
         );
@@ -1406,7 +1407,7 @@ mod archival_state_tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async().await as usize,
+                .count_leaves().await as usize,
             "AOCL leaf count must agree with #premine allocations + #transaction outputs in all blocks, even after rollback"
         );
 

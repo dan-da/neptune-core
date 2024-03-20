@@ -75,7 +75,7 @@ impl Transaction {
     /// Create a new `Transaction`` from a `PrimitiveWitness` (which defines an old
     /// `Transaction`) by updating the mutator set records according to a new
     /// `Block`.
-    fn new_with_updated_mutator_set_records_given_primitive_witness(
+    async fn new_with_updated_mutator_set_records_given_primitive_witness(
         old_primitive_witness: &PrimitiveWitness,
         block: &Block,
     ) -> Result<Transaction> {
@@ -124,6 +124,7 @@ impl Transaction {
                 &msa_state.kernel,
                 &block_addition_record,
             )
+            .await
             .expect("MS MP update from add must succeed in wallet handler");
 
             msa_state.add(&block_addition_record);
@@ -225,7 +226,7 @@ impl Transaction {
     /// Update mutator set data in a transaction to update its
     /// compatibility with a new block. Note that for Proof witnesses, this will
     /// invalidate the proof, requiring an update.
-    pub fn new_with_updated_mutator_set_records(
+    pub async fn new_with_updated_mutator_set_records(
         &self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
@@ -234,7 +235,7 @@ impl Transaction {
             Self::new_with_updated_mutator_set_records_given_primitive_witness(
                 primitive_witness,
                 block,
-            )
+            ).await
         } else {
             Self::new_with_updated_mutator_set_records_given_proof(
                 self,

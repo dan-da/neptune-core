@@ -1,6 +1,7 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
 
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
@@ -770,7 +771,7 @@ impl GlobalState {
             "Attempting to restore {} missing monitored UTXOs to wallet database",
             recovery_data_for_missing_mutxos.len()
         );
-        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves_async().await;
+        let current_aocl_leaf_count = ams_ref.ams().kernel.aocl.count_leaves().await;
         let mut restored_mutxos = 0;
         for incoming_utxo in recovery_data_for_missing_mutxos {
             // If the referenced UTXO is in the future from our tip, do not attempt to recover it. Instead: warn the user of this.
@@ -918,7 +919,7 @@ impl GlobalState {
                 }
 
                 // revert additions
-                membership_proof.revert_update_from_batch_addition(&previous_mutator_set);
+                membership_proof.revert_update_from_batch_addition(&previous_mutator_set).await;
 
                 // unset spent_in_block field if the UTXO was spent in this block
                 if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
@@ -968,6 +969,7 @@ impl GlobalState {
                             &block_msa,
                             addition_record,
                         )
+                        .await
                         .expect("Could not update membership proof with addition record.");
                     block_msa.add(addition_record);
                 }

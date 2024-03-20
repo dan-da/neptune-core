@@ -12,8 +12,11 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::time::Duration;
 use tasm_lib::triton_vm::proof::Proof;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+// use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+// use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
+
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use tracing::{debug, error, warn};
@@ -184,8 +187,8 @@ impl Block {
         let body: BlockBody = BlockBody {
             transaction: genesis_coinbase_tx,
             mutator_set_accumulator: genesis_mutator_set.clone(),
-            block_mmr_accumulator: MmrAccumulator::new(vec![]),
-            lock_free_mmr_accumulator: MmrAccumulator::new(vec![]),
+            block_mmr_accumulator: MmrAccumulator::default(),
+            lock_free_mmr_accumulator: MmrAccumulator::default(),
             uncle_blocks: vec![],
         };
 
@@ -791,7 +794,7 @@ mod block_tests {
 
         let index = thread_rng().gen_range(0..blocks.len() - 1);
         let block_digest = blocks[index].hash();
-        let (membership_proof, _) = ammr.prove_membership_async(index as u64).await;
+        let (membership_proof, _) = ammr.prove_membership(index as u64).await;
         let (v, _) = membership_proof.verify(
             &last_block_mmra.get_peaks(),
             block_digest,

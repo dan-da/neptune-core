@@ -22,12 +22,17 @@ use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
 use tasm_lib::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
+// use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator},
+    util_types::{algebraic_hasher::AlgebraicHasher,
+        // mmr::mmr_accumulator::MmrAccumulator
+    },
 };
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
+
 
 use crate::models::consensus::{
     SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
@@ -203,7 +208,7 @@ impl RemovalRecordsIntegrityWitness {
         (root, paths)
     }
 
-    pub fn pseudorandom_mmra_with_mps(
+    pub async fn pseudorandom_mmra_with_mps(
         seed: [u8; 32],
         leafs: &[Digest],
     ) -> (MmrAccumulator<Hash>, Vec<MmrMembershipProof<Hash>>) {
@@ -323,15 +328,16 @@ impl RemovalRecordsIntegrityWitness {
 
         // sanity check
         for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-            assert!(mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0);
+            assert!(mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0);
         }
 
         (mmra, mps)
     }
 }
 
-impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+// impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
+impl<'a> RemovalRecordsIntegrityWitness {
+    async fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let num_inputs = u.int_in_range(1..=3usize)?;
         let _num_outputs = u.int_in_range(1..=3usize)?;
         let _num_public_announcements = u.int_in_range(0..=2usize)?;
@@ -358,13 +364,13 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
             .map(|ar| ar.canonical_commitment)
             .collect_vec();
         let (aocl, mmr_mps) =
-            Self::pseudorandom_mmra_with_mps(u.arbitrary()?, &canonical_commitments);
+            Self::pseudorandom_mmra_with_mps(u.arbitrary()?, &canonical_commitments).await;
         assert_eq!(num_inputs, mmr_mps.len());
         assert_eq!(num_inputs, canonical_commitments.len());
 
         for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
             assert!(
-                mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
+                mp.verify(&aocl.get_peaks().await, cc, aocl.count_leaves().await).0,
                 "Returned MPs must be valid for returned AOCL"
             );
         }
@@ -376,7 +382,7 @@ impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
         let swbfa_hash: Digest = u.arbitrary()?;
         let mut kernel: TransactionKernel = u.arbitrary()?;
         kernel.mutator_set_hash = Hash::hash_pair(
-            Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+            Hash::hash_pair(aocl.bag_peaks().await, swbfi.bag_peaks().await),
             Hash::hash_pair(swbfa_hash, Digest::default()),
         );
         kernel.inputs = input_utxos

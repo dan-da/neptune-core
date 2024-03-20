@@ -5,7 +5,8 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use strum::EnumCount;
 use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
-use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+// use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
 use tasm_lib::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 

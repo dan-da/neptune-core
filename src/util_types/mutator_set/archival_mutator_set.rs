@@ -8,7 +8,9 @@ use std::error::Error;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+// use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
@@ -126,16 +128,16 @@ where
         &self,
         index: u64,
     ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Box<dyn Error>> {
-        if self.kernel.aocl.count_leaves_async().await <= index {
+        if self.kernel.aocl.count_leaves().await <= index {
             return Err(Box::new(
                 MutatorSetKernelError::RequestedAoclAuthPathOutOfBounds((
                     index,
-                    self.kernel.aocl.count_leaves_async().await,
+                    self.kernel.aocl.count_leaves().await,
                 )),
             ));
         }
 
-        Ok(self.kernel.aocl.prove_membership_async(index).await.0)
+        Ok(self.kernel.aocl.prove_membership(index).await.0)
     }
 
     /// Returns an authentication path for a chunk in the sliding window Bloom filter
@@ -143,11 +145,11 @@ where
         &self,
         chunk_index: u64,
     ) -> Result<(mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Chunk), Box<dyn Error>> {
-        if self.kernel.swbf_inactive.count_leaves_async().await <= chunk_index {
+        if self.kernel.swbf_inactive.count_leaves().await <= chunk_index {
             return Err(Box::new(
                 MutatorSetKernelError::RequestedSwbfAuthPathOutOfBounds((
                     chunk_index,
-                    self.kernel.swbf_inactive.count_leaves_async().await,
+                    self.kernel.swbf_inactive.count_leaves().await,
                 )),
             ));
         }
@@ -155,7 +157,7 @@ where
         let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> = self
             .kernel
             .swbf_inactive
-            .prove_membership_async(chunk_index)
+            .prove_membership(chunk_index)
             .await
             .0;
 
@@ -181,7 +183,7 @@ where
         receiver_preimage: Digest,
         aocl_index: u64,
     ) -> Result<MsMembershipProof, Box<dyn Error>> {
-        if self.kernel.aocl.is_empty_async().await {
+        if self.kernel.aocl.is_empty().await {
             return Err(Box::new(MutatorSetKernelError::MutatorSetIsEmpty));
         }
 
@@ -209,7 +211,7 @@ where
             let chunk_membership_proof: mmr::mmr_membership_proof::MmrMembershipProof<Hash> = self
                 .kernel
                 .swbf_inactive
-                .prove_membership_async(chunk_index)
+                .prove_membership(chunk_index)
                 .await
                 .0;
             target_chunks
@@ -261,7 +263,7 @@ where
             // update archival mmr
             self.kernel
                 .swbf_inactive
-                .mutate_leaf_raw_async(chunk_index, Hash::hash(&new_chunk))
+                .mutate_leaf_raw(chunk_index, Hash::hash(&new_chunk))
                 .await;
 
             self.chunks.set(chunk_index, new_chunk).await;
@@ -271,8 +273,8 @@ where
     /// Determine whether the given `AdditionRecord` can be reversed.
     /// Equivalently, determine if it was added last.
     pub async fn add_is_reversible(&mut self, addition_record: &AdditionRecord) -> bool {
-        let leaf_index = self.kernel.aocl.count_leaves_async().await - 1;
-        let digest = self.kernel.aocl.get_leaf_async(leaf_index).await;
+        let leaf_index = self.kernel.aocl.count_leaves().await - 1;
+        let digest = self.kernel.aocl.get_leaf(leaf_index).await;
         addition_record.canonical_commitment == digest
     }
 
@@ -283,10 +285,10 @@ where
     ///   from the inactive window, and slide window back by putting the
     ///   last inactive chunk in the active window.
     pub async fn revert_add(&mut self, addition_record: &AdditionRecord) {
-        let removed_add_index = self.kernel.aocl.count_leaves_async().await - 1;
+        let removed_add_index = self.kernel.aocl.count_leaves().await - 1;
 
         // 1. Remove last leaf from AOCL
-        let digest = self.kernel.aocl.remove_last_leaf_async().await.unwrap();
+        let digest = self.kernel.aocl.remove_last_leaf().await.unwrap();
         assert_eq!(addition_record.canonical_commitment, digest);
 
         // 2. Possibly shrink bloom filter by moving a chunk back into active window
@@ -298,7 +300,7 @@ where
         }
 
         // 2.a. Remove a chunk from inactive window
-        let _digest = self.kernel.swbf_inactive.remove_last_leaf_async().await;
+        let _digest = self.kernel.swbf_inactive.remove_last_leaf().await;
         let last_inactive_chunk = self.chunks.pop().await.unwrap();
 
         // 2.b. Slide active window back by putting `last_inactive_chunk` back
@@ -327,12 +329,12 @@ where
     pub async fn accumulator(&self) -> MutatorSetAccumulator {
         let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
             aocl: MmrAccumulator::init(
-                self.kernel.aocl.get_peaks_async().await,
-                self.kernel.aocl.count_leaves_async().await,
+                self.kernel.aocl.get_peaks().await,
+                self.kernel.aocl.count_leaves().await,
             ),
             swbf_inactive: MmrAccumulator::init(
-                self.kernel.swbf_inactive.get_peaks_async().await,
-                self.kernel.swbf_inactive.count_leaves_async().await,
+                self.kernel.swbf_inactive.get_peaks().await,
+                self.kernel.swbf_inactive.count_leaves().await,
             ),
             swbf_active: self.kernel.swbf_active.clone(),
         };

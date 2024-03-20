@@ -25,8 +25,11 @@ use super::shared::{
     NUM_TRIALS,
 };
 use twenty_first::util_types::mmr;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+// use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+// use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
+
 
 #[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);

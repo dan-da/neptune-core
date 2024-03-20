@@ -12,9 +12,11 @@ use crate::database::NeptuneLevelDb;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
+// use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use twenty_first::util_types::mmr::mmr_trait::Mmr;
+// use twenty_first::util_types::mmr::mmr_trait::Mmr;
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;

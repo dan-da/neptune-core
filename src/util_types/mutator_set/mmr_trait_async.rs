@@ -2,11 +2,13 @@ use crate::twenty_first::shared_math::digest::Digest;
 use crate::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::twenty_first::util_types::mmr::{
-    mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof,
+    // mmr_accumulator::MmrAccumulator,
+    mmr_membership_proof::MmrMembershipProof,
 };
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
 
 #[allow(async_fn_in_trait)]
-pub trait MmrAsync<H: AlgebraicHasher> {
+pub trait Mmr<H: AlgebraicHasher> {
     /// Create a new MMR instanc from a list of hash digests. The supplied digests
     /// are the leaves of the MMR.
 

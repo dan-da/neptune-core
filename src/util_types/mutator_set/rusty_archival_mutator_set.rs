@@ -77,8 +77,8 @@ impl RustyArchivalMutatorSet {
     pub async fn restore_or_new(&mut self) {
         // The field `digests` of ArchivalMMR should always have at
         // least one element (a dummy digest), owing to 1-indexation.
-        self.ams_mut().kernel.aocl.fix_dummy_async().await;
-        self.ams_mut().kernel.swbf_inactive.fix_dummy_async().await;
+        self.ams_mut().kernel.aocl.fix_dummy().await;
+        self.ams_mut().kernel.swbf_inactive.fix_dummy().await;
 
         // populate active window
         self.ams_mut().kernel.swbf_active.sbf = self.active_window_storage.get().await;
@@ -136,7 +136,7 @@ mod tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async()
+                .count_leaves()
                 .await
         );
 
@@ -168,7 +168,7 @@ mod tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async()
+                .count_leaves()
                 .await
         );
 
@@ -212,7 +212,7 @@ mod tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async()
+                .count_leaves()
                 .await
         );
 
@@ -238,7 +238,7 @@ mod tests {
                 .ams()
                 .kernel
                 .aocl
-                .count_leaves_async()
+                .count_leaves()
                 .await
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {

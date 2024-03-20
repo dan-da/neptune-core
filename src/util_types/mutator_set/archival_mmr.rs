@@ -12,15 +12,19 @@ use std::pin::Pin;
 use itertools::Itertools;
 
 use twenty_first::util_types::mmr::{
-    mmr_accumulator::MmrAccumulator, mmr_membership_proof::MmrMembershipProof, mmr_trait::Mmr,
+    // mmr_accumulator::MmrAccumulator,
+    mmr_membership_proof::MmrMembershipProof,
     shared_advanced, shared_basic,
 };
+use super::mmr_trait_async::*;
+use super::mmr_accumulator::MmrAccumulator;
+
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
 /// Merkle Mountain Ranges only know about hashes. When values are to be associated with
 /// MMRs, these values must be stored by the caller, or in a wrapper to this data structure.
-pub struct ArchivalMmr<H: AlgebraicHasher, Storage: StorageVec<Digest>> {
+pub struct ArchivalMmr<H: AlgebraicHasher, Storage: StorageVec<Digest> + Send + Sync> {
     digests: Storage,
     _hasher: PhantomData<H>,
 }
@@ -31,160 +35,27 @@ where
     Storage: StorageVec<Digest> + Send + Sync,
 {
     /// Calculate the root for the entire MMR
-    fn bag_peaks(&self) -> Digest {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.bag_peaks_async())
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    /// Return the digests of the peaks of the MMR
-    fn get_peaks(&self) -> Vec<Digest> {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.get_peaks_async())
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    /// Whether the MMR is empty. Note that since indexing starts at
-    /// 1, the `digests` contain must always contain at least one
-    /// element: a dummy digest.
-    fn is_empty(&self) -> bool {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.is_empty_async())
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    /// Return the number of leaves in the tree
-    fn count_leaves(&self) -> u64 {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.count_leaves_async())
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    /// Append an element to the archival MMR, return the membership proof of the newly added leaf.
-    /// The membership proof is returned here since the accumulater MMR has no other way of
-    /// retrieving a membership proof for a leaf. And the archival and accumulator MMR share
-    /// this interface.
-    fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.append_async(new_leaf))
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    /// Mutate an existing leaf. It is the caller's responsibility that the
-    /// membership proof is valid. If the membership proof is wrong, the MMR
-    /// will end up in a broken state.
-    fn mutate_leaf(&mut self, old_membership_proof: &MmrMembershipProof<H>, new_leaf: Digest) {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.mutate_leaf_async(old_membership_proof, new_leaf))
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    fn batch_mutate_leaf_and_update_mps(
-        &mut self,
-        membership_proofs: &mut [&mut MmrMembershipProof<H>],
-        mutation_data: Vec<(MmrMembershipProof<H>, Digest)>,
-    ) -> Vec<usize> {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(
-                    self.batch_mutate_leaf_and_update_mps_async(membership_proofs, mutation_data),
-                )
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    fn verify_batch_update(
-        &self,
-        new_peaks: &[Digest],
-        appended_leafs: &[Digest],
-        leaf_mutations: &[(Digest, MmrMembershipProof<H>)],
-    ) -> bool {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.verify_batch_update_async(
-                    new_peaks,
-                    appended_leafs,
-                    leaf_mutations,
-                ))
-            })
-            .join()
-            .unwrap()
-        })
-    }
-
-    fn to_accumulator(&self) -> MmrAccumulator<H> {
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                let runtime = tokio::runtime::Runtime::new().unwrap();
-                runtime.block_on(self.to_accumulator_async())
-            })
-            .join()
-            .unwrap()
-        })
-    }
-}
-
-impl<H, Storage> ArchivalMmr<H, Storage>
-where
-    H: AlgebraicHasher + Send + Sync,
-    Storage: StorageVec<Digest>,
-{
-    /// Calculate the root for the entire MMR
-    pub async fn bag_peaks_async(&self) -> Digest {
-        let peaks: Vec<Digest> = self.get_peaks_async().await;
+    async fn bag_peaks(&self) -> Digest {
+        let peaks: Vec<Digest> = self.get_peaks().await;
         bag_peaks::<H>(&peaks)
     }
 
     /// Return the digests of the peaks of the MMR
-    pub async fn get_peaks_async(&self) -> Vec<Digest> {
-        let peaks_and_heights = self.get_peaks_with_heights_async().await;
+    async fn get_peaks(&self) -> Vec<Digest> {
+        let peaks_and_heights = self.get_peaks_with_heights().await;
         peaks_and_heights.into_iter().map(|x| x.0).collect()
     }
 
     /// Whether the MMR is empty. Note that since indexing starts at
     /// 1, the `digests` contain must always contain at least one
     /// element: a dummy digest.
-    pub async fn is_empty_async(&self) -> bool {
+    async fn is_empty(&self) -> bool {
         self.digests.len().await == 1
     }
 
     /// Return the number of leaves in the tree
-    pub async fn count_leaves_async(&self) -> u64 {
-        let peaks_and_heights: Vec<(_, u32)> = self.get_peaks_with_heights_async().await;
+    async fn count_leaves(&self) -> u64 {
+        let peaks_and_heights: Vec<(_, u32)> = self.get_peaks_with_heights().await;
         let mut acc = 0;
         for (_, height) in peaks_and_heights {
             acc += 1 << height
@@ -197,24 +68,24 @@ where
     /// The membership proof is returned here since the accumulater MMR has no other way of
     /// retrieving a membership proof for a leaf. And the archival and accumulator MMR share
     /// this interface.
-    pub async fn append_async(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
+    async fn append(&mut self, new_leaf: Digest) -> MmrMembershipProof<H> {
         let node_index = self.digests.len().await;
         let leaf_index = shared_advanced::node_index_to_leaf_index(node_index).unwrap();
-        self.append_raw_async(new_leaf).await;
-        self.prove_membership_async(leaf_index).await.0
+        self.append_raw(new_leaf).await;
+        self.prove_membership(leaf_index).await.0
     }
 
     /// Mutate an existing leaf. It is the caller's responsibility that the
     /// membership proof is valid. If the membership proof is wrong, the MMR
     /// will end up in a broken state.
-    pub async fn mutate_leaf_async(
+    async fn mutate_leaf(
         &mut self,
         old_membership_proof: &MmrMembershipProof<H>,
         new_leaf: Digest,
     ) {
         // Sanity check
         let real_membership_proof: MmrMembershipProof<H> = self
-            .prove_membership_async(old_membership_proof.leaf_index)
+            .prove_membership(old_membership_proof.leaf_index)
             .await
             .0;
         assert_eq!(
@@ -222,11 +93,11 @@ where
             "membership proof argument list must match internally calculated"
         );
 
-        self.mutate_leaf_raw_async(real_membership_proof.leaf_index, new_leaf.to_owned())
+        self.mutate_leaf_raw(real_membership_proof.leaf_index, new_leaf.to_owned())
             .await
     }
 
-    pub async fn batch_mutate_leaf_and_update_mps_async(
+    async fn batch_mutate_leaf_and_update_mps(
         &mut self,
         membership_proofs: &mut [&mut MmrMembershipProof<H>],
         mutation_data: Vec<(MmrMembershipProof<H>, Digest)>,
@@ -237,12 +108,12 @@ where
         );
 
         for (mp, digest) in mutation_data.iter() {
-            self.mutate_leaf_raw_async(mp.leaf_index, *digest).await;
+            self.mutate_leaf_raw(mp.leaf_index, *digest).await;
         }
 
         let mut modified_mps: Vec<usize> = vec![];
         for (i, mp) in membership_proofs.iter_mut().enumerate() {
-            let new_mp = self.prove_membership_async(mp.leaf_index).await.0;
+            let new_mp = self.prove_membership(mp.leaf_index).await.0;
             if new_mp != **mp {
                 modified_mps.push(i);
             }
@@ -253,32 +124,32 @@ where
         modified_mps
     }
 
-    pub async fn verify_batch_update_async(
+    async fn verify_batch_update(
         &self,
         new_peaks: &[Digest],
         appended_leafs: &[Digest],
         leaf_mutations: &[(Digest, MmrMembershipProof<H>)],
     ) -> bool {
-        let accumulator: MmrAccumulator<H> = self.to_accumulator_async().await;
-        accumulator.verify_batch_update(new_peaks, appended_leafs, leaf_mutations)
+        let accumulator: MmrAccumulator<H> = self.to_accumulator().await;
+        accumulator.verify_batch_update(new_peaks, appended_leafs, leaf_mutations).await
     }
 
-    pub async fn to_accumulator_async(&self) -> MmrAccumulator<H> {
+    async fn to_accumulator(&self) -> MmrAccumulator<H> {
         MmrAccumulator::init(
-            self.get_peaks_async().await,
-            self.count_leaves_async().await,
+            self.get_peaks().await,
+            self.count_leaves().await,
         )
     }
 }
 
-impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
+impl<H: AlgebraicHasher, Storage: StorageVec<Digest> + Send + Sync> ArchivalMmr<H, Storage> {
     /// Create a new archival MMR, or restore one from a database.
     pub async fn new(pv: Storage) -> Self {
         let mut ret = Self {
             digests: pv,
             _hasher: PhantomData,
         };
-        ret.fix_dummy_async().await;
+        ret.fix_dummy().await;
         ret
     }
 
@@ -287,20 +158,20 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     /// (even if it is never used). Due to the persistence layer,
     /// this data structure can be set to the default vector, which
     /// is the empty vector. This method fixes that.
-    pub async fn fix_dummy_async(&mut self) {
+    pub async fn fix_dummy(&mut self) {
         if self.digests.len().await == 0 {
             self.digests.push(Digest::default()).await;
         }
     }
 
     /// Get a leaf from the MMR, will panic if index is out of range
-    pub async fn get_leaf_async(&self, leaf_index: u64) -> Digest {
+    pub async fn get_leaf(&self, leaf_index: u64) -> Digest {
         let node_index = shared_advanced::leaf_index_to_node_index(leaf_index);
         self.digests.get(node_index).await
     }
 
     /// Update a hash in the existing archival MMR
-    pub async fn mutate_leaf_raw_async(&mut self, leaf_index: u64, new_leaf: Digest) {
+    pub async fn mutate_leaf_raw(&mut self, leaf_index: u64, new_leaf: Digest) {
         // 1. change the leaf value
         let mut node_index = shared_advanced::leaf_index_to_node_index(leaf_index);
         self.digests.set(node_index, new_leaf).await;
@@ -337,15 +208,15 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     }
 
     /// Return (membership_proof, peaks)
-    pub async fn prove_membership_async(
+    pub async fn prove_membership(
         &self,
         leaf_index: u64,
     ) -> (MmrMembershipProof<H>, Vec<Digest>) {
         // A proof consists of an authentication path
         // and a list of peaks
         assert!(
-            leaf_index < self.count_leaves_async().await,
-            "Cannot prove membership of leaf outside of range. Got leaf_index {leaf_index}. Leaf count is {}", self.count_leaves_async().await
+            leaf_index < self.count_leaves().await,
+            "Cannot prove membership of leaf outside of range. Got leaf_index {leaf_index}. Leaf count is {}", self.count_leaves().await
         );
 
         // Find out how long the authentication path is
@@ -384,7 +255,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
         }
 
         let peaks: Vec<Digest> = self
-            .get_peaks_with_heights_async()
+            .get_peaks_with_heights()
             .await
             .iter()
             .map(|x| x.0)
@@ -396,8 +267,8 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     }
 
     /// Return a list of tuples (peaks, height)
-    pub async fn get_peaks_with_heights_async(&self) -> Vec<(Digest, u32)> {
-        if self.is_empty_async().await {
+    pub async fn get_peaks_with_heights(&self) -> Vec<(Digest, u32)> {
+        if self.is_empty().await {
             return vec![];
         }
 
@@ -433,7 +304,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
     }
 
     /// Append an element to the archival MMR
-    pub fn append_raw_async(&mut self, new_leaf: Digest) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+    pub fn append_raw(&mut self, new_leaf: Digest) -> Pin<Box<dyn Future<Output = ()> + '_>> {
         Box::pin(async move {
             let node_index = self.digests.len().await;
             self.digests.push(new_leaf).await;
@@ -447,14 +318,14 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest>> ArchivalMmr<H, Storage> {
                     .get(shared_advanced::left_sibling(node_index, own_height))
                     .await;
                 let parent_hash: Digest = H::hash_pair(left_sibling_hash, new_leaf);
-                self.append_raw_async(parent_hash).await;
+                self.append_raw(parent_hash).await;
             }
         })
     }
 
     /// Remove the last leaf from the archival MMR
-    pub async fn remove_last_leaf_async(&mut self) -> Option<Digest> {
-        if self.is_empty_async().await {
+    pub async fn remove_last_leaf(&mut self) -> Option<Digest> {
+        if self.is_empty().await {
             return None;
         }
 
@@ -511,7 +382,7 @@ pub(crate) mod mmr_test {
         {
             let mut ammr = get_empty_ammr().await;
             for digest in digests {
-                ammr.append_raw_async(digest).await;
+                ammr.append_raw(digest).await;
             }
             ammr
         }
@@ -619,7 +490,7 @@ pub(crate) mod mmr_test {
         );
 
         // Verify that the appended value matches the one stored in the archival MMR
-        assert_eq!(new_leaf, archival_mmr.get_leaf_async(0).await);
+        assert_eq!(new_leaf, archival_mmr.get_leaf(0).await);
 
         // Verify that the membership proofs for the inserted leafs are valid and that they agree
         assert_eq!(
@@ -653,7 +524,7 @@ pub(crate) mod mmr_test {
         // let archival_mmr = ArchivalMmr::<Hasher>::new(leaf_hashes.clone());
         let archival_mmr = mock::get_ammr_from_digests::<H>(leaf_hashes.clone()).await;
         let (mut membership_proof, peaks): (MmrMembershipProof<H>, Vec<Digest>) =
-            archival_mmr.prove_membership_async(0).await;
+            archival_mmr.prove_membership(0).await;
 
         // Verify that the accumulated hash in the verifier is compared against the **correct** hash,
         // not just **any** hash in the peaks list.
@@ -697,7 +568,7 @@ pub(crate) mod mmr_test {
 
         let leaf_index: usize = 2;
         let (mp1, old_peaks): (MmrMembershipProof<H>, Vec<Digest>) =
-            archival_mmr.prove_membership_async(leaf_index as u64).await;
+            archival_mmr.prove_membership(leaf_index as u64).await;
 
         // Verify single leaf
 
@@ -711,7 +582,7 @@ pub(crate) mod mmr_test {
             mock::get_ammr_from_digests::<H>(leaf_hashes.clone()).await;
 
         let (mp2, _acc_hash_2) = other_archival_mmr
-            .prove_membership_async(leaf_index as u64)
+            .prove_membership(leaf_index as u64)
             .await;
 
         // Mutate leaf + mutate leaf raw, assert that they're equivalent
@@ -721,7 +592,7 @@ pub(crate) mod mmr_test {
 
         let new_peaks_one = other_archival_mmr.get_peaks();
         archival_mmr
-            .mutate_leaf_raw_async(leaf_index as u64, mutated_leaf)
+            .mutate_leaf_raw(leaf_index as u64, mutated_leaf)
             .await;
 
         let new_peaks_two = archival_mmr.get_peaks();
@@ -807,10 +678,10 @@ pub(crate) mod mmr_test {
                 mock::get_ammr_from_digests::<H>(vec![new_leaf; size]).await;
             for i in 0..size {
                 let i = i as u64;
-                let (mp, _archival_peaks) = archival.prove_membership_async(i).await;
+                let (mp, _archival_peaks) = archival.prove_membership(i).await;
                 assert_eq!(i, mp.leaf_index);
                 acc.mutate_leaf(&mp, new_leaf);
-                archival.mutate_leaf_raw_async(i, new_leaf).await;
+                archival.mutate_leaf_raw(i, new_leaf).await;
                 let new_archival_peaks = archival.get_peaks();
                 assert_eq!(new_archival_peaks, acc.get_peaks());
             }
@@ -834,11 +705,11 @@ pub(crate) mod mmr_test {
                 mock::get_ammr_from_digests::<H>(vec![new_leaf; size]).await;
             for i in 0..size {
                 let i = i as u64;
-                let (mp, peaks_before_update) = archival.prove_membership_async(i).await;
+                let (mp, peaks_before_update) = archival.prove_membership(i).await;
                 assert_eq!(archival.get_peaks(), peaks_before_update);
 
                 // Verify the update operation using the batch verifier
-                archival.mutate_leaf_raw_async(i, new_leaf).await;
+                archival.mutate_leaf_raw(i, new_leaf).await;
                 assert!(
                     acc.verify_batch_update(&archival.get_peaks(), &[], &[(new_leaf, mp.clone())]),
                     "Valid batch update parameters must succeed"
@@ -893,7 +764,7 @@ pub(crate) mod mmr_test {
 
                 // Verify that membership proofs are the same as generating them from an archival MMR
                 let archival_membership_proof_direct = archival_iterative
-                    .prove_membership_async(leaf_index as u64)
+                    .prove_membership(leaf_index as u64)
                     .await
                     .0;
                 assert_eq!(archival_membership_proof_direct, archival_membership_proof);
@@ -940,13 +811,13 @@ pub(crate) mod mmr_test {
         assert_eq!(1, mmr.count_nodes().await);
 
         let original_peaks_and_heights: Vec<(Digest, u32)> =
-            mmr.get_peaks_with_heights_async().await;
+            mmr.get_peaks_with_heights().await;
         assert_eq!(1, original_peaks_and_heights.len());
         assert_eq!(0, original_peaks_and_heights[0].1);
 
         {
             let leaf_index = 0;
-            let (membership_proof, peaks) = mmr.prove_membership_async(leaf_index).await;
+            let (membership_proof, peaks) = mmr.prove_membership(leaf_index).await;
             let valid_res = membership_proof.verify(&peaks, input_hash, 1);
             assert!(valid_res.0);
             assert!(valid_res.1.is_some());
@@ -956,7 +827,7 @@ pub(crate) mod mmr_test {
         assert_eq!(2, mmr.count_leaves());
         assert_eq!(3, mmr.count_nodes().await);
 
-        let new_peaks_and_heights = mmr.get_peaks_with_heights_async().await;
+        let new_peaks_and_heights = mmr.get_peaks_with_heights().await;
         assert_eq!(1, new_peaks_and_heights.len());
         assert_eq!(1, new_peaks_and_heights[0].1);
 
@@ -973,18 +844,18 @@ pub(crate) mod mmr_test {
         // membership proofs prior to all mutations. This is because the `verify_batch_update` method
         // updates the membership proofs internally to account for the mutations.
         let leaf_mutations: Vec<(Digest, MmrMembershipProof<H>)> =
-            futures::future::join_all((0..2).map(|i| mmr_after_append.prove_membership_async(i)))
+            futures::future::join_all((0..2).map(|i| mmr_after_append.prove_membership(i)))
                 .await
                 .into_iter()
                 .map(|p| (new_leaf, p.0))
                 .collect();
 
         for &leaf_index in &[0u64, 1] {
-            let mp = mmr.prove_membership_async(leaf_index).await.0;
+            let mp = mmr.prove_membership(leaf_index).await.0;
             mmr.mutate_leaf(&mp, new_leaf);
             assert_eq!(
                 new_leaf,
-                mmr.get_leaf_async(leaf_index).await,
+                mmr.get_leaf(leaf_index).await,
                 "fetched leaf must match what we put in"
             );
         }
@@ -1008,14 +879,14 @@ pub(crate) mod mmr_test {
         assert_eq!(1 + num_leaves, mmr.count_nodes().await);
 
         let original_peaks_and_heights: Vec<(Digest, u32)> =
-            mmr.get_peaks_with_heights_async().await;
+            mmr.get_peaks_with_heights().await;
         let expected_peaks = 2;
         assert_eq!(expected_peaks, original_peaks_and_heights.len());
 
         {
             let leaf_index = 0;
             let input_digest = input_digests[leaf_index];
-            let (mut membership_proof, peaks) = mmr.prove_membership_async(leaf_index as u64).await;
+            let (mut membership_proof, peaks) = mmr.prove_membership(leaf_index as u64).await;
 
             let (mp_verifies_1, acc_hash_1) =
                 membership_proof.verify(&peaks, input_digest, num_leaves);
@@ -1042,9 +913,9 @@ pub(crate) mod mmr_test {
 
         for leaf_index in 0..num_leaves {
             let new_leaf: Digest = H::hash(&BFieldElement::new(987223));
-            let (mp, _acc_hash) = mmr.prove_membership_async(leaf_index).await;
+            let (mp, _acc_hash) = mmr.prove_membership(leaf_index).await;
             mmr.mutate_leaf(&mp, new_leaf);
-            assert_eq!(new_leaf, mmr.get_leaf_async(leaf_index).await);
+            assert_eq!(new_leaf, mmr.get_leaf(leaf_index).await);
         }
     }
 
@@ -1070,7 +941,7 @@ pub(crate) mod mmr_test {
             assert_eq!(leaf_count, mmr.count_leaves());
             assert_eq!(node_count, mmr.count_nodes().await);
 
-            let original_peaks_and_heights = mmr.get_peaks_with_heights_async().await;
+            let original_peaks_and_heights = mmr.get_peaks_with_heights().await;
             let peak_heights_1: Vec<u32> = original_peaks_and_heights.iter().map(|x| x.1).collect();
 
             let (peak_heights_2, _) = get_peak_heights_and_peak_node_indices(leaf_count);
@@ -1091,7 +962,7 @@ pub(crate) mod mmr_test {
             // Get an authentication path for **all** values in MMR,
             // verify that it is valid
             for index in 0..leaf_count {
-                let (membership_proof, peaks) = mmr.prove_membership_async(index).await;
+                let (membership_proof, peaks) = mmr.prove_membership(index).await;
                 let valid_res =
                     membership_proof.verify(&peaks, input_hashes[index as usize], leaf_count);
 
@@ -1123,32 +994,32 @@ pub(crate) mod mmr_test {
         let mut mmr: ArchivalMmr<H, Storage> =
             mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
         assert_eq!(22, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[11]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[11]), mmr.remove_last_leaf().await);
         assert_eq!(19, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[10]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[10]), mmr.remove_last_leaf().await);
         assert_eq!(18, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[9]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[9]), mmr.remove_last_leaf().await);
         assert_eq!(16, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[8]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[8]), mmr.remove_last_leaf().await);
         assert_eq!(15, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[7]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[7]), mmr.remove_last_leaf().await);
         assert_eq!(11, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[6]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[6]), mmr.remove_last_leaf().await);
         assert_eq!(10, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[5]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[5]), mmr.remove_last_leaf().await);
         assert_eq!(8, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[4]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[4]), mmr.remove_last_leaf().await);
         assert_eq!(7, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[3]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[3]), mmr.remove_last_leaf().await);
         assert_eq!(4, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[2]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[2]), mmr.remove_last_leaf().await);
         assert_eq!(3, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[1]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[1]), mmr.remove_last_leaf().await);
         assert_eq!(1, mmr.count_nodes().await);
-        assert_eq!(Some(input_digests[0]), mmr.remove_last_leaf_async().await);
+        assert_eq!(Some(input_digests[0]), mmr.remove_last_leaf().await);
         assert_eq!(0, mmr.count_nodes().await);
         assert!(mmr.is_empty());
-        assert!(mmr.remove_last_leaf_async().await.is_none());
+        assert!(mmr.remove_last_leaf().await.is_none());
     }
 
     #[tokio::test]
@@ -1166,7 +1037,7 @@ pub(crate) mod mmr_test {
             mock::get_ammr_from_digests::<H>(input_digests_big).await;
 
         for _ in 0..(big_size - small_size) {
-            mmr_big.remove_last_leaf_async().await;
+            mmr_big.remove_last_leaf().await;
         }
 
         assert_eq!(mmr_big.get_peaks(), mmr_small.get_peaks());
@@ -1198,7 +1069,7 @@ pub(crate) mod mmr_test {
             assert_eq!(size, mmr.count_leaves());
             assert_eq!(node_count, mmr.count_nodes().await);
             let original_peaks_and_heights: Vec<(Digest, u32)> =
-                mmr.get_peaks_with_heights_async().await;
+                mmr.get_peaks_with_heights().await;
             let peak_heights_1: Vec<u32> = original_peaks_and_heights.iter().map(|x| x.1).collect();
             let (peak_heights_2, _) = get_peak_heights_and_peak_node_indices(size);
             assert_eq!(peak_heights_1, peak_heights_2);
@@ -1215,7 +1086,7 @@ pub(crate) mod mmr_test {
             // Get an authentication path for **all** values in MMR,
             // verify that it is valid
             for leaf_index in 0..size {
-                let (mut membership_proof, peaks) = mmr.prove_membership_async(leaf_index).await;
+                let (mut membership_proof, peaks) = mmr.prove_membership(leaf_index).await;
                 let valid_res =
                     membership_proof.verify(&peaks, input_digests[leaf_index as usize], size);
                 assert!(valid_res.0);
@@ -1235,15 +1106,15 @@ pub(crate) mod mmr_test {
 
                 // Modify an element in the MMR and run prove/verify for membership
                 let old_leaf = input_digests[leaf_index as usize];
-                mmr.mutate_leaf_raw_async(leaf_index, new_leaf).await;
+                mmr.mutate_leaf_raw(leaf_index, new_leaf).await;
 
-                let (new_mp, new_peaks) = mmr.prove_membership_async(leaf_index).await;
+                let (new_mp, new_peaks) = mmr.prove_membership(leaf_index).await;
                 assert!(new_mp.verify(&new_peaks, new_leaf, size).0);
                 assert!(!new_mp.verify(&new_peaks, old_leaf, size).0);
 
                 // Return the element to its former value and run prove/verify for membership
-                mmr.mutate_leaf_raw_async(leaf_index, old_leaf).await;
-                let (old_mp, old_peaks) = mmr.prove_membership_async(leaf_index).await;
+                mmr.mutate_leaf_raw(leaf_index, old_leaf).await;
+                let (old_mp, old_peaks) = mmr.prove_membership(leaf_index).await;
                 assert!(!old_mp.verify(&old_peaks, new_leaf, size).0);
                 assert!(old_mp.verify(&old_peaks, old_leaf, size).0);
             }
@@ -1279,11 +1150,11 @@ pub(crate) mod mmr_test {
 
         let digest1: Digest = random();
         ammr1.append(digest1);
-        assert_eq!(digest0, ammr0.get_leaf_async(0).await);
-        assert_eq!(digest1, ammr1.get_leaf_async(0).await);
+        assert_eq!(digest0, ammr0.get_leaf(0).await);
+        assert_eq!(digest1, ammr1.get_leaf(0).await);
         storage.persist().await;
 
-        assert_eq!(digest0, ammr0.get_leaf_async(0).await);
-        assert_eq!(digest1, ammr1.get_leaf_async(0).await);
+        assert_eq!(digest0, ammr0.get_leaf(0).await);
+        assert_eq!(digest1, ammr1.get_leaf(0).await);
     }
 }

@@ -5,9 +5,11 @@ use tasm_lib::{
     triton_vm::program::{NonDeterminism, PublicInput},
     twenty_first::{
         shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-        util_types::mmr::mmr_accumulator::MmrAccumulator,
+        // util_types::mmr::mmr_accumulator::MmrAccumulator,
     },
 };
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+
 
 use crate::models::consensus::SecretWitness;
 

@@ -24,9 +24,12 @@ use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
-        mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
+        // mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
     },
 };
+use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mutator_set::mmr_trait_async::*;
+
 
 use crate::models::blockchain::transaction::validity::removal_records_integrity::{
     RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness,
@@ -53,126 +56,150 @@ use super::{
 };
 
 impl CompiledProgram for RemovalRecordsIntegrity {
+
     fn rust_shadow(
         public_input: &PublicInput,
         nondeterminism: &NonDeterminism<BFieldElement>,
     ) -> anyhow::Result<Vec<BFieldElement>> {
-        let hash_of_kernel = *Digest::decode(
-            &public_input
-                .individual_tokens
+
+        // We must call async fn, but we cannot make this fn
+        // async, as that would conflict with the trait, defined
+        // in a non-async crate.
+        //
+        // The only way I know of to call an async fn inside a
+        // sync fn is to create a new thread with new tokio runtime.
+        // THis is of course fairly expensive.
+        async fn rust_shadow_async(
+            public_input: &PublicInput,
+            nondeterminism: &NonDeterminism<BFieldElement>,
+        ) -> anyhow::Result<Vec<BFieldElement>> {
+
+            let hash_of_kernel = *Digest::decode(
+                &public_input
+                    .individual_tokens
+                    .iter()
+                    .copied()
+                    .take(DIGEST_LENGTH)
+                    .rev()
+                    .collect_vec(),
+            )
+            .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
+
+            // 1. read and process witness data
+            let removal_record_integrity_witness = *RemovalRecordsIntegrityWitness::decode_from_memory(
+                &nondeterminism.ram,
+                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+            )
+            .unwrap();
+
+            println!(
+                "first element of witness: {}",
+                removal_record_integrity_witness.encode()[0]
+            );
+            println!(
+                "first element of kernel: {}",
+                removal_record_integrity_witness.kernel.encode()[0]
+            );
+
+            // 2. assert that the kernel from the witness matches the hash in the public input
+            // now we can trust all data in kernel
+            assert_eq!(
+                hash_of_kernel,
+                removal_record_integrity_witness.kernel.mast_hash(),
+                "hash of kernel ({})\nwitness kernel ({})",
+                hash_of_kernel,
+                removal_record_integrity_witness.kernel.mast_hash()
+            );
+
+            // 3. assert that the mutator set's MMRs in the witness match the kernel
+            // now we can trust all data in these MMRs as well
+            let mutator_set_hash = Hash::hash_pair(
+                Hash::hash_pair(
+                    removal_record_integrity_witness.aocl.bag_peaks().await,
+                    removal_record_integrity_witness.swbfi.bag_peaks().await,
+                ),
+                Hash::hash_pair(
+                    removal_record_integrity_witness.swbfa_hash,
+                    Digest::default(),
+                ),
+            );
+            assert_eq!(
+                removal_record_integrity_witness.kernel.mutator_set_hash,
+                mutator_set_hash
+            );
+
+            // 4. derive index sets from inputs and match them against those listed in the kernel
+            // How do we trust input UTXOs?
+            // Because they generate removal records, and we can match
+            // those against the removal records that are listed in the
+            // kernel.
+            let items = removal_record_integrity_witness
+                .input_utxos
                 .iter()
-                .copied()
-                .take(DIGEST_LENGTH)
-                .rev()
-                .collect_vec(),
-        )
-        .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
+                .map(Hash::hash)
+                .collect_vec();
 
-        // 1. read and process witness data
-        let removal_record_integrity_witness = *RemovalRecordsIntegrityWitness::decode_from_memory(
-            &nondeterminism.ram,
-            FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-        )
-        .unwrap();
-
-        println!(
-            "first element of witness: {}",
-            removal_record_integrity_witness.encode()[0]
-        );
-        println!(
-            "first element of kernel: {}",
-            removal_record_integrity_witness.kernel.encode()[0]
-        );
-
-        // 2. assert that the kernel from the witness matches the hash in the public input
-        // now we can trust all data in kernel
-        assert_eq!(
-            hash_of_kernel,
-            removal_record_integrity_witness.kernel.mast_hash(),
-            "hash of kernel ({})\nwitness kernel ({})",
-            hash_of_kernel,
-            removal_record_integrity_witness.kernel.mast_hash()
-        );
-
-        // 3. assert that the mutator set's MMRs in the witness match the kernel
-        // now we can trust all data in these MMRs as well
-        let mutator_set_hash = Hash::hash_pair(
-            Hash::hash_pair(
-                removal_record_integrity_witness.aocl.bag_peaks(),
-                removal_record_integrity_witness.swbfi.bag_peaks(),
-            ),
-            Hash::hash_pair(
-                removal_record_integrity_witness.swbfa_hash,
-                Digest::default(),
-            ),
-        );
-        assert_eq!(
-            removal_record_integrity_witness.kernel.mutator_set_hash,
-            mutator_set_hash
-        );
-
-        // 4. derive index sets from inputs and match them against those listed in the kernel
-        // How do we trust input UTXOs?
-        // Because they generate removal records, and we can match
-        // those against the removal records that are listed in the
-        // kernel.
-        let items = removal_record_integrity_witness
-            .input_utxos
-            .iter()
-            .map(Hash::hash)
-            .collect_vec();
-
-        // test that removal records listed in kernel match those derived from input utxos
-        let digests_of_derived_index_lists = items
-            .iter()
-            .zip(removal_record_integrity_witness.membership_proofs.iter())
-            .map(|(&item, msmp)| {
-                AbsoluteIndexSet::new(&get_swbf_indices(
-                    item,
-                    msmp.sender_randomness,
-                    msmp.receiver_preimage,
-                    msmp.auth_path_aocl.leaf_index,
-                ))
-                .encode()
-            })
-            .map(|x| Hash::hash_varlen(&x))
-            .collect::<HashSet<_>>();
-        let digests_of_claimed_index_lists = removal_record_integrity_witness
-            .kernel
-            .inputs
-            .iter()
-            .map(|input| input.absolute_indices.encode())
-            .map(|x| Hash::hash_varlen(&x))
-            .collect::<HashSet<_>>();
-        assert_eq!(
-            digests_of_derived_index_lists,
-            digests_of_claimed_index_lists
-        );
-
-        // 5. verify that all input utxos (mutator set items) live in the AOCL
-        assert!(items
-            .into_iter()
-            .zip(removal_record_integrity_witness.membership_proofs.iter())
-            .map(|(item, msmp)| {
-                (
-                    commit(
+            // test that removal records listed in kernel match those derived from input utxos
+            let digests_of_derived_index_lists = items
+                .iter()
+                .zip(removal_record_integrity_witness.membership_proofs.iter())
+                .map(|(&item, msmp)| {
+                    AbsoluteIndexSet::new(&get_swbf_indices(
                         item,
                         msmp.sender_randomness,
-                        msmp.receiver_preimage.hash::<Hash>(),
-                    ),
-                    &msmp.auth_path_aocl,
-                )
-            })
-            .all(|(cc, mp)| {
-                mp.verify(
-                    &removal_record_integrity_witness.aocl.get_peaks(),
-                    cc.canonical_commitment,
-                    removal_record_integrity_witness.aocl.count_leaves(),
-                )
-                .0
-            }));
+                        msmp.receiver_preimage,
+                        msmp.auth_path_aocl.leaf_index,
+                    ))
+                    .encode()
+                })
+                .map(|x| Hash::hash_varlen(&x))
+                .collect::<HashSet<_>>();
+            let digests_of_claimed_index_lists = removal_record_integrity_witness
+                .kernel
+                .inputs
+                .iter()
+                .map(|input| input.absolute_indices.encode())
+                .map(|x| Hash::hash_varlen(&x))
+                .collect::<HashSet<_>>();
+            assert_eq!(
+                digests_of_derived_index_lists,
+                digests_of_claimed_index_lists
+            );
 
-        Ok(vec![])
+            // 5. verify that all input utxos (mutator set items) live in the AOCL
+            let peaks = removal_record_integrity_witness.aocl.get_peaks().await;
+            let count_leaves = removal_record_integrity_witness.aocl.count_leaves().await;
+            assert!(items
+                .into_iter()
+                .zip(removal_record_integrity_witness.membership_proofs.iter())
+                .map(|(item, msmp)| {
+                    (
+                        commit(
+                            item,
+                            msmp.sender_randomness,
+                            msmp.receiver_preimage.hash::<Hash>(),
+                        ),
+                        &msmp.auth_path_aocl,
+                    )
+                })
+                .all(|(cc, mp)| {
+                    mp.verify(
+                        &peaks,
+                        cc.canonical_commitment,
+                        count_leaves,
+                    )
+                    .0
+                }));
+
+            Ok(vec![])
+        }
+
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                let runtime = tokio::runtime::Runtime::new().unwrap();
+                runtime.block_on(rust_shadow_async(public_input, nondeterminism))
+            }).join().unwrap()
+        })
     }
 
     fn code() -> (Vec<LabelledInstruction>, Library) {

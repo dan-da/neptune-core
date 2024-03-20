@@ -334,7 +334,7 @@ impl Mempool {
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
             *tx = tx
-                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block).await
                 .expect("Updating mempool transaction must succeed");
         }
 
