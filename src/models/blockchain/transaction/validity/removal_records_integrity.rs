@@ -2,13 +2,8 @@ use crate::models::blockchain::transaction;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
-// use crate::util_types::mutator_set::addition_record::AdditionRecord;
-// use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
-// use crate::util_types::mutator_set::mutator_set_trait::commit;
-// use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 
 use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-// use arbitrary::Arbitrary;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -22,12 +17,10 @@ use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
 use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-// use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{algebraic_hasher::AlgebraicHasher,
-        // mmr::mmr_accumulator::MmrAccumulator
     },
 };
 use crate::util_types::mmr::MmrAccumulator;
@@ -336,8 +329,12 @@ impl RemovalRecordsIntegrityWitness {
     }
 }
 
+// Commented out during async storage refactor due to
+// non-async tasm-lib trait conflicts.
+//
+// Seems like this belongs in a tests module anyway?
+
 // impl<'a> Arbitrary<'a> for RemovalRecordsIntegrityWitness {
-// impl<'a> RemovalRecordsIntegrityWitness {
 //     async fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 //         let num_inputs = u.int_in_range(1..=3usize)?;
 //         let _num_outputs = u.int_in_range(1..=3usize)?;

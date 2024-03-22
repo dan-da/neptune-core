@@ -11,9 +11,6 @@ use tasm_lib::twenty_first::util_types::algebraic_hasher::{AlgebraicHasher, Spon
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
-// use twenty_first::util_types::mmr;
-// use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-// use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mmr::traits::*;
 
@@ -555,7 +552,6 @@ mod accumulation_scheme_tests {
     use rand::prelude::*;
     use rand::Rng;
 
-    // use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
     use crate::util_types::mmr::MmrAccumulator;
 
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;

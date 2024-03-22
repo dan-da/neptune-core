@@ -38,6 +38,13 @@ pub struct MsaAndRecords {
     pub removal_records: Vec<RemovalRecord>,
     pub membership_proofs: Vec<MsMembershipProof>,
 }
+
+// Commented out during async storage refactor
+// because it is only used by impl Arbitrary,
+// which is also commented out.
+//
+// Maybe this verify() method will be used later?
+
 /*
 impl MsaAndRecords {
     pub async fn verify(&self, items: &[Digest]) -> bool {
@@ -63,6 +70,12 @@ impl MsaAndRecords {
     }
 }
 */
+
+// Commented out during async storage refactor due to
+// non-async tasm-lib trait conflicts.
+//
+// Seems like this belongs in a tests module anyway?
+
 /*
 impl Arbitrary for MsaAndRecords {
     /// Parameters:

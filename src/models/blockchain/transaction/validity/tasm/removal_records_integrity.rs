@@ -24,7 +24,6 @@ use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
     util_types::{
         algebraic_hasher::AlgebraicHasher,
-        // mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
     },
 };
 use crate::util_types::mmr::MmrAccumulator;

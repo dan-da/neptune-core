@@ -2,6 +2,8 @@ use crate::config_models::network::Network;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
 use crate::prelude::twenty_first;
+use crate::util_types::mmr::MmrAccumulator;
+use crate::util_types::mmr::traits::*;
 
 use get_size::GetSize;
 use itertools::Itertools;
@@ -12,10 +14,6 @@ use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::time::Duration;
 use tasm_lib::triton_vm::proof::Proof;
-// use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-// use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::traits::*;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 

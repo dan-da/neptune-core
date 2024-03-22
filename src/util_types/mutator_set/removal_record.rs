@@ -25,11 +25,9 @@ use super::shared::{
     NUM_TRIALS,
 };
 use twenty_first::util_types::mmr;
-// use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-// use twenty_first::util_types::mmr::mmr_trait::Mmr;
+
 use crate::util_types::mmr::MmrAccumulator;
 use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-
 use crate::util_types::mmr::traits::*;
 
 

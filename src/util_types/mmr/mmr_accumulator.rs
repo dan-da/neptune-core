@@ -283,6 +283,7 @@ impl<H: AlgebraicHasher> Mmr<H> for MmrAccumulator<H> {
     }
 }
 
+#[cfg(test)]
 pub mod util {
 
     use super::*;

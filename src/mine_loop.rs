@@ -30,8 +30,6 @@ use rand::SeedableRng;
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
-// use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-// use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mmr::traits::*;
 use tokio::select;

@@ -8,7 +8,6 @@ use twenty_first::shared_math::tip5::Digest;
 use crate::util_types::mmr::traits::*;
 use crate::util_types::mmr::MmrAccumulator;
 use twenty_first::util_types::{
-    // algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
     algebraic_hasher::AlgebraicHasher,
 };
 
@@ -26,8 +25,8 @@ pub struct MutatorSetAccumulator {
 impl MutatorSetAccumulator {
     pub fn new() -> Self {
         let set_commitment = MutatorSetKernel::<MmrAccumulator<Hash>> {
-            aocl: MmrAccumulator::init(vec![], 0),
-            swbf_inactive: MmrAccumulator::init(vec![], 0),
+            aocl: MmrAccumulator::default(),
+            swbf_inactive: MmrAccumulator::default(),
             swbf_active: ActiveWindow::new(),
         };
 

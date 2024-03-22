@@ -33,7 +33,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-// use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mmr::traits::*;
 
@@ -43,7 +42,6 @@ use tokio_util::codec::{Encoder, LengthDelimitedCodec};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-// use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
 use twenty_first::shared_math::b_field_element::BFieldElement;
 
