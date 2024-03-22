@@ -125,7 +125,7 @@ mod tests {
 
     use triton_vm::prelude::{BFieldElement, Digest};
 
-    use crate::util_types::mutator_set::archival_mmr::mmr_test::mock;
+    use crate::util_types::mmr::mock;
 
     impl Function for VerifyAoclMembership {
         fn rust_shadow(

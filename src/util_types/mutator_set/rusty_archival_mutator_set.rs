@@ -107,6 +107,7 @@ mod tests {
         ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };
     use crate::util_types::test_shared::mutator_set::*;
+    use crate::util_types::mmr::traits::*;
 
     use super::*;
 
@@ -166,7 +167,7 @@ mod tests {
 
         // Verify membership
         for (mp, &item) in mps.iter().zip(items.iter()) {
-            assert!(rusty_mutator_set.ams().verify(item, mp));
+            assert!(rusty_mutator_set.ams().verify(item, mp).await);
         }
 
         // Remove items
@@ -225,7 +226,7 @@ mod tests {
         );
         for (index, (mp, &item)) in mps.iter().zip(items.iter()).enumerate() {
             assert!(
-                new_rusty_mutator_set.ams().verify(item, mp),
+                new_rusty_mutator_set.ams().verify(item, mp).await,
                 "membership proof {index} does not verify"
             );
         }
@@ -233,7 +234,7 @@ mod tests {
         // Verify non-membership
         for (index, (mp, &item)) in removed_mps.iter().zip(removed_items.iter()).enumerate() {
             assert!(
-                !new_rusty_mutator_set.ams().verify(item, mp),
+                !new_rusty_mutator_set.ams().verify(item, mp).await,
                 "membership proof of non-member {index} still valid"
             );
         }

@@ -797,7 +797,7 @@ mod transaction_tests {
     //     transaction.update_mutator_set_records(&block_1).unwrap();
 
     //     // Insert the updated transaction into block 2 and verify that this block is valid
-    //     let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+    //     let mut block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key()).await;
     //     block_2.authority_merge_transaction(updated_tx.clone());
     //     assert!(block_2.is_valid_for_devnet(&block_1));
 
@@ -807,12 +807,12 @@ mod transaction_tests {
     //     let mut _previous_block = next_block.clone();
     //     for _ in 0..26 {
     //         _previous_block = next_block;
-    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key()).await;
     //         updated_tx.update_ms_data(&next_block).unwrap();
     //     }
 
     //     _previous_block = next_block.clone();
-    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key()).await;
     //     next_block.authority_merge_transaction(updated_tx.clone());
     //     assert!(next_block.is_valid_for_devnet(&_previous_block));
 
@@ -847,8 +847,8 @@ mod transaction_tests {
     //     // Create next block and verify that transaction is not valid with this block as tip
     //     let genesis_block = Block::genesis_block().await;
     //     let other_wallet = WalletSecret::new(generate_secret_key());
-    //     let block_1 = make_mock_block(&genesis_block, None, own_wallet_secret.get_public_key());
-    //     let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key());
+    //     let block_1 = make_mock_block(&genesis_block, None, own_wallet_secret.get_public_key()).await;
+    //     let block_2 = make_mock_block(&block_1, None, other_wallet.get_public_key()).await;
     //     assert!(
     //         block_1.is_valid_for_devnet(&genesis_block),
     //         "Block 1 must be valid with only coinbase output"
@@ -934,7 +934,7 @@ mod transaction_tests {
     //             .create_transaction(vec![utxo_a, utxo_b, utxo_c], 1.into())
     //             .await
     //             .unwrap();
-    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key());
+    //         next_block = make_mock_block(&_previous_block, None, other_wallet.get_public_key()).await;
 
     //         next_block.authority_merge_transaction(other_transaction);
     //         assert!(
@@ -967,7 +967,7 @@ mod transaction_tests {
     //     }
 
     //     _previous_block = next_block.clone();
-    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key());
+    //     next_block = make_mock_block(&next_block, None, other_wallet.get_public_key()).await;
     //     next_block.authority_merge_transaction(updated_tx.clone());
     //     assert!(
     //         next_block.is_valid_for_devnet(&_previous_block),

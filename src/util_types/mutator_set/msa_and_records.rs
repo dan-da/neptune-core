@@ -176,7 +176,7 @@ impl Arbitrary for MsaAndRecords {
                         let all_index_sets = all_index_sets.clone();
                         let aocl_membership_proofs = aocl_membership_proofs.clone();
                         let removables = removables.clone();
-                        let swbf_mmr_leaf_count = aocl_mmra.count_leaves() / (BATCH_SIZE as u64);
+                        let swbf_mmr_leaf_count = aocl_mmra.count_leaves().await / (BATCH_SIZE as u64);
 
                         // unwrap random swbf mmra and membership proofs
                         MmraAndMembershipProofs::arbitrary_with((
@@ -233,7 +233,7 @@ impl Arbitrary for MsaAndRecords {
                                     .zip(personalized_chunk_dictionaries.iter())
                                     .map(|(((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)| {
                                         let leaf = commit(*item, *sender_randomness, receiver_preimage.hash::<Hash>()).canonical_commitment;
-                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks(), leaf, aocl_mmra.count_leaves()).0);
+                                        assert!(aocl_auth_path.verify(&aocl_mmra.get_peaks().await, leaf, aocl_mmra.count_leaves().await).0);
                                         (((item, sender_randomness, receiver_preimage), aocl_auth_path), target_chunks)
                                     })
                                     .map(

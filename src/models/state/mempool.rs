@@ -583,7 +583,7 @@ mod tests {
         // Ensure that both wallets have a non-zero balance
         let genesis_block = Block::genesis_block().await;
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen()).await;
 
         // Update both states with block 1
         premine_receiver_global_state
@@ -675,7 +675,7 @@ mod tests {
 
         // Create next block which includes preminer's transaction
         let (mut block_2, _, _) =
-            make_mock_block(&block_1, None, premine_receiver_address, rng.gen());
+            make_mock_block(&block_1, None, premine_receiver_address, rng.gen()).await;
         block_2
             .accumulate_transaction(tx_by_preminer, &block_1.kernel.body.mutator_set_accumulator)
             .await;
@@ -698,7 +698,7 @@ mod tests {
         );
 
         let (block_3_with_no_input, _, _) =
-            make_mock_block(&block_2, None, premine_receiver_address, rng.gen());
+            make_mock_block(&block_2, None, premine_receiver_address, rng.gen()).await;
         let mut block_3_with_updated_tx = block_3_with_no_input.clone();
 
         debug!(
@@ -746,7 +746,7 @@ mod tests {
         let mut previous_block = block_3_with_no_input;
         for _ in 0..10 {
             let (next_block, _, _) =
-                make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
+                make_mock_block(&previous_block, None, other_receiver_address, rng.gen()).await;
             mempool
                 .update_with_block(
                     previous_block.kernel.body.mutator_set_accumulator,
@@ -757,7 +757,7 @@ mod tests {
         }
 
         let (mut block_14, _, _) =
-            make_mock_block(&previous_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&previous_block, None, other_receiver_address, rng.gen()).await;
         assert_eq!(Into::<BlockHeight>::into(14), block_14.kernel.header.height);
         tx_by_other_updated = mempool.get_transactions_for_block(usize::MAX)[0].clone();
         block_14
@@ -793,7 +793,7 @@ mod tests {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state_lock =
             get_mock_global_state(Network::Alpha, 2, WalletSecret::devnet_wallet()).await;
-        let now = Duration::from_millis(Block::genesis_block().kernel.header.timestamp.value());
+        let now = Duration::from_millis(Block::genesis_block().await.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;

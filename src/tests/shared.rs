@@ -472,7 +472,7 @@ pub async fn pseudorandom_removal_record_integrity_witness(
         .iter()
         .map(|ar| ar.canonical_commitment)
         .collect_vec();
-    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments);
+    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments).await;
     assert_eq!(num_inputs, mmr_mps.len());
     assert_eq!(num_inputs, canonical_commitments.len());
 
@@ -496,7 +496,7 @@ pub async fn pseudorandom_removal_record_integrity_witness(
         num_public_announcements,
     );
     kernel.mutator_set_hash = Hash::hash_pair(
-        Hash::hash_pair(aocl.bag_peaks(), swbfi.bag_peaks()),
+        Hash::hash_pair(aocl.bag_peaks().await, swbfi.bag_peaks().await),
         Hash::hash_pair(swbfa_hash, Digest::default()),
     );
     kernel.inputs = input_utxos
@@ -921,7 +921,7 @@ pub async fn make_mock_block(
     let mut next_mutator_set = previous_block.kernel.body.mutator_set_accumulator.clone();
     let previous_mutator_set = next_mutator_set.clone();
     let mut block_mmr = previous_block.kernel.body.block_mmr_accumulator.clone();
-    block_mmr.append(previous_block.hash());
+    block_mmr.append(previous_block.hash()).await;
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
 
     let coinbase_addition_record: AdditionRecord =
@@ -964,7 +964,7 @@ pub async fn make_mock_block(
     let block_body: BlockBody = BlockBody {
         transaction,
         mutator_set_accumulator: next_mutator_set.clone(),
-        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::new(vec![]),
+        lock_free_mmr_accumulator: MmrAccumulator::<Hash>::default(),
         block_mmr_accumulator: block_mmr,
         uncle_blocks: vec![],
     };
@@ -993,7 +993,7 @@ pub async fn make_mock_block(
     )
 }
 
-pub fn make_mock_block_with_valid_pow(
+pub async fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
@@ -1005,14 +1005,14 @@ pub fn make_mock_block_with_valid_pow(
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
-    );
+    ).await;
     while !block.has_proof_of_work(previous_block) {
         let (block_new, utxo_new, digest_new) = make_mock_block(
             previous_block,
             block_timestamp,
             coinbase_beneficiary,
             rng.gen(),
-        );
+        ).await;
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;
@@ -1020,7 +1020,7 @@ pub fn make_mock_block_with_valid_pow(
     (block, utxo, digest)
 }
 
-pub fn make_mock_block_with_invalid_pow(
+pub async fn make_mock_block_with_invalid_pow(
     previous_block: &Block,
     block_timestamp: Option<u64>,
     coinbase_beneficiary: generation_address::ReceivingAddress,
@@ -1032,14 +1032,14 @@ pub fn make_mock_block_with_invalid_pow(
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
-    );
+    ).await;
     while block.has_proof_of_work(previous_block) {
         let (block_new, utxo_new, digest_new) = make_mock_block(
             previous_block,
             block_timestamp,
             coinbase_beneficiary,
             rng.gen(),
-        );
+        ).await;
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;

@@ -335,7 +335,7 @@ mod removal_record_tests {
 
     use super::*;
 
-    fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
+    async fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let mp: MsMembershipProof = accumulator
@@ -345,9 +345,9 @@ mod removal_record_tests {
         (item, mp, removal_record)
     }
 
-    #[test]
-    fn get_size_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn get_size_test() {
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let serialization_result = bincode::serialize(&removal_record).unwrap();
         let reported_size = removal_record.get_size();
@@ -358,9 +358,9 @@ mod removal_record_tests {
         assert!(reported_size * 2 > serialization_result.len());
     }
 
-    #[test]
-    fn verify_that_removal_records_and_mp_indices_agree() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn verify_that_removal_records_and_mp_indices_agree() {
+        let (item, mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let mut mp_indices = mp.compute_indices(item).0;
         mp_indices.sort_unstable();
@@ -373,9 +373,9 @@ mod removal_record_tests {
         );
     }
 
-    #[test]
-    fn hash_test() {
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn hash_test() {
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let mut removal_record_alt: RemovalRecord = removal_record.clone();
         assert_eq!(
@@ -393,9 +393,9 @@ mod removal_record_tests {
         );
     }
 
-    #[test]
-    fn get_chunkidx_to_indices_test() {
-        let (item, mp, removal_record) = get_item_mp_and_removal_record();
+    #[tokio::test]
+    async fn get_chunkidx_to_indices_test() {
+        let (item, mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let chunks2indices = removal_record.get_chunkidx_to_indices_dict();
 
@@ -415,13 +415,13 @@ mod removal_record_tests {
         }
     }
 
-    #[test]
-    fn removal_record_serialization_test() {
+    #[tokio::test]
+    async fn removal_record_serialization_test() {
         // TODO: You could argue that this test doesn't belong here, as it tests the behavior of
         // an imported library. I included it here, though, because the setup seems a bit clumsy
         // to me so far.
 
-        let (_item, _mp, removal_record) = get_item_mp_and_removal_record();
+        let (_item, _mp, removal_record) = get_item_mp_and_removal_record().await;
 
         let json: String = serde_json::to_string(&removal_record).unwrap();
         let s_back = serde_json::from_str::<RemovalRecord>(&json).unwrap();
@@ -457,8 +457,8 @@ mod removal_record_tests {
         );
     }
 
-    #[test]
-    fn batch_update_from_addition_pbt() {
+    #[tokio::test]
+    async fn batch_update_from_addition_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
 
         let test_iterations = 10;
@@ -490,7 +490,7 @@ mod removal_record_tests {
                     &items,
                     &accumulator.kernel,
                     &addition_record,
-                );
+                ).await;
                 assert!(
                     update_res_mp.is_ok(),
                     "batch update must return OK, i = {}",
@@ -502,12 +502,12 @@ mod removal_record_tests {
 
                 for removal_record in removal_records.iter().map(|x| &x.1) {
                     assert!(
-                        removal_record.validate(&accumulator.kernel),
+                        removal_record.validate(&accumulator.kernel).await,
                         "removal records must validate, i = {}",
                         i
                     );
                     assert!(
-                        accumulator.kernel.can_remove(removal_record),
+                        accumulator.kernel.can_remove(removal_record).await,
                         "removal records must return true on `can_remove`, i = {}",
                         i
                     );
@@ -531,11 +531,11 @@ mod removal_record_tests {
                     .await
             );
             assert!(
-                accumulator.kernel.can_remove(random_removal_record),
+                accumulator.kernel.can_remove(random_removal_record).await,
                 "removal records must return true on `can_remove`",
             );
             assert!(
-                random_removal_record.validate(&accumulator.kernel),
+                random_removal_record.validate(&accumulator.kernel).await,
                 "removal record must have valid MMR MPs"
             );
             accumulator.remove(random_removal_record).await;
@@ -546,14 +546,14 @@ mod removal_record_tests {
             );
 
             assert!(
-                !accumulator.kernel.can_remove(random_removal_record),
+                !accumulator.kernel.can_remove(random_removal_record).await,
                 "removal records must return false on `can_remove` after removal",
             );
         }
     }
 
-    #[test]
-    fn batch_update_from_addition_and_remove_pbt() {
+    #[tokio::test]
+    async fn batch_update_from_addition_and_remove_pbt() {
         // Verify that a single element can be added to and removed from the mutator set
 
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
@@ -585,7 +585,7 @@ mod removal_record_tests {
                 &items,
                 &accumulator.kernel,
                 &addition_record,
-            );
+            ).await;
             assert!(
                 update_res_mp.is_ok(),
                 "batch update must return OK, i = {}",
@@ -597,12 +597,12 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&accumulator.kernel),
+                    removal_record.validate(&accumulator.kernel).await,
                     "removal records must validate, i = {}",
                     i
                 );
                 assert!(
-                    accumulator.kernel.can_remove(removal_record),
+                    accumulator.kernel.can_remove(removal_record).await,
                     "removal records must return true on `can_remove`, i = {}",
                     i
                 );
@@ -632,11 +632,11 @@ mod removal_record_tests {
 
             for removal_record in removal_records.iter().map(|x| &x.1) {
                 assert!(
-                    removal_record.validate(&accumulator.kernel),
+                    removal_record.validate(&accumulator.kernel).await,
                     "removal records must validate, i = {}",
                     i
                 );
-                assert!(accumulator.kernel.can_remove(removal_record));
+                assert!(accumulator.kernel.can_remove(removal_record).await);
             }
         }
 
@@ -645,10 +645,10 @@ mod removal_record_tests {
         assert!(original_first_removal_record
             .as_ref()
             .unwrap()
-            .validate(&accumulator.kernel));
+            .validate(&accumulator.kernel).await);
         assert!(!accumulator
             .kernel
-            .can_remove(&original_first_removal_record.unwrap()));
+            .can_remove(&original_first_removal_record.unwrap()).await);
     }
 
     #[test]

@@ -398,14 +398,14 @@ mod tests {
     //     let rriw = RemovalRecordsIntegrity::new_from_witness(primitive_witness, tx_kernel);
     // }
 
-    #[test]
-    fn test_graceful_halt() {
+    #[tokio::test]
+    async fn test_graceful_halt() {
         let mut seed = [0u8; 32];
         seed[0] = 0xa0;
         seed[1] = 0xf1;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record_integrity_witness =
-            pseudorandom_removal_record_integrity_witness(rng.gen());
+            pseudorandom_removal_record_integrity_witness(rng.gen()).await;
 
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
             .kernel
@@ -452,14 +452,14 @@ mod tests {
         assert_eq!(program, other_program);
     }
 
-    #[test]
-    fn tasm_matches_rust() {
+    #[tokio::test]
+    async fn tasm_matches_rust() {
         let mut seed = [0u8; 32];
         seed[0] = 0xa0;
         seed[1] = 0xf1;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record_integrity_witness =
-            pseudorandom_removal_record_integrity_witness(rng.gen());
+            pseudorandom_removal_record_integrity_witness(rng.gen()).await;
         let mut memory = HashMap::default();
         encode_to_memory(
             &mut memory,
@@ -496,14 +496,14 @@ mod bench {
     use super::RemovalRecordsIntegrity;
     use tasm_lib::traits::compiled_program::bench_and_profile_program;
 
-    #[test]
-    fn benchmark() {
+    #[tokio::test]
+    async fn benchmark() {
         let mut seed = [0u8; 32];
         seed[0] = 0xa7;
         seed[1] = 0xf7;
         let mut rng: StdRng = SeedableRng::from_seed(seed);
         let removal_record_integrity_witness =
-            pseudorandom_removal_record_integrity_witness(rng.gen());
+            pseudorandom_removal_record_integrity_witness(rng.gen()).await;
 
         let stdin: Vec<BFieldElement> = removal_record_integrity_witness
             .kernel

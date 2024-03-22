@@ -558,8 +558,8 @@ mod ms_proof_tests {
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
     use twenty_first::shared_math::other::random_elements;
 
-    #[test]
-    fn mp_equality_test() {
+    #[tokio::test]
+    async fn mp_equality_test() {
         let mut rng = thread_rng();
 
         let (_item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
@@ -606,11 +606,11 @@ mod ms_proof_tests {
 
         // Construct an MMR with 7 leafs
         let mmr_digests = random_elements::<Digest>(7);
-        let mut mmra: MmrAccumulator<Hash> = MmrAccumulator::new(mmr_digests);
+        let mut mmra: MmrAccumulator<Hash> = MmrAccumulator::new(mmr_digests).await;
 
         // Get an MMR membership proof by adding the 8th leaf
         let zero_chunk = Chunk::empty_chunk();
-        let mmr_mp = mmra.append(Hash::hash(&zero_chunk));
+        let mmr_mp = mmra.append(Hash::hash(&zero_chunk)).await;
 
         // Verify that the MMR membership proof has the expected length of 3 (sanity check)
         assert_eq!(3, mmr_mp.authentication_path.len());
@@ -672,12 +672,12 @@ mod ms_proof_tests {
                     *oi,
                     &archival_mutator_set.accumulator().await,
                     &addition_record,
-                )
+                ).await
                 .expect("Could not update membership proof from addition.");
             }
 
             let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
             if i == own_index {
                 own_membership_proof = Some(membership_proof);
                 own_item = Some(item);
@@ -691,7 +691,7 @@ mod ms_proof_tests {
                             own_item.unwrap(),
                             &archival_mutator_set.accumulator().await,
                             &addition_record,
-                        )
+                        ).await
                         .expect("Could not update membership proof from addition record.");
                 }
             }
@@ -701,12 +701,12 @@ mod ms_proof_tests {
 
         // assert that own mp is valid
         assert!(
-            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await
         );
 
         // Assert that all other mps are valid
         for (itm, mp) in membership_proofs.iter() {
-            assert!(archival_mutator_set.verify(*itm, mp));
+            assert!(archival_mutator_set.verify(*itm, mp).await);
         }
 
         // generate some removal records
@@ -745,7 +745,7 @@ mod ms_proof_tests {
 
         // assert valid
         assert!(
-            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await
         );
 
         // revert some removal records
@@ -768,7 +768,7 @@ mod ms_proof_tests {
 
         // assert valid
         assert!(
-            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+            archival_mutator_set.verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await
         );
 
         // assert same as snapshot before application-and-reversion
@@ -796,9 +796,9 @@ mod ms_proof_tests {
                 &items,
                 &ams.accumulator().await.kernel,
                 &addition_record,
-            )
+            ).await
             .unwrap();
-            mps.push(ams.prove(item, sender_randomness, receiver_preimage));
+            mps.push(ams.prove(item, sender_randomness, receiver_preimage).await);
             items.push(item);
             ams.add(&addition_record).await;
             addition_records.push(addition_record);
@@ -806,7 +806,7 @@ mod ms_proof_tests {
 
         // Verify that all MPs are valid
         for i in 0..ms_size {
-            assert!(ams.verify(items[i], &mps[i]));
+            assert!(ams.verify(items[i], &mps[i]).await);
         }
 
         // Remove all `ms_size` elements from the MS
@@ -824,16 +824,16 @@ mod ms_proof_tests {
             // Verify that the rest of the MPs are still valid
             for j in 0..ms_size {
                 if j > i {
-                    assert!(ams.verify(items[j], &mps[j]));
+                    assert!(ams.verify(items[j], &mps[j]).await);
                 } else {
-                    assert!(!ams.verify(items[j], &mps[j]));
+                    assert!(!ams.verify(items[j], &mps[j]).await);
                 }
             }
         }
 
         // Verify that all MPs are invalid since their items were removed
         for i in 0..ms_size {
-            assert!(!ams.verify(items[i], &mps[i]));
+            assert!(!ams.verify(items[i], &mps[i]).await);
         }
 
         // Revert all removals in opposite order and verify that the MPs become valid again
@@ -844,16 +844,16 @@ mod ms_proof_tests {
             }
             for j in 0..ms_size {
                 if j < i {
-                    assert!(!ams.verify(items[j], &mps[j]));
+                    assert!(!ams.verify(items[j], &mps[j]).await);
                 } else {
-                    assert!(ams.verify(items[j], &mps[j]));
+                    assert!(ams.verify(items[j], &mps[j]).await);
                 }
             }
         }
 
         // Verify all MPs after reverting all removals
         for i in 0..ms_size {
-            ams.verify(items[i], &mps[i]);
+            ams.verify(items[i], &mps[i]).await;
         }
     }
 
@@ -878,9 +878,9 @@ mod ms_proof_tests {
                     &items,
                     &ams.accumulator().await.kernel,
                     &addition_record,
-                )
+                ).await
                 .unwrap();
-                mps.push(ams.prove(item, sender_randomness, receiver_preimage));
+                mps.push(ams.prove(item, sender_randomness, receiver_preimage).await);
                 items.push(item);
                 ams.add(&addition_record).await;
                 addition_records.push(addition_record);
@@ -893,7 +893,7 @@ mod ms_proof_tests {
                     .revert_update_from_batch_addition(&ams.accumulator().await)
                     .await;
                 assert!(
-                    ams.verify(items[0], &mps[0]),
+                    ams.verify(items[0], &mps[0]).await,
                     "MP should be valid after reversion"
                 );
                 if i != 1 {
@@ -902,7 +902,7 @@ mod ms_proof_tests {
                         .revert_update_from_batch_addition(&ams.accumulator().await)
                         .await;
                     assert!(
-                        ams.verify(items[1], &mps[1]),
+                        ams.verify(items[1], &mps[1]).await,
                         "MP should be valid after reversion"
                     );
                 }
@@ -953,7 +953,7 @@ mod ms_proof_tests {
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
                 own_mp
-                    .update_from_addition(own_item, &msa, &addition_record)
+                    .update_from_addition(own_item, &msa, &addition_record).await
                     .unwrap();
                 msa.add(&addition_record).await;
                 assert!(
@@ -972,7 +972,7 @@ mod ms_proof_tests {
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
                 own_mp
-                    .update_from_addition(own_item, &msa, &addition_record)
+                    .update_from_addition(own_item, &msa, &addition_record).await
                     .unwrap();
                 msa.add(&addition_record).await;
                 assert!(
@@ -1020,7 +1020,7 @@ mod ms_proof_tests {
             addition_records.push(addition_record);
 
             let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
             match i.cmp(&own_index) {
                 std::cmp::Ordering::Less => {}
                 std::cmp::Ordering::Equal => {
@@ -1029,7 +1029,7 @@ mod ms_proof_tests {
                 }
                 std::cmp::Ordering::Greater => {
                     assert!(archival_mutator_set
-                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
+                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await);
                     assert!(
                         archival_mutator_set
                             .accumulator()
@@ -1044,7 +1044,7 @@ mod ms_proof_tests {
                             own_item.unwrap(),
                             &archival_mutator_set.accumulator().await,
                             &addition_record,
-                        )
+                        ).await
                         .expect("Could not update membership proof from addition record.");
                 }
             }
@@ -1056,11 +1056,11 @@ mod ms_proof_tests {
                 let own_item = own_item.as_ref().unwrap().to_owned();
                 assert!(archival_mutator_set
                     .kernel
-                    .verify(own_item, own_membership_proof.as_ref().unwrap(),));
+                    .verify(own_item, own_membership_proof.as_ref().unwrap(),).await);
 
                 let mut memproof = own_membership_proof.as_ref().unwrap().clone();
 
-                assert!(archival_mutator_set.kernel.verify(own_item, &memproof,));
+                assert!(archival_mutator_set.kernel.verify(own_item, &memproof,).await);
 
                 memproof
                     .revert_update_from_batch_addition(&mutator_set_before)
@@ -1082,7 +1082,7 @@ mod ms_proof_tests {
                 .await;
 
             assert!(archival_mutator_set
-                .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
+                .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await);
         }
     }
 
@@ -1143,7 +1143,7 @@ mod ms_proof_tests {
 
                 // record membership proof
                 let membership_proof =
-                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage);
+                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
 
                 // update existing membership proof
                 for (it, mp) in tracked_items_and_membership_proofs.iter_mut() {
@@ -1151,7 +1151,7 @@ mod ms_proof_tests {
                         *it,
                         &archival_mutator_set.accumulator().await,
                         &addition_record,
-                    )
+                    ).await
                     .expect("Could not update membership proof from addition.");
                 }
 
@@ -1211,7 +1211,7 @@ mod ms_proof_tests {
 
                 // don't lose track of the removed item
                 assert!(
-                    archival_mutator_set.verify(item, &membership_proof),
+                    archival_mutator_set.verify(item, &membership_proof).await,
                     "track index: {track_index}\nitem index: {index}",
                 );
                 removed_items_and_membership_proofs.push((item, membership_proof.clone(), index));
@@ -1310,7 +1310,7 @@ mod ms_proof_tests {
                                             match removed_items_and_membership_proofs.pop() {
                                                 Some((item, membership_proof, index)) => {
                                                     assert!(archival_mutator_set
-                                                        .verify(item, &membership_proof));
+                                                        .verify(item, &membership_proof).await);
                                                     tracked_items_and_membership_proofs
                                                         .insert(index, (item, membership_proof));
                                                     _report_index = index;
@@ -1341,7 +1341,7 @@ mod ms_proof_tests {
                     archival_mutator_set.verify(
                         own_item,
                         &tracked_items_and_membership_proofs[track_index].1
-                    ),
+                    ).await,
                     "seed: {seed_integer} / n: {n}",
                 );
             }

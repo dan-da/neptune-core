@@ -617,7 +617,7 @@ mod block_tests {
             .to_address();
         let genesis_block = Block::genesis_block().await;
 
-        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen());
+        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, address, rng.gen()).await;
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         assert!(
@@ -706,25 +706,25 @@ mod block_tests {
         assert_eq!(bfe_max_elem, some_threshold_actual.values()[3]);
     }
 
-    #[test]
-    fn block_with_wrong_mmra_is_invalid() {
+    #[tokio::test]
+    async fn block_with_wrong_mmra_is_invalid() {
         let mut rng = thread_rng();
         let genesis_block = Block::genesis_block().await;
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
 
-        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new(vec![]);
+        block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::default();
         let timestamp = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
 
         assert!(!block_1.is_valid(&genesis_block, timestamp).await);
     }
 
     #[traced_test]
-    #[test]
-    fn block_with_far_future_timestamp_is_invalid() {
+    #[tokio::test]
+    async fn block_with_far_future_timestamp_is_invalid() {
         let mut rng = thread_rng();
         let genesis_block = Block::genesis_block().await;
         let mut now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
@@ -732,7 +732,7 @@ mod block_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
 
         // Set block timestamp 1 hour in the future.  (is valid)
         let future_time1 = now + Duration::from_secs(60 * 60);
@@ -773,18 +773,18 @@ mod block_tests {
         let mut storage = SimpleRustyStorage::new(db);
         let ammr_storage = storage.schema.new_vec::<Digest>("ammr-blocks-0").await;
         let mut ammr: ArchivalMmr<Hash, _> = ArchivalMmr::new(ammr_storage).await;
-        ammr.append(genesis_block.hash());
-        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]);
+        ammr.append(genesis_block.hash()).await;
+        let mut mmra = MmrAccumulator::new(vec![genesis_block.hash()]).await;
 
         for i in 0..55 {
             let wallet_secret = WalletSecret::new_random();
             let recipient_address = wallet_secret.nth_generation_spending_key(0).to_address();
             let (new_block, _, _) =
-                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
+                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen()).await;
             if i != 54 {
-                ammr.append(new_block.hash());
-                mmra.append(new_block.hash());
-                assert_eq!(ammr.to_accumulator().bag_peaks(), mmra.bag_peaks());
+                ammr.append(new_block.hash()).await;
+                mmra.append(new_block.hash()).await;
+                assert_eq!(ammr.to_accumulator().await.bag_peaks().await, mmra.bag_peaks().await);
             }
             blocks.push(new_block);
         }

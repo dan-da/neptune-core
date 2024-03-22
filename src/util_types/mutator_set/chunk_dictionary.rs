@@ -119,7 +119,7 @@ mod chunk_dict_tests {
     use crate::util_types::mutator_set::shared::CHUNK_SIZE;
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
-    use super::super::archival_mmr::mmr_test::mock;
+    use crate::util_types::mmr::mock;
     use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::shared_math::other::random_elements;

@@ -1240,7 +1240,7 @@ mod global_state_tests {
                         .kernel
                         .body
                         .mutator_set_accumulator
-                        .verify(Hash::hash(&monitored_utxo.utxo), &mp)
+                        .verify(Hash::hash(&monitored_utxo.utxo), &mp).await
                     {
                         return false;
                     }
@@ -1303,8 +1303,7 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             privacy,
-        ))
-        .await
+        ).await)
     }
 
     #[traced_test]
@@ -1447,7 +1446,7 @@ mod global_state_tests {
             .to_address();
         let genesis_block = Block::genesis_block().await;
         let (mock_block_1, _, _) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen()).await;
         crate::tests::shared::add_block_to_archival_state(
             global_state.chain.archival_state_mut(),
             mock_block_1.clone(),
@@ -1499,7 +1498,7 @@ mod global_state_tests {
                         .get_latest_membership_proof_entry()
                         .unwrap()
                         .1,
-                );
+                ).await;
             assert_eq!(
                 mock_block_1.hash(),
                 own_premine_mutxo
@@ -1530,7 +1529,7 @@ mod global_state_tests {
         let launch = genesis_block.kernel.header.timestamp.value();
         let seven_months = 7 * 30 * 24 * 60 * 60 * 1000;
         let (mock_block_1a, _, _) =
-            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
+            make_mock_block(&genesis_block, None, other_receiver_address, rng.gen()).await;
         {
             global_state
                 .chain
@@ -1601,7 +1600,7 @@ mod global_state_tests {
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
         let genesis_block = global_state.chain.archival_state().get_latest_block().await;
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
-            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
+            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen()).await;
         {
             global_state
                 .chain
@@ -1646,7 +1645,7 @@ mod global_state_tests {
         let mut parent_block = genesis_block;
         for _ in 0..5 {
             let (next_block, _, _) =
-                make_mock_block(&parent_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&parent_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1727,7 +1726,7 @@ mod global_state_tests {
         let genesis_block = global_state.chain.archival_state().get_latest_block().await;
         assert!(genesis_block.kernel.header.height.is_genesis());
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
-            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
+            make_mock_block(&genesis_block, None, own_receiving_address, rng.gen()).await;
         {
             global_state
                 .chain
@@ -1768,7 +1767,7 @@ mod global_state_tests {
         let mut fork_a_block = mock_block_1a.clone();
         for _ in 0..100 {
             let (next_a_block, _, _) =
-                make_mock_block(&fork_a_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&fork_a_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1800,7 +1799,7 @@ mod global_state_tests {
         let mut fork_b_block = mock_block_1a.clone();
         for _ in 0..100 {
             let (next_b_block, _, _) =
-                make_mock_block(&fork_b_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&fork_b_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1855,7 +1854,7 @@ mod global_state_tests {
         let mut fork_c_block = genesis_block.clone();
         for _ in 0..100 {
             let (next_c_block, _, _) =
-                make_mock_block(&fork_c_block, None, other_receiving_address, rng.gen());
+                make_mock_block(&fork_c_block, None, other_receiving_address, rng.gen()).await;
             global_state
                 .chain
                 .archival_state_mut()
@@ -1977,7 +1976,7 @@ mod global_state_tests {
             None,
             genesis_spending_key.to_address(),
             rng.gen(),
-        );
+        ).await;
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
@@ -2244,7 +2243,7 @@ mod global_state_tests {
                 None,
                 genesis_spending_key.to_address(),
                 rng.gen(),
-            );
+            ).await;
         block_2
             .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
             .await;
@@ -2270,7 +2269,7 @@ mod global_state_tests {
         let wallet_secret = WalletSecret::new_random();
         let receiving_address = wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _cb_utxo, _cb_output_randomness) =
-            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen()).await;
 
         add_block(&mut global_state, block_1).await.unwrap();
 

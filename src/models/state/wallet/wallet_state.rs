@@ -840,7 +840,7 @@ mod tests {
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
+                make_mock_block(&latest_block, None, other_recipient_address, rng.gen()).await;
             own_global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
@@ -886,7 +886,7 @@ mod tests {
                 None,
                 own_recipient_address,
                 rng.gen(),
-            );
+            ).await;
         own_global_state
             .wallet_state
             .expected_utxos
@@ -945,7 +945,7 @@ mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
-            make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
+            make_mock_block(&latest_block, None, other_recipient_address, rng.gen()).await;
         own_global_state
             .wallet_state
             .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_3b)
@@ -991,7 +991,7 @@ mod tests {
         mutator_set_accumulator = latest_block.kernel.body.mutator_set_accumulator.clone();
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
+                make_mock_block(&latest_block, None, other_recipient_address, rng.gen()).await;
             own_global_state
                 .wallet_state
                 .update_wallet_state_with_new_block(&mutator_set_accumulator, &new_block)
@@ -1038,7 +1038,7 @@ mod tests {
 
         // Mine *one* more block. Verify that MUTXO is pruned
         let (block_12, _, _) =
-            make_mock_block(&latest_block, None, other_recipient_address, rng.gen());
+            make_mock_block(&latest_block, None, other_recipient_address, rng.gen()).await;
         own_global_state
             .wallet_state
             .update_wallet_state_with_new_block(&mutator_set_accumulator, &block_12)
@@ -1133,8 +1133,7 @@ mod tests {
             assert!(genesis_block
                 .body()
                 .mutator_set_accumulator
-                .verify(Hash::hash(&utxo), &ms_membership_proof))
-            .await;
+                .verify(Hash::hash(&utxo), &ms_membership_proof).await);
         }
     }
 }

@@ -127,7 +127,7 @@ mod ms_accumulator_tests {
                 &items,
                 &accumulator.kernel,
                 &addition_record,
-            )
+            ).await
             .expect("MS membership update must work");
 
             accumulator.add(&addition_record).await;
@@ -235,14 +235,14 @@ mod ms_accumulator_tests {
                         &items,
                         &accumulator.kernel,
                         &addition_record,
-                    );
+                    ).await;
                     assert!(update_result.is_ok(), "Batch mutation must return OK");
 
                     // Update membership proofs sequentially
                     for (mp, &own_item) in membership_proofs_sequential.iter_mut().zip(items.iter())
                     {
                         let update_res_seq =
-                            mp.update_from_addition(own_item, &accumulator, &addition_record);
+                            mp.update_from_addition(own_item, &accumulator, &addition_record).await;
                         assert!(update_res_seq.is_ok());
                     }
 
@@ -296,7 +296,7 @@ mod ms_accumulator_tests {
 
                     // generate removal record
                     let removal_record: RemovalRecord = accumulator.drop(removal_item, &removal_mp);
-                    assert!(removal_record.validate(&accumulator.kernel));
+                    assert!(removal_record.validate(&accumulator.kernel).await);
 
                     // update membership proofs
                     // Uppdate membership proofs in batch
@@ -420,8 +420,8 @@ mod ms_accumulator_tests {
     }
 
     #[ignore]
-    #[test]
-    fn profile() {
+    #[tokio::test]
+    async fn profile() {
         // populate a mutator set with items according to some target profile,
         // and then print the size of the mutator set accumulator, in bytes
         let mut rng = thread_rng();
@@ -463,7 +463,7 @@ mod ms_accumulator_tests {
                 let receiver_preimage = rng.gen::<Digest>();
                 let addition_record = commit(item, sender_randomness, receiver_preimage);
                 for (it, mp) in items_and_membership_proofs.iter_mut() {
-                    mp.update_from_addition(*it, &msa, &addition_record)
+                    mp.update_from_addition(*it, &msa, &addition_record).await
                         .unwrap();
                 }
                 let membership_proof = msa.prove(item, sender_randomness, receiver_preimage).await;

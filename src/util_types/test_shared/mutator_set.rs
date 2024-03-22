@@ -89,7 +89,7 @@ pub async fn insert_mock_item<M: Mmr<Hash>>(
         sender_randomness,
         receiver_preimage.hash::<Hash>(),
     );
-    let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage);
+    let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage).await;
     mutator_set.add_helper(&addition_record).await;
 
     (membership_proof, new_item)
@@ -465,7 +465,7 @@ mod shared_tests_test {
             let mut inner_rng: StdRng = SeedableRng::from_seed(inner_seed);
 
             let leafs: Vec<Digest> = (0..num_leafs).map(|_| inner_rng.gen()).collect_vec();
-            let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs);
+            let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs).await;
             for (leaf, mp) in leafs.into_iter().zip(mps) {
                 assert!(
                     mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)

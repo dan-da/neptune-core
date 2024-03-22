@@ -1297,7 +1297,7 @@ mod peer_loop_tests {
             None,
             a_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let mock = Mock::new(vec![Action::Read(PeerMessage::Block(Box::new(
             block_1_with_different_genesis.into(),
         )))]);
@@ -1375,7 +1375,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_without_valid_pow, _, _) =
-            make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_invalid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
 
         // Sending an invalid block will not neccessarily result in a ban. This depends on the peer
         // tolerance that is set in the client. For this reason, we include a "Bye" here.
@@ -1464,7 +1464,7 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -1529,15 +1529,15 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
         let (block_2_a, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen()).await;
         let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()); // <--- canonical
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()).await; // <--- canonical
         let (block_2_b, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen()).await;
         let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen()).await;
 
         add_block(&mut global_state_mut, block_1.clone()).await?;
         add_block(&mut global_state_mut, block_2_a.clone()).await?;
@@ -1621,15 +1621,15 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
         let (block_2_a, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen()).await;
         let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()); // <--- canonical
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()).await; // <--- canonical
         let (block_2_b, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen()).await;
         let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen()).await;
 
         add_block(&mut global_state_mut, block_1.clone()).await?;
         add_block(&mut global_state_mut, block_2_a.clone()).await?;
@@ -1687,15 +1687,15 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
         let (block_2_a, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen()).await;
         let (block_3_a, _, _) =
-            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()); // <--- canonical
+            make_mock_block_with_valid_pow(&block_2_a, None, a_recipient_address, rng.gen()).await; // <--- canonical
         let (block_2_b, _, _) =
-            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen()).await;
         let (block_3_b, _, _) =
-            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2_b, None, a_recipient_address, rng.gen()).await;
 
         add_block(&mut global_state_mut, block_1.clone()).await?;
         add_block(&mut global_state_mut, block_2_a.clone()).await?;
@@ -1750,7 +1750,7 @@ mod peer_loop_tests {
             .await;
 
         let (mock_block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(mock_block_1.into()))),
             Action::Read(PeerMessage::Bye),
@@ -1812,9 +1812,9 @@ mod peer_loop_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen()).await;
 
         let mock = Mock::new(vec![
             Action::Read(PeerMessage::Block(Box::new(block_2.clone().into()))),
@@ -1903,25 +1903,25 @@ mod peer_loop_tests {
             None,
             own_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_2, _, _) = make_mock_block_with_valid_pow(
             &block_1.clone(),
             None,
             own_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_3, _, _) = make_mock_block_with_valid_pow(
             &block_2.clone(),
             None,
             own_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_4, _, _) = make_mock_block_with_valid_pow(
             &block_3.clone(),
             None,
             own_recipient_address,
             rng.gen(),
-        );
+        ).await;
         add_block(&mut global_state_mut, block_1.clone()).await?;
 
         drop(global_state_mut);
@@ -1999,13 +1999,13 @@ mod peer_loop_tests {
             None,
             a_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen()).await;
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -2082,11 +2082,11 @@ mod peer_loop_tests {
             None,
             a_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen()).await;
         drop(global_state);
 
         let mock = Mock::new(vec![
@@ -2167,15 +2167,15 @@ mod peer_loop_tests {
             None,
             a_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_5, _, _) =
-            make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_4.clone(), None, a_recipient_address, rng.gen()).await;
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -2278,13 +2278,13 @@ mod peer_loop_tests {
             None,
             a_recipient_address,
             rng.gen(),
-        );
+        ).await;
         let (block_2, _, _) =
-            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_1.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_3, _, _) =
-            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_2.clone(), None, a_recipient_address, rng.gen()).await;
         let (block_4, _, _) =
-            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(&block_3.clone(), None, a_recipient_address, rng.gen()).await;
         add_block(&mut global_state_mut, block_1.clone()).await?;
         drop(global_state_mut);
 
