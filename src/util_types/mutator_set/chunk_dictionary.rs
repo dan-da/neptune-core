@@ -13,8 +13,8 @@ use triton_vm::prelude::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
 use super::chunk::Chunk;
-use twenty_first::shared_math::b_field_element::BFieldElement;
 use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use twenty_first::shared_math::b_field_element::BFieldElement;
 
 #[derive(Clone, Debug, Serialize, Deserialize, GetSize, PartialEq, Eq, Default, Arbitrary)]
 pub struct ChunkDictionary {
@@ -120,10 +120,10 @@ mod chunk_dict_tests {
     use crate::util_types::test_shared::mutator_set::random_chunk_dictionary;
 
     use super::super::archival_mmr::mmr_test::mock;
+    use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
     use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
     use twenty_first::shared_math::other::random_elements;
     use twenty_first::shared_math::tip5::{Digest, Tip5};
-    use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     use super::*;
 

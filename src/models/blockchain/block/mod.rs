@@ -2,8 +2,8 @@ use crate::config_models::network::Network;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::{ValidityAstType, ValidityTree, WitnessType};
 use crate::prelude::twenty_first;
-use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 
 use get_size::GetSize;
 use itertools::Itertools;
@@ -408,7 +408,8 @@ impl Block {
                 .body
                 .mutator_set_accumulator
                 .kernel
-                .can_remove(removal_record).await
+                .can_remove(removal_record)
+                .await
             {
                 warn!("Removal record cannot be removed from mutator set");
                 return false;
@@ -803,7 +804,8 @@ mod block_tests {
             v,
             "peaks: {} ({}) leaf count: {} index: {} path: {} number of blocks: {} leaf index: {}",
             last_block_mmra
-                .get_peaks().await
+                .get_peaks()
+                .await
                 .iter()
                 .map(|d| d.emojihash())
                 .join(","),
@@ -818,7 +820,10 @@ mod block_tests {
             blocks.len(),
             membership_proof.leaf_index
         );
-        assert_eq!(last_block_mmra.count_leaves().await, blocks.len() as u64 - 1);
+        assert_eq!(
+            last_block_mmra.count_leaves().await,
+            blocks.len() as u64 - 1
+        );
     }
 
     #[test]

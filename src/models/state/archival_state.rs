@@ -22,9 +22,9 @@ use crate::models::blockchain::block::{block_height::BlockHeight, Block};
 use crate::models::database::{
     BlockFileLocation, BlockIndexKey, BlockIndexValue, BlockRecord, FileRecord, LastFileRecord,
 };
+use crate::util_types::mmr::traits::*;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::*;
-use crate::util_types::mmr::traits::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 
@@ -197,13 +197,7 @@ impl ArchivalState {
         // We could have populated the archival mutator set with the genesis block UTXOs earlier in
         // the setup, but we don't have the genesis block in scope before this function, so it makes
         // sense to do it here.
-        if archival_mutator_set
-            .ams()
-            .kernel
-            .aocl
-            .is_empty()
-            .await
-        {
+        if archival_mutator_set.ams().kernel.aocl.is_empty().await {
             for addition_record in genesis_block.kernel.body.transaction.kernel.outputs.iter() {
                 archival_mutator_set.ams_mut().add(addition_record).await;
             }
@@ -762,7 +756,8 @@ impl ArchivalState {
                 RemovalRecord::batch_update_from_addition(
                     &mut removal_records,
                     &mut self.archival_mutator_set.ams_mut().kernel,
-                ).await;
+                )
+                .await;
 
                 // Add the element to the mutator set
                 self.archival_mutator_set
@@ -1304,7 +1299,9 @@ mod archival_state_tests {
                 .await;
 
             assert!(
-                next_block.is_valid(&previous_block, now + seven_months).await,
+                next_block
+                    .is_valid(&previous_block, now + seven_months)
+                    .await,
                 "next block ({i}) not valid for devnet"
             );
 
@@ -1563,7 +1560,11 @@ mod archival_state_tests {
                     &genesis_block.kernel.body.mutator_set_accumulator,
                 )
                 .await;
-            assert!(block_1.is_valid(&genesis_block, launch + seven_months).await);
+            assert!(
+                block_1
+                    .is_valid(&genesis_block, launch + seven_months)
+                    .await
+            );
         }
 
         println!("Accumulated transaction into block_1.");

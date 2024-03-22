@@ -1,7 +1,7 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mmr::traits::*;
+use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
@@ -579,7 +579,8 @@ impl GlobalState {
             timestamp.as_millis() as u64,
             mutator_set_accumulator,
             privacy,
-        ).await)
+        )
+        .await)
     }
 
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
@@ -919,7 +920,9 @@ impl GlobalState {
                 }
 
                 // revert additions
-                membership_proof.revert_update_from_batch_addition(&previous_mutator_set).await;
+                membership_proof
+                    .revert_update_from_batch_addition(&previous_mutator_set)
+                    .await;
 
                 // unset spent_in_block field if the UTXO was spent in this block
                 if let Some((spent_block_hash, _, _)) = monitored_utxo.spent_in_block {
@@ -1300,7 +1303,8 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             privacy,
-        )).await
+        ))
+        .await
     }
 
     #[traced_test]
@@ -2041,7 +2045,11 @@ mod global_state_tests {
                 )
                 .await;
             let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
-            assert!(block_1.is_valid(&genesis_block, now + Duration::from_millis(seven_months)).await);
+            assert!(
+                block_1
+                    .is_valid(&genesis_block, now + Duration::from_millis(seven_months))
+                    .await
+            );
         }
 
         println!("Accumulated transaction into block_1.");
@@ -2266,9 +2274,12 @@ mod global_state_tests {
 
         add_block(&mut global_state, block_1).await.unwrap();
 
-        assert!(global_state
-            .chain
-            .light_state()
-            .is_valid(&genesis_block, now).await);
+        assert!(
+            global_state
+                .chain
+                .light_state()
+                .is_valid(&genesis_block, now)
+                .await
+        );
     }
 }

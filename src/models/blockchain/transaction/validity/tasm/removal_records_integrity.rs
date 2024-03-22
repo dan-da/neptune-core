@@ -3,6 +3,8 @@ use crate::prelude::{triton_vm, twenty_first};
 
 use std::collections::HashSet;
 
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use itertools::Itertools;
 use tasm_lib::data_type::DataType;
 use tasm_lib::library::Library;
@@ -22,13 +24,8 @@ use triton_vm::instruction::LabelledInstruction;
 use triton_vm::prelude::{triton_asm, BFieldElement, NonDeterminism, PublicInput};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{
-        algebraic_hasher::AlgebraicHasher,
-    },
+    util_types::algebraic_hasher::AlgebraicHasher,
 };
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::traits::*;
-
 
 use crate::models::blockchain::transaction::validity::removal_records_integrity::{
     RemovalRecordsIntegrity, RemovalRecordsIntegrityWitness,
@@ -55,12 +52,10 @@ use super::{
 };
 
 impl CompiledProgram for RemovalRecordsIntegrity {
-
     fn rust_shadow(
         public_input: &PublicInput,
         nondeterminism: &NonDeterminism<BFieldElement>,
     ) -> anyhow::Result<Vec<BFieldElement>> {
-
         // We must call async fn, but we cannot make this fn
         // async, as that would conflict with the trait, defined
         // in a non-async crate.
@@ -72,7 +67,6 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             public_input: &PublicInput,
             nondeterminism: &NonDeterminism<BFieldElement>,
         ) -> anyhow::Result<Vec<BFieldElement>> {
-
             let hash_of_kernel = *Digest::decode(
                 &public_input
                     .individual_tokens
@@ -85,11 +79,12 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             .expect("Could not decode public input in Removal Records Integrity :: verify_raw");
 
             // 1. read and process witness data
-            let removal_record_integrity_witness = *RemovalRecordsIntegrityWitness::decode_from_memory(
-                &nondeterminism.ram,
-                FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
-            )
-            .unwrap();
+            let removal_record_integrity_witness =
+                *RemovalRecordsIntegrityWitness::decode_from_memory(
+                    &nondeterminism.ram,
+                    FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS,
+                )
+                .unwrap();
 
             println!(
                 "first element of witness: {}",
@@ -181,14 +176,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
                         &msmp.auth_path_aocl,
                     )
                 })
-                .all(|(cc, mp)| {
-                    mp.verify(
-                        &peaks,
-                        cc.canonical_commitment,
-                        count_leaves,
-                    )
-                    .0
-                }));
+                .all(|(cc, mp)| { mp.verify(&peaks, cc.canonical_commitment, count_leaves,).0 }));
 
             Ok(vec![])
         }
@@ -197,7 +185,9 @@ impl CompiledProgram for RemovalRecordsIntegrity {
             s.spawn(|| {
                 let runtime = tokio::runtime::Runtime::new().unwrap();
                 runtime.block_on(rust_shadow_async(public_input, nondeterminism))
-            }).join().unwrap()
+            })
+            .join()
+            .unwrap()
         })
     }
 
@@ -373,7 +363,6 @@ impl CompiledProgram for RemovalRecordsIntegrity {
         ]
     }
 }
-
 
 #[cfg(test)]
 

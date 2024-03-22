@@ -1,15 +1,13 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use crate::util_types::mmr::traits::*;
-use crate::util_types::mmr::MmrAccumulator;
-use twenty_first::util_types::{
-    algebraic_hasher::AlgebraicHasher,
-};
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
@@ -51,7 +49,8 @@ impl MutatorSetAsync for MutatorSetAccumulator {
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         self.kernel
-            .prove(item, sender_randomness, receiver_preimage).await
+            .prove(item, sender_randomness, receiver_preimage)
+            .await
     }
 
     async fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
@@ -88,7 +87,8 @@ impl MutatorSetAsync for MutatorSetAccumulator {
         preserved_membership_proofs: &mut [&mut MsMembershipProof],
     ) {
         self.kernel
-            .batch_remove(removal_records, preserved_membership_proofs).await;
+            .batch_remove(removal_records, preserved_membership_proofs)
+            .await;
     }
 }
 
@@ -118,7 +118,9 @@ mod ms_accumulator_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage).await;
+            let membership_proof = accumulator
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -151,10 +153,12 @@ mod ms_accumulator_tests {
         }
 
         // Remove the entries with batch_remove
-        accumulator.batch_remove(
-            removal_records,
-            &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-        ).await;
+        accumulator
+            .batch_remove(
+                removal_records,
+                &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
+            )
+            .await;
 
         // Verify that the expected membership proofs fail/pass
         for (mp, &item, skipped) in izip!(
@@ -219,8 +223,9 @@ mod ms_accumulator_tests {
 
                     let addition_record: AdditionRecord =
                         commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-                    let membership_proof_acc =
-                        accumulator.prove(item, sender_randomness, receiver_preimage).await;
+                    let membership_proof_acc = accumulator
+                        .prove(item, sender_randomness, receiver_preimage)
+                        .await;
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch

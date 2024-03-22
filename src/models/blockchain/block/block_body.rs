@@ -8,9 +8,9 @@ use tasm_lib::twenty_first::shared_math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
-use crate::util_types::mmr::MmrAccumulator;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::Transaction;
+use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 
 #[derive(Debug, Clone, EnumCount)]

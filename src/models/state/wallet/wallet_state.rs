@@ -414,7 +414,8 @@ impl WalletState {
                         &utxo_digests,
                         &msa_state.kernel,
                         addition_record,
-                    ).await;
+                    )
+                    .await;
                 match updated_mp_indices {
                     Ok(mut indices_of_mutated_mps) => {
                         changed_mps.append(&mut indices_of_mutated_mps)
@@ -424,7 +425,8 @@ impl WalletState {
             }
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel).await;
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel)
+                .await;
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
@@ -444,8 +446,9 @@ impl WalletState {
                         .sum::<NeptuneCoins>(),
                 );
                 let utxo_digest = Hash::hash(&utxo);
-                let new_own_membership_proof =
-                    msa_state.prove(utxo_digest, sender_randomness, receiver_preimage).await;
+                let new_own_membership_proof = msa_state
+                    .prove(utxo_digest, sender_randomness, receiver_preimage)
+                    .await;
 
                 // Add the data required to restore the UTXOs membership proof from public
                 // data to the secret's file.
@@ -557,7 +560,13 @@ impl WalletState {
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            new_block.kernel.body.mutator_set_accumulator.clone().hash().await,
+            new_block
+                .kernel
+                .body
+                .mutator_set_accumulator
+                .clone()
+                .hash()
+                .await,
             msa_state.hash().await,
             "Mutator set in wallet-handler must agree with that from applied block"
         );
@@ -1124,7 +1133,8 @@ mod tests {
             assert!(genesis_block
                 .body()
                 .mutator_set_accumulator
-                .verify(Hash::hash(&utxo), &ms_membership_proof)).await;
+                .verify(Hash::hash(&utxo), &ms_membership_proof))
+            .await;
         }
     }
 }

@@ -1,6 +1,7 @@
 use crate::models::blockchain::shared::Hash;
 use crate::prelude::twenty_first;
 
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use arbitrary::Arbitrary;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -16,12 +17,10 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mmr::traits::*;
-
+use crate::util_types::mmr::MmrAccumulator;
+use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use super::addition_record::AdditionRecord;
 use super::chunk_dictionary::{pseudorandom_chunk_dictionary, ChunkDictionary};
@@ -194,9 +193,7 @@ impl MsMembershipProof {
         // repeated since the MMR `batch_update_from_append` handles this optimally.
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
-        let mut mmr_membership_proofs_for_append: Vec<
-            &mut MmrMembershipProof<Hash>,
-        > = vec![];
+        let mut mmr_membership_proofs_for_append: Vec<&mut MmrMembershipProof<Hash>> = vec![];
 
         // The `mmr_membership_proof_index_to_membership_proof_index` variable is to remember
         // which parts of the MMR membership proofs that map to MS membership proofs. This is
@@ -212,13 +209,12 @@ impl MsMembershipProof {
             }
         }
 
-        let indices_for_mutated_values =
-            MmrMembershipProof::<Hash>::batch_update_from_append(
-                &mut mmr_membership_proofs_for_append,
-                mutator_set.swbf_inactive.count_leaves().await,
-                new_chunk_digest,
-                &mutator_set.swbf_inactive.get_peaks().await,
-            );
+        let indices_for_mutated_values = MmrMembershipProof::<Hash>::batch_update_from_append(
+            &mut mmr_membership_proofs_for_append,
+            mutator_set.swbf_inactive.count_leaves().await,
+            new_chunk_digest,
+            &mutator_set.swbf_inactive.get_peaks().await,
+        );
         let mut swbf_mutated_indices: Vec<usize> = vec![];
         for j in indices_for_mutated_values {
             swbf_mutated_indices.push(mmr_membership_proof_index_to_membership_proof_index[j]);
@@ -286,9 +282,9 @@ impl MsMembershipProof {
         // a whole archival MMR for this operation, as the archival MMR can be in the
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
-        let mut mmra: MmrAccumulator<Hash> = mutator_set.kernel.swbf_inactive.to_accumulator().await;
-        let new_auth_path: MmrMembershipProof<Hash> =
-            mmra.append(new_chunk_digest).await;
+        let mut mmra: MmrAccumulator<Hash> =
+            mutator_set.kernel.swbf_inactive.to_accumulator().await;
+        let new_auth_path: MmrMembershipProof<Hash> = mmra.append(new_chunk_digest).await;
 
         let mut swbf_chunk_dictionary_updated = false;
         let batch_index = new_item_index / BATCH_SIZE as u64;
@@ -366,7 +362,11 @@ impl MsMembershipProof {
         }
 
         // remove chunks from unslid windows
-        let swbfi_leaf_count = previous_mutator_set.kernel.swbf_inactive.count_leaves().await;
+        let swbfi_leaf_count = previous_mutator_set
+            .kernel
+            .swbf_inactive
+            .count_leaves()
+            .await;
         self.target_chunks
             .dictionary
             .retain(|k, _v| *k < swbfi_leaf_count);
@@ -415,11 +415,10 @@ impl MsMembershipProof {
         }
 
         // Perform the batch mutation of the MMR membership proofs
-        let mutated_mmr_mps =
-            MmrMembershipProof::batch_update_from_batch_leaf_mutation(
-                &mut own_mmr_mps,
-                mutation_argument,
-            );
+        let mutated_mmr_mps = MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            &mut own_mmr_mps,
+            mutation_argument,
+        );
 
         // Keep track of which MS membership proofs that were mutated. This is all those membership
         // proofs which have a mutated chunk
@@ -553,11 +552,11 @@ mod ms_proof_tests {
     };
 
     use super::*;
+    use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
     use itertools::{Either, Itertools};
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
     use twenty_first::shared_math::other::random_elements;
-    use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     #[test]
     fn mp_equality_test() {
@@ -636,7 +635,8 @@ mod ms_proof_tests {
 
             let mp = accumulator
                 .kernel
-                .prove(item, sender_randomness, receiver_preimage).await;
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             let json: String = serde_json::to_string(&mp).unwrap();
             let mp_again = serde_json::from_str::<MsMembershipProof>(&json).unwrap();
@@ -889,14 +889,18 @@ mod ms_proof_tests {
             // Revert all adds but the first one, and keep the 1st MP updated
             for i in (1..j).rev() {
                 ams.revert_add(&addition_records[i]).await;
-                mps[0].revert_update_from_batch_addition(&ams.accumulator().await).await;
+                mps[0]
+                    .revert_update_from_batch_addition(&ams.accumulator().await)
+                    .await;
                 assert!(
                     ams.verify(items[0], &mps[0]),
                     "MP should be valid after reversion"
                 );
                 if i != 1 {
                     // We also check the 2nd MP for good measure, as long as its item is still in the MS
-                    mps[1].revert_update_from_batch_addition(&ams.accumulator().await).await;
+                    mps[1]
+                        .revert_update_from_batch_addition(&ams.accumulator().await)
+                        .await;
                     assert!(
                         ams.verify(items[1], &mps[1]),
                         "MP should be valid after reversion"
@@ -935,7 +939,9 @@ mod ms_proof_tests {
                 own_sender_randomness,
                 own_receiver_preimage.hash::<Hash>(),
             );
-            let mut own_mp = msa.prove(own_item, own_sender_randomness, own_receiver_preimage).await;
+            let mut own_mp = msa
+                .prove(own_item, own_sender_randomness, own_receiver_preimage)
+                .await;
             msa.add(&own_addition_record).await;
             let msa_after_own_add = msa.clone();
 
@@ -976,11 +982,15 @@ mod ms_proof_tests {
             }
 
             // revert last batch
-            own_mp.revert_update_from_batch_addition(&msa_after_first_batch).await;
+            own_mp
+                .revert_update_from_batch_addition(&msa_after_first_batch)
+                .await;
             assert!(msa_after_first_batch.verify(own_item, &own_mp).await);
 
             // revert first batch
-            own_mp.revert_update_from_batch_addition(&msa_after_own_add).await;
+            own_mp
+                .revert_update_from_batch_addition(&msa_after_own_add)
+                .await;
             assert!(msa_after_own_add.verify(own_item, &own_mp).await);
         }
     }
@@ -1020,10 +1030,13 @@ mod ms_proof_tests {
                 std::cmp::Ordering::Greater => {
                     assert!(archival_mutator_set
                         .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
-                    assert!(archival_mutator_set
-                        .accumulator()
-                        .await
-                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await);
+                    assert!(
+                        archival_mutator_set
+                            .accumulator()
+                            .await
+                            .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap())
+                            .await
+                    );
                     own_membership_proof
                         .as_mut()
                         .unwrap()
@@ -1049,7 +1062,9 @@ mod ms_proof_tests {
 
                 assert!(archival_mutator_set.kernel.verify(own_item, &memproof,));
 
-                memproof.revert_update_from_batch_addition(&mutator_set_before).await;
+                memproof
+                    .revert_update_from_batch_addition(&mutator_set_before)
+                    .await;
 
                 assert!(mutator_set_before.verify(own_item, &memproof).await);
                 // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
@@ -1063,7 +1078,8 @@ mod ms_proof_tests {
             own_membership_proof
                 .as_mut()
                 .unwrap()
-                .revert_update_from_batch_addition(&archival_mutator_set.accumulator().await).await;
+                .revert_update_from_batch_addition(&archival_mutator_set.accumulator().await)
+                .await;
 
             assert!(archival_mutator_set
                 .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
@@ -1245,7 +1261,8 @@ mod ms_proof_tests {
                             for (_, mp) in tracked_items_and_membership_proofs.iter_mut() {
                                 mp.revert_update_from_batch_addition(
                                     &archival_mutator_set.accumulator().await,
-                                ).await;
+                                )
+                                .await;
                             }
                         }
                         // otherwise, revert individually
@@ -1266,7 +1283,8 @@ mod ms_proof_tests {
                                             {
                                                 mp.revert_update_from_batch_addition(
                                                     &archival_mutator_set.accumulator().await,
-                                                ).await;
+                                                )
+                                                .await;
                                             }
                                         }
                                         Either::Right(removal_record) => {

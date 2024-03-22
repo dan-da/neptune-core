@@ -26,10 +26,9 @@ use super::shared::{
 };
 use twenty_first::util_types::mmr;
 
-use crate::util_types::mmr::MmrAccumulator;
 use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mmr::traits::*;
-
+use crate::util_types::mmr::MmrAccumulator;
 
 #[derive(Debug, Clone, PartialEq, Eq, BFieldCodec, Arbitrary)]
 pub struct AbsoluteIndexSet([u128; NUM_TRIALS as usize]);
@@ -164,8 +163,7 @@ impl RemovalRecord {
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
         let mut mmra: MmrAccumulator<Hash> = mutator_set.swbf_inactive.to_accumulator().await;
-        let new_swbf_auth_path: MmrMembershipProof<Hash> =
-            mmra.append(new_chunk_digest).await;
+        let new_swbf_auth_path: MmrMembershipProof<Hash> = mmra.append(new_chunk_digest).await;
 
         // Collect all indices for all removal records that are being updated
         let mut chunk_index_to_rr_index: HashMap<u64, Vec<usize>> = HashMap::new();
@@ -340,7 +338,9 @@ mod removal_record_tests {
     fn get_item_mp_and_removal_record() -> (Digest, MsMembershipProof, RemovalRecord) {
         let mut accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
-        let mp: MsMembershipProof = accumulator.prove(item, sender_randomness, receiver_preimage).await;
+        let mp: MsMembershipProof = accumulator
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
         let removal_record: RemovalRecord = accumulator.drop(item, &mp);
         (item, mp, removal_record)
     }
@@ -436,7 +436,9 @@ mod removal_record_tests {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record: AdditionRecord =
             commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-        let mp = accumulator.prove(item, sender_randomness, receiver_preimage).await;
+        let mp = accumulator
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
 
         assert!(
             !accumulator.verify(item, &mp).await,
@@ -470,7 +472,9 @@ mod removal_record_tests {
 
                 let addition_record: AdditionRecord =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-                let mp = accumulator.prove(item, sender_randomness, receiver_preimage).await;
+                let mp = accumulator
+                    .prove(item, sender_randomness, receiver_preimage)
+                    .await;
 
                 // Update all removal records from addition, then add the element
                 RemovalRecord::batch_update_from_addition(
@@ -479,7 +483,8 @@ mod removal_record_tests {
                         .map(|x| &mut x.1)
                         .collect::<Vec<_>>(),
                     &mut accumulator.kernel,
-                ).await;
+                )
+                .await;
                 let update_res_mp = MsMembershipProof::batch_update_from_addition(
                     &mut mps.iter_mut().collect::<Vec<_>>(),
                     &items,
@@ -520,7 +525,11 @@ mod removal_record_tests {
             // this function, so we only test one of the removal records here.
             let (chosen_index, random_removal_record) =
                 removal_records.choose(&mut rand::thread_rng()).unwrap();
-            assert!(accumulator.verify(items[*chosen_index], &mps[*chosen_index]).await);
+            assert!(
+                accumulator
+                    .verify(items[*chosen_index], &mps[*chosen_index])
+                    .await
+            );
             assert!(
                 accumulator.kernel.can_remove(random_removal_record),
                 "removal records must return true on `can_remove`",
@@ -530,7 +539,11 @@ mod removal_record_tests {
                 "removal record must have valid MMR MPs"
             );
             accumulator.remove(random_removal_record).await;
-            assert!(!accumulator.verify(items[*chosen_index], &mps[*chosen_index]).await);
+            assert!(
+                !accumulator
+                    .verify(items[*chosen_index], &mps[*chosen_index])
+                    .await
+            );
 
             assert!(
                 !accumulator.kernel.can_remove(random_removal_record),
@@ -554,7 +567,9 @@ mod removal_record_tests {
 
             let addition_record: AdditionRecord =
                 commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let mp = accumulator.prove(item, sender_randomness, receiver_preimage).await;
+            let mp = accumulator
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             // Update all removal records from addition, then add the element
             RemovalRecord::batch_update_from_addition(
@@ -563,7 +578,8 @@ mod removal_record_tests {
                     .map(|x| &mut x.1)
                     .collect::<Vec<_>>(),
                 &mut accumulator.kernel,
-            ).await;
+            )
+            .await;
             let update_res_mp = MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect::<Vec<_>>(),
                 &items,

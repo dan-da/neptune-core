@@ -1,17 +1,13 @@
-use crate::{models::consensus::tasm::program::ConsensusProgram, Hash};
 use crate::models::consensus::SecretWitness;
 use crate::util_types::mmr::MmrAccumulator;
+use crate::{models::consensus::tasm::program::ConsensusProgram, Hash};
 
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
     triton_vm::program::{NonDeterminism, PublicInput},
-    twenty_first::{
-        shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
-    },
+    twenty_first::shared_math::{b_field_element::BFieldElement, bfield_codec::BFieldCodec},
 };
-
-
 
 #[derive(Debug, Clone, BFieldCodec, GetSize, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CorrectMmrUpdateWitness {

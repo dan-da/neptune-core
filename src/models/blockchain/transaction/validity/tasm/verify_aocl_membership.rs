@@ -1,6 +1,4 @@
-use crate::prelude::{
-    triton_vm,
-};
+use crate::prelude::triton_vm;
 
 use crate::{
     models::blockchain::shared::Hash,

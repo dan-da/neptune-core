@@ -139,7 +139,8 @@ impl TransactionValidationLogic {
 
         let mut mutator_set_accumulator = old_mutator_set_accumulator.clone();
         if mutator_set_update
-            .apply_to_accumulator(&mut mutator_set_accumulator).await
+            .apply_to_accumulator(&mut mutator_set_accumulator)
+            .await
             .is_err()
         {
             return ValidityTree::none();

@@ -5,14 +5,14 @@ use crate::prelude::twenty_first;
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::ArchivalMmr;
 use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::ArchivalMmr;
+use crate::util_types::mmr::MmrAccumulator;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
@@ -47,7 +47,8 @@ where
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         self.kernel
-            .prove(item, sender_randomness, receiver_preimage).await
+            .prove(item, sender_randomness, receiver_preimage)
+            .await
     }
 
     async fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
@@ -92,7 +93,8 @@ where
     ) {
         let chunk_index_to_chunk_mutation = self
             .kernel
-            .batch_remove(removal_records, preserved_membership_proofs).await;
+            .batch_remove(removal_records, preserved_membership_proofs)
+            .await;
 
         self.chunks.set_many(chunk_index_to_chunk_mutation).await
     }
@@ -538,14 +540,16 @@ mod archival_mutator_set_tests {
                 ms.verify(
                     items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
-                ).await,
+                )
+                .await,
                 "First colliding MS MP must be valid"
             );
             assert!(
                 ms.verify(
                     items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
-                ).await,
+                )
+                .await,
                 "Second colliding MS MP must be valid"
             );
         }
@@ -595,7 +599,8 @@ mod archival_mutator_set_tests {
                 !ms.verify(
                     items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
-                ).await,
+                )
+                .await,
                 "First colliding MS MP must be invalid after removal"
             );
         }
@@ -631,7 +636,8 @@ mod archival_mutator_set_tests {
                 !ms.verify(
                     items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
-                ).await,
+                )
+                .await,
                 "Second colliding MS MP must be invalid after removal"
             );
         }

@@ -25,8 +25,12 @@ impl MutatorSetUpdate {
 
     /// Apply a mutator-set-update to a mutator-set-accumulator. Changes the mutator
     /// set accumulator according to the provided addition and removal records.
-    pub async fn apply_to_accumulator(&self, ms_accumulator: &mut MutatorSetAccumulator) -> Result<()> {
-        self.apply_to_accumulator_and_records(ms_accumulator, &mut []).await
+    pub async fn apply_to_accumulator(
+        &self,
+        ms_accumulator: &mut MutatorSetAccumulator,
+    ) -> Result<()> {
+        self.apply_to_accumulator_and_records(ms_accumulator, &mut [])
+            .await
     }
 
     /// Apply a mutator-set-update to a mutator-set-accumulator and a bunch of
@@ -45,9 +49,11 @@ impl MutatorSetUpdate {
             RemovalRecord::batch_update_from_addition(
                 &mut applied_removal_records,
                 &mut ms_accumulator.kernel,
-            ).await;
+            )
+            .await;
 
-            RemovalRecord::batch_update_from_addition(removal_records, &mut ms_accumulator.kernel).await;
+            RemovalRecord::batch_update_from_addition(removal_records, &mut ms_accumulator.kernel)
+                .await;
 
             ms_accumulator.add(addition_record).await;
         }

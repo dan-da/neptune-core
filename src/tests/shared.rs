@@ -5,6 +5,8 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::consensus::ValidityTree;
 use crate::prelude::twenty_first;
 
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
 use bytesize::ByteSize;
@@ -33,8 +35,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::traits::*;
 
 use tokio::sync::{broadcast, mpsc};
 use tokio_serde::{formats::SymmetricalBincode, Serializer};
@@ -478,7 +478,8 @@ pub async fn pseudorandom_removal_record_integrity_witness(
 
     for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
         assert!(
-            mp.verify(&aocl.get_peaks().await, cc, aocl.count_leaves().await).0,
+            mp.verify(&aocl.get_peaks().await, cc, aocl.count_leaves().await)
+                .0,
             "Returned MPs must be valid for returned AOCL"
         );
     }

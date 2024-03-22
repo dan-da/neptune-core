@@ -18,6 +18,8 @@ use crate::models::state::wallet::utxo_notification_pool::{ExpectedUtxo, UtxoNot
 use crate::models::state::wallet::WalletSecret;
 use crate::models::state::{GlobalState, GlobalStateLock};
 use crate::prelude::twenty_first;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_trait::*;
 use anyhow::{Context, Result};
@@ -30,8 +32,6 @@ use rand::SeedableRng;
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::traits::*;
 use tokio::select;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -272,7 +272,8 @@ async fn create_block_transaction(
         next_block_height,
         latest_block.kernel.body.mutator_set_accumulator.clone(),
         timestamp,
-    ).await;
+    )
+    .await;
 
     debug!(
         "Creating block transaction with mutator set hash: {}",
@@ -280,7 +281,8 @@ async fn create_block_transaction(
             .kernel
             .body
             .mutator_set_accumulator
-            .hash().await
+            .hash()
+            .await
             .emojihash()
     );
 
@@ -334,7 +336,8 @@ pub async fn mine(
                     &latest_block,
                     global_state_lock.lock_guard().await.deref(),
                     now,
-                ).await;
+                )
+                .await;
                 let (block_header, block_body) =
                     make_block_template(&latest_block, transaction, now).await;
                 let miner_task = mine_block(
@@ -495,7 +498,9 @@ mod mine_loop_tests {
             Block::mk_std_block_type(None),
         );
         assert!(
-            block_template_empty_mempool.is_valid(&genesis_block, now).await,
+            block_template_empty_mempool
+                .is_valid(&genesis_block, now)
+                .await,
             "Block template created by miner with empty mempool must be valid"
         );
 
@@ -534,7 +539,8 @@ mod mine_loop_tests {
                 &genesis_block,
                 &premine_receiver_global_state,
                 now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 1000),
-            ).await;
+            )
+            .await;
         assert_eq!(
             3,
             transaction_non_empty_mempool.kernel.outputs.len(),
@@ -547,17 +553,20 @@ mod mine_loop_tests {
             &genesis_block,
             transaction_non_empty_mempool,
             now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000),
-        ).await;
+        )
+        .await;
         let block_template_non_empty_mempool = Block::new(
             block_header_template,
             block_body,
             Block::mk_std_block_type(None),
         );
         assert!(
-            block_template_non_empty_mempool.is_valid(
-                &genesis_block,
-                now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000)
-            ).await,
+            block_template_non_empty_mempool
+                .is_valid(
+                    &genesis_block,
+                    now + Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000 + 2000)
+                )
+                .await,
             "Block template created by miner with non-empty mempool must be valid"
         );
 

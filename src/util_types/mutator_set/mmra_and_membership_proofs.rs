@@ -1,15 +1,15 @@
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use itertools::Itertools;
 use proptest::{
     arbitrary::Arbitrary,
     strategy::{BoxedStrategy, Just, Strategy},
 };
-use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use tasm_lib::Digest;
 
-use crate::util_types::mmr::MmrAccumulator;
 use crate::models::blockchain::shared::Hash;
+use crate::util_types::mmr::MmrAccumulator;
 
 use super::root_and_paths::RootAndPaths;
 

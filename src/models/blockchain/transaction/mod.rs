@@ -8,9 +8,9 @@ pub mod transaction_kernel;
 pub mod utxo;
 pub mod validity;
 
-use futures::StreamExt;
 use anyhow::{bail, Result};
 use arbitrary::Arbitrary;
+use futures::StreamExt;
 use get_size::GetSize;
 use itertools::Itertools;
 use num_bigint::BigInt;
@@ -100,13 +100,15 @@ impl Transaction {
             RemovalRecord::batch_update_from_addition(
                 &mut block_removal_records,
                 &mut msa_state.kernel,
-            ).await;
+            )
+            .await;
 
             // Batch update transaction's removal records
             RemovalRecord::batch_update_from_addition(
                 &mut transaction_removal_records,
                 &mut msa_state.kernel,
-            ).await;
+            )
+            .await;
 
             // Batch update primitive witness membership proofs
             let membership_proofs = &mut primitive_witness
@@ -157,7 +159,13 @@ impl Transaction {
         }
 
         // Sanity check of block validity
-        let block_msa_hash = block.kernel.body.mutator_set_accumulator.clone().hash().await;
+        let block_msa_hash = block
+            .kernel
+            .body
+            .mutator_set_accumulator
+            .clone()
+            .hash()
+            .await;
         assert_eq!(
             msa_state.hash().await,
             block_msa_hash,
@@ -217,7 +225,8 @@ impl Transaction {
             previous_mutator_set_accumulator,
             &new_kernel,
             &mutator_set_update,
-        ).await;
+        )
+        .await;
 
         Ok(Transaction {
             kernel: new_kernel,
@@ -237,13 +246,15 @@ impl Transaction {
             Self::new_with_updated_mutator_set_records_given_primitive_witness(
                 primitive_witness,
                 block,
-            ).await
+            )
+            .await
         } else {
             Self::new_with_updated_mutator_set_records_given_proof(
                 self,
                 previous_mutator_set_accumulator,
                 block,
-            ).await
+            )
+            .await
         }
     }
 
@@ -413,10 +424,9 @@ impl Transaction {
         &self,
         mutator_set_accumulator: &MutatorSetAccumulator,
     ) -> bool {
-        futures::stream::iter(self.kernel
-            .inputs
-            .iter())
-            .all(|rr| rr.validate(&mutator_set_accumulator.kernel)).await
+        futures::stream::iter(self.kernel.inputs.iter())
+            .all(|rr| rr.validate(&mutator_set_accumulator.kernel))
+            .await
     }
 
     /// Verify the transaction directly from the primitive witness, without proofs or
@@ -458,13 +468,21 @@ impl Transaction {
         {
             let item = Hash::hash(input_utxo);
             // TODO: write these functions in tasm
-            if !primitive_witness.mutator_set_accumulator.verify(item, msmp).await {
+            if !primitive_witness
+                .mutator_set_accumulator
+                .verify(item, msmp)
+                .await
+            {
                 warn!(
                     "Cannot generate removal record for an item with an invalid membership proof."
                 );
                 debug!(
                     "witness mutator set hash: {}",
-                    primitive_witness.mutator_set_accumulator.hash().await.emojihash()
+                    primitive_witness
+                        .mutator_set_accumulator
+                        .hash()
+                        .await
+                        .emojihash()
                 );
                 debug!(
                     "kernel mutator set hash: {}",
@@ -587,7 +605,11 @@ impl Transaction {
             );
             debug!(
                 "Witness mutator set hash: {}",
-                primitive_witness.mutator_set_accumulator.hash().await.emojihash()
+                primitive_witness
+                    .mutator_set_accumulator
+                    .hash()
+                    .await
+                    .emojihash()
             );
             return false;
         }

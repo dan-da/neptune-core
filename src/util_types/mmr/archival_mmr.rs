@@ -11,12 +11,11 @@ use std::pin::Pin;
 
 use itertools::Itertools;
 
-use twenty_first::util_types::mmr::{
-    mmr_membership_proof::MmrMembershipProof,
-    shared_advanced, shared_basic,
-};
 use super::traits::*;
 use super::MmrAccumulator;
+use twenty_first::util_types::mmr::{
+    mmr_membership_proof::MmrMembershipProof, shared_advanced, shared_basic,
+};
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///
@@ -129,14 +128,13 @@ where
         leaf_mutations: &[(Digest, MmrMembershipProof<H>)],
     ) -> bool {
         let accumulator: MmrAccumulator<H> = self.to_accumulator().await;
-        accumulator.verify_batch_update(new_peaks, appended_leafs, leaf_mutations).await
+        accumulator
+            .verify_batch_update(new_peaks, appended_leafs, leaf_mutations)
+            .await
     }
 
     async fn to_accumulator(&self) -> MmrAccumulator<H> {
-        MmrAccumulator::init(
-            self.get_peaks().await,
-            self.count_leaves().await,
-        )
+        MmrAccumulator::init(self.get_peaks().await, self.count_leaves().await)
     }
 }
 
@@ -206,10 +204,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest> + Send + Sync> ArchivalMmr<
     }
 
     /// Return (membership_proof, peaks)
-    pub async fn prove_membership(
-        &self,
-        leaf_index: u64,
-    ) -> (MmrMembershipProof<H>, Vec<Digest>) {
+    pub async fn prove_membership(&self, leaf_index: u64) -> (MmrMembershipProof<H>, Vec<Digest>) {
         // A proof consists of an authentication path
         // and a list of peaks
         assert!(
@@ -302,7 +297,10 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest> + Send + Sync> ArchivalMmr<
     }
 
     /// Append an element to the archival MMR
-    pub fn append_raw(&mut self, new_leaf: Digest) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    pub fn append_raw(
+        &mut self,
+        new_leaf: Digest,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let node_index = self.digests.len().await;
             self.digests.push(new_leaf).await;
@@ -579,9 +577,7 @@ pub(crate) mod mmr_test {
         let mut other_archival_mmr: ArchivalMmr<H, Storage> =
             mock::get_ammr_from_digests::<H>(leaf_hashes.clone()).await;
 
-        let (mp2, _acc_hash_2) = other_archival_mmr
-            .prove_membership(leaf_index as u64)
-            .await;
+        let (mp2, _acc_hash_2) = other_archival_mmr.prove_membership(leaf_index as u64).await;
 
         // Mutate leaf + mutate leaf raw, assert that they're equivalent
 
@@ -808,8 +804,7 @@ pub(crate) mod mmr_test {
         assert_eq!(1, mmr.count_leaves());
         assert_eq!(1, mmr.count_nodes().await);
 
-        let original_peaks_and_heights: Vec<(Digest, u32)> =
-            mmr.get_peaks_with_heights().await;
+        let original_peaks_and_heights: Vec<(Digest, u32)> = mmr.get_peaks_with_heights().await;
         assert_eq!(1, original_peaks_and_heights.len());
         assert_eq!(0, original_peaks_and_heights[0].1);
 
@@ -876,8 +871,7 @@ pub(crate) mod mmr_test {
         assert_eq!(num_leaves, mmr.count_leaves());
         assert_eq!(1 + num_leaves, mmr.count_nodes().await);
 
-        let original_peaks_and_heights: Vec<(Digest, u32)> =
-            mmr.get_peaks_with_heights().await;
+        let original_peaks_and_heights: Vec<(Digest, u32)> = mmr.get_peaks_with_heights().await;
         let expected_peaks = 2;
         assert_eq!(expected_peaks, original_peaks_and_heights.len());
 
@@ -1066,8 +1060,7 @@ pub(crate) mod mmr_test {
                 mock::get_ammr_from_digests::<H>(input_digests.clone()).await;
             assert_eq!(size, mmr.count_leaves());
             assert_eq!(node_count, mmr.count_nodes().await);
-            let original_peaks_and_heights: Vec<(Digest, u32)> =
-                mmr.get_peaks_with_heights().await;
+            let original_peaks_and_heights: Vec<(Digest, u32)> = mmr.get_peaks_with_heights().await;
             let peak_heights_1: Vec<u32> = original_peaks_and_heights.iter().map(|x| x.1).collect();
             let (peak_heights_2, _) = get_peak_heights_and_peak_node_indices(size);
             assert_eq!(peak_heights_1, peak_heights_2);

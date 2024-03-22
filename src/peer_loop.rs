@@ -779,17 +779,19 @@ impl PeerLoopHandler {
                 }
 
                 // if transaction is not confirmable, punish
-                let confirmable = transaction.is_confirmable_relative_to(
-                    &self
-                        .global_state_lock
-                        .lock_guard()
-                        .await
-                        .chain
-                        .light_state()
-                        .kernel
-                        .body
-                        .mutator_set_accumulator,
-                ).await;
+                let confirmable = transaction
+                    .is_confirmable_relative_to(
+                        &self
+                            .global_state_lock
+                            .lock_guard()
+                            .await
+                            .chain
+                            .light_state()
+                            .kernel
+                            .body
+                            .mutator_set_accumulator,
+                    )
+                    .await;
                 if !confirmable {
                     warn!("Received unconfirmable tx");
                     self.punish(PeerSanctionReason::UnconfirmableTransaction)

@@ -3,7 +3,10 @@ use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 use crate::prelude::{triton_vm, twenty_first};
 
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use field_count::FieldCount;
 use get_size::GetSize;
 use itertools::Itertools;
@@ -16,16 +19,11 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::traits::compiled_program::CompiledProgram;
 use tasm_lib::triton_vm::instruction::LabelledInstruction;
 use tasm_lib::triton_vm::program::PublicInput;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use triton_vm::prelude::{BFieldElement, NonDeterminism};
 use twenty_first::{
     shared_math::{bfield_codec::BFieldCodec, tip5::Digest},
-    util_types::{algebraic_hasher::AlgebraicHasher,
-    },
+    util_types::algebraic_hasher::AlgebraicHasher,
 };
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::traits::*;
-
 
 use crate::models::consensus::{
     SecretWitness, ValidationLogic, ValidityAstType, ValidityTree, WhichProgram, WitnessType,
@@ -103,7 +101,6 @@ impl SecretWitness for RemovalRecordsIntegrityWitness {
     }
 }
 
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, FieldCount, BFieldCodec)]
 pub struct RemovalRecordsIntegrity {
     pub witness: RemovalRecordsIntegrityWitness,
@@ -119,7 +116,6 @@ impl ConsensusProgram for RemovalRecordsIntegrity {
         program.labelled_instructions()
     }
 }
-
 
 impl From<transaction::PrimitiveWitness> for RemovalRecordsIntegrity {
     fn from(primitive_witness: transaction::PrimitiveWitness) -> Self {
@@ -322,7 +318,10 @@ impl RemovalRecordsIntegrityWitness {
 
         // sanity check
         for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-            assert!(mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0);
+            assert!(
+                mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                    .0
+            );
         }
 
         (mmra, mps)

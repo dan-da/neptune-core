@@ -9,12 +9,12 @@ use rand::{thread_rng, Rng, RngCore, SeedableRng};
 
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::NeptuneLevelDb;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use twenty_first::shared_math::other::{log_2_ceil, log_2_floor};
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use crate::util_types::mmr::MmrAccumulator;
-use crate::util_types::mmr::traits::*;
 use twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 
 use crate::util_types::mutator_set::active_window::ActiveWindow;
@@ -287,7 +287,10 @@ pub async fn pseudorandom_mmra_with_mps<H: AlgebraicHasher>(
 
     // sanity check
     for (&leaf, mp) in leafs.iter().zip(mps.iter()) {
-        assert!(mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0);
+        assert!(
+            mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                .0
+        );
     }
 
     (mmra, mps)
@@ -413,7 +416,10 @@ mod shared_tests_test {
         let mut rng = thread_rng();
         let leaf: Digest = rng.gen();
         let (mmra, mp) = pseudorandom_mmra_with_mp::<Hash>(rng.gen(), leaf);
-        assert!(mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0);
+        assert!(
+            mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                .0
+        );
     }
 
     #[test]
@@ -462,7 +468,8 @@ mod shared_tests_test {
             let (mmra, mps) = pseudorandom_mmra_with_mps::<Hash>(inner_rng.gen(), &leafs);
             for (leaf, mp) in leafs.into_iter().zip(mps) {
                 assert!(
-                    mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0,
+                    mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                        .0,
                     "failure observed for num_leafs: {num_leafs} and seed: {inner_seed:?}"
                 );
             }

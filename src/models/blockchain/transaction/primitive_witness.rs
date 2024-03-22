@@ -12,18 +12,13 @@ use tasm_lib::{
     Digest,
 };
 
-use crate::models::{
-    blockchain::type_scripts::{
-        neptune_coins::NeptuneCoins},
-};
+use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+use crate::Hash;
 use crate::{
     models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
     util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, mutator_set_accumulator::MutatorSetAccumulator,
     },
-};
-use crate::{
-    Hash,
 };
 
 use super::{

@@ -1,26 +1,25 @@
 use arbitrary::Arbitrary;
 use get_size::GetSize;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{collections::HashMap, fmt::Debug};
-use itertools::Itertools;
 use tasm_lib::structure::tasm_object::TasmObject;
 
 use super::traits::*;
 
-use crate::twenty_first::util_types::mmr::{
-    shared_basic,
-    shared_advanced,
-    mmr_membership_proof::MmrMembershipProof,
-};
 use crate::twenty_first::shared_math::bfield_codec::BFieldCodec;
 use crate::twenty_first::shared_math::digest::Digest;
 use crate::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use crate::twenty_first::util_types::mmr::{
+    mmr_membership_proof::MmrMembershipProof, shared_advanced, shared_basic,
+};
 use crate::twenty_first::util_types::shared::bag_peaks;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary)]
-pub struct MmrAccumulator<H: AlgebraicHasher>
-{
+#[derive(
+    Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary,
+)]
+pub struct MmrAccumulator<H: AlgebraicHasher> {
     leaf_count: u64,
     peaks: Vec<Digest>,
     #[bfield_codec(ignore)]
@@ -88,7 +87,11 @@ impl<H: AlgebraicHasher> Mmr<H> for MmrAccumulator<H> {
     /// Mutate an existing leaf. It is the caller's responsibility that the
     /// membership proof is valid. If the membership proof is wrong, the MMR
     /// will end up in a broken state.
-    async fn mutate_leaf(&mut self, old_membership_proof: &MmrMembershipProof<H>, new_leaf: Digest) {
+    async fn mutate_leaf(
+        &mut self,
+        old_membership_proof: &MmrMembershipProof<H>,
+        new_leaf: Digest,
+    ) {
         self.peaks = shared_basic::calculate_new_peaks_from_leaf_mutation(
             &self.peaks,
             new_leaf,
@@ -678,7 +681,9 @@ mod accumulator_mmr_tests {
             assert!(mmra_mps
                 .iter()
                 .zip(terminal_leafs_for_mps.iter())
-                .all(|(mp, &leaf)| mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0));
+                .all(|(mp, &leaf)| mp
+                    .verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await)
+                    .0));
 
             // Manually construct an MMRA from the new data and verify that peaks and leaf count matches
             assert!(

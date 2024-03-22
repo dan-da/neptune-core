@@ -334,7 +334,8 @@ impl Mempool {
         // Update the remaining transactions so their mutator set data is still valid
         for tx in self.tx_dictionary.values_mut() {
             *tx = tx
-                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block).await
+                .new_with_updated_mutator_set_records(&previous_mutator_set_accumulator, block)
+                .await
                 .expect("Updating mempool transaction must succeed");
         }
 
@@ -706,7 +707,8 @@ mod tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .hash().await
+                .hash()
+                .await
                 .emojihash()
         );
         debug!(
@@ -715,7 +717,8 @@ mod tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .hash().await
+                .hash()
+                .await
                 .emojihash()
         );
 
@@ -731,7 +734,9 @@ mod tests {
             .await;
         now = Duration::from_millis(block_2.kernel.header.timestamp.value());
         assert!(
-            block_3_with_updated_tx.is_valid(&block_2, now + seven_months).await,
+            block_3_with_updated_tx
+                .is_valid(&block_2, now + seven_months)
+                .await,
             "Block with tx with updated mutator set data must be valid"
         );
 
