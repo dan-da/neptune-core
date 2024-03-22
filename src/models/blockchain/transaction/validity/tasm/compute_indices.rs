@@ -16,7 +16,7 @@ use triton_vm::triton_asm;
 use twenty_first::shared_math::b_field_element::BFieldElement;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use crate::util_types::mutator_set::ms_membership_proof::{
     pseudorandom_mutator_set_membership_proof, MsMembershipProof,

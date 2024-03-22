@@ -37,7 +37,7 @@ use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::{AbsoluteIndexSet, RemovalRecord};
 use crate::Hash;
 
@@ -219,7 +219,7 @@ impl WalletState {
             wallet_state
                 .update_wallet_state_with_new_block(
                     &MutatorSetAccumulator::default(),
-                    &Block::genesis_block(),
+                    &Block::genesis_block().await,
                 )
                 .await
                 .expect("Updating wallet state with genesis block must succeed");
@@ -424,7 +424,7 @@ impl WalletState {
             }
 
             // Batch update removal records to keep them valid after next addition
-            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel);
+            RemovalRecord::batch_update_from_addition(&mut removal_records, &mut msa_state.kernel).await;
 
             // If output UTXO belongs to us, add it to the list of monitored UTXOs and
             // add its membership proof to the list of managed membership proofs.
@@ -445,7 +445,7 @@ impl WalletState {
                 );
                 let utxo_digest = Hash::hash(&utxo);
                 let new_own_membership_proof =
-                    msa_state.prove(utxo_digest, sender_randomness, receiver_preimage);
+                    msa_state.prove(utxo_digest, sender_randomness, receiver_preimage).await;
 
                 // Add the data required to restore the UTXOs membership proof from public
                 // data to the secret's file.
@@ -478,7 +478,7 @@ impl WalletState {
             }
 
             // Update mutator set to bring it to the correct state for the next call to batch-update
-            msa_state.add(addition_record);
+            msa_state.add(addition_record).await;
         }
 
         // sanity check
@@ -551,14 +551,14 @@ impl WalletState {
                 }
             }
 
-            msa_state.remove(removal_record);
+            msa_state.remove(removal_record).await;
             block_tx_input_count += 1;
         }
 
         // Sanity check that `msa_state` agrees with the mutator set from the applied block
         assert_eq!(
-            new_block.kernel.body.mutator_set_accumulator.clone().hash(),
-            msa_state.hash(),
+            new_block.kernel.body.mutator_set_accumulator.clone().hash().await,
+            msa_state.hash().await,
             "Mutator set in wallet-handler must agree with that from applied block"
         );
 
@@ -588,7 +588,7 @@ impl WalletState {
             // Sanity check that membership proofs of non-spent transactions are still valid
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || msa_state.verify(utxo_digest, updated_ms_mp)
+                    || msa_state.verify(utxo_digest, updated_ms_mp).await
             );
 
             monitored_utxos.set(*own_utxo_index, monitored_utxo).await;
@@ -807,7 +807,7 @@ mod tests {
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_global_state_lock = get_mock_global_state(network, 0, own_wallet_secret).await;
         let mut own_global_state = own_global_state_lock.lock_guard_mut().await;
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let monitored_utxos_count_init = own_global_state
             .wallet_state
             .wallet_db
@@ -1092,7 +1092,7 @@ mod tests {
     async fn mock_wallet_state_is_synchronized_to_genesis_block() {
         let network = Network::RegTest;
         let wallet = WalletSecret::devnet_wallet();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
 
         let wallet_state = get_mock_wallet_state(wallet, network).await;
 
@@ -1124,7 +1124,7 @@ mod tests {
             assert!(genesis_block
                 .body()
                 .mutator_set_accumulator
-                .verify(Hash::hash(&utxo), &ms_membership_proof));
+                .verify(Hash::hash(&utxo), &ms_membership_proof)).await;
         }
     }
 }

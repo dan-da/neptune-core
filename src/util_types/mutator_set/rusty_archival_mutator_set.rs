@@ -147,14 +147,14 @@ mod tests {
                 rusty_mutator_set
                     .ams()
                     .kernel
-                    .prove(item, sender_randomness, receiver_preimage);
+                    .prove(item, sender_randomness, receiver_preimage).await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut mps.iter_mut().collect_vec(),
                 &items,
                 &rusty_mutator_set.ams().kernel,
                 &addition_record,
-            )
+            ).await
             .expect("Cannot batch update from addition");
 
             mps.push(mp);

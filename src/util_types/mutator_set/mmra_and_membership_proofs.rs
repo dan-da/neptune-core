@@ -5,13 +5,14 @@ use proptest::{
 };
 use tasm_lib::twenty_first::util_types::mmr::shared_basic::leaf_index_to_mt_index_and_peak_index;
 use tasm_lib::{
-    twenty_first::util_types::mmr::{
-        // mmr_accumulator::MmrAccumulator,
-        mmr_membership_proof::MmrMembershipProof,
-    },
+    // twenty_first::util_types::mmr::{
+    //     // mmr_accumulator::MmrAccumulator,
+    //     // mmr_membership_proof::MmrMembershipProof,
+    // },
     Digest,
 };
 use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 
 use crate::models::blockchain::shared::Hash;

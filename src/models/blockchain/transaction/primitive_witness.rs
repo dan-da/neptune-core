@@ -1,14 +1,14 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+// use std::time::{SystemTime, UNIX_EPOCH};
 
 use get_size::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedSub;
-use proptest::{
-    arbitrary::Arbitrary,
-    collection::vec,
-    strategy::{BoxedStrategy, Strategy},
-};
-use proptest_arbitrary_interop::arb;
+// use proptest::{
+//     arbitrary::Arbitrary,
+//     collection::vec,
+//     strategy::{BoxedStrategy, Strategy},
+// };
+// use proptest_arbitrary_interop::arb;
 use rand::{thread_rng, Rng};
 use serde::{Deserialize, Serialize};
 use tasm_lib::{
@@ -21,8 +21,10 @@ use tasm_lib::{
 };
 
 use crate::models::{
-    blockchain::type_scripts::{native_currency::NativeCurrency, neptune_coins::NeptuneCoins},
-    consensus::tasm::program::ConsensusProgram,
+    blockchain::type_scripts::{
+        // native_currency::NativeCurrency,
+        neptune_coins::NeptuneCoins},
+    // consensus::tasm::program::ConsensusProgram,
 };
 use crate::{
     models::{blockchain::type_scripts::TypeScript, state::wallet::address::generation_address},
@@ -31,17 +33,17 @@ use crate::{
     },
 };
 use crate::{
-    util_types::mutator_set::{
-        msa_and_records::MsaAndRecords,
-        mutator_set_trait::{commit, MutatorSet},
-    },
+    // util_types::mutator_set::{
+    //     // msa_and_records::MsaAndRecords,
+    //     // mutator_set_trait::*,
+    // },
     Hash,
 };
 
 use super::{
     transaction_kernel::TransactionKernel,
     utxo::{LockScript, Utxo},
-    PublicAnnouncement,
+    // PublicAnnouncement,
 };
 
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
@@ -183,7 +185,7 @@ impl PrimitiveWitness {
             .collect_vec()
     }
 }
-
+/*
 impl Arbitrary for PrimitiveWitness {
     type Parameters = (usize, usize, usize);
     type Strategy = BoxedStrategy<Self>;
@@ -392,6 +394,7 @@ pub(crate) fn arbitrary_primitive_witness_with(
         )
         .boxed()
 }
+*/
 
 #[cfg(test)]
 mod test {

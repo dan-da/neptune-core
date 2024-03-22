@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use tasm_lib::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use super::chunk_dictionary::ChunkDictionary;
 use super::removal_record::RemovalRecord;

@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::{collections::HashMap, fmt::Debug};
 use itertools::Itertools;
+use tasm_lib::structure::tasm_object::TasmObject;
 
 use super::mmr_trait_async::*;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use crate::twenty_first::util_types::mmr::{
-    mmr_membership_proof::MmrMembershipProof,
     shared_basic,
     shared_advanced,
 };
@@ -17,10 +18,13 @@ use crate::twenty_first::shared_math::digest::Digest;
 use crate::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::twenty_first::util_types::shared::bag_peaks;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, Arbitrary)]
-pub struct MmrAccumulator<H>
-where
-    H: AlgebraicHasher,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary)]
+pub struct Foo<S: BFieldCodec> {
+    i: Vec<S>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary)]
+pub struct MmrAccumulator<H: AlgebraicHasher>
 {
     leaf_count: u64,
     peaks: Vec<Digest>,
@@ -479,8 +483,8 @@ mod accumulator_mmr_tests {
         assert_eq!(3, accumulator_mmr.count_leaves());
     }
 
-    #[test]
-    fn verify_batch_update_single_append_test() {
+    #[tokio::test]
+    async fn verify_batch_update_single_append_test() {
         type H = blake3::Hasher;
 
         let leaf_hashes_start: Vec<Digest> = random_elements(3);
@@ -493,15 +497,15 @@ mod accumulator_mmr_tests {
         let accumulator_mmr_end: MmrAccumulator<H> = MmrAccumulator::new(leaf_hashes_end);
 
         let leaves_were_appended = accumulator_mmr_start.verify_batch_update(
-            &accumulator_mmr_end.get_peaks(),
+            &accumulator_mmr_end.get_peaks().await,
             &[appended_leaf],
             &[],
         );
         assert!(leaves_were_appended);
     }
 
-    #[test]
-    fn verify_batch_update_single_mutate_test() {
+    #[tokio::test]
+    async fn verify_batch_update_single_mutate_test() {
         type H = blake3::Hasher;
 
         let leaf0: Digest = random();
@@ -522,7 +526,7 @@ mod accumulator_mmr_tests {
             let appended_leafs = [];
             let leaf_mutations = [(leaf3, membership_proof.clone())];
             assert!(accumulator_mmr_start.verify_batch_update(
-                &accumulator_mmr_end.get_peaks(),
+                &accumulator_mmr_end.get_peaks().await,
                 &appended_leafs,
                 &leaf_mutations,
             ));
@@ -532,15 +536,15 @@ mod accumulator_mmr_tests {
             let appended_leafs = [];
             let leaf_mutations = [(leaf3, membership_proof.clone()), (leaf3, membership_proof)];
             assert!(!accumulator_mmr_start.verify_batch_update(
-                &accumulator_mmr_end.get_peaks(),
+                &accumulator_mmr_end.get_peaks().await,
                 &appended_leafs,
                 &leaf_mutations,
             ));
         }
     }
 
-    #[test]
-    fn verify_batch_update_two_append_test() {
+    #[tokio::test]
+    async fn verify_batch_update_two_append_test() {
         type H = blake3::Hasher;
 
         let leaf_hashes_start: Vec<Digest> = random_elements(3);
@@ -551,15 +555,15 @@ mod accumulator_mmr_tests {
         let accumulator_mmr_end: MmrAccumulator<H> = MmrAccumulator::new(leaf_hashes_end);
 
         let leaves_were_appended = accumulator_mmr_start.verify_batch_update(
-            &accumulator_mmr_end.get_peaks(),
+            &accumulator_mmr_end.get_peaks().await,
             &appended_leafs,
             &[],
         );
         assert!(leaves_were_appended);
     }
 
-    #[test]
-    fn verify_batch_update_two_mutate_test() {
+    #[tokio::test]
+    async fn verify_batch_update_two_mutate_test() {
         type H = blake3::Hasher;
 
         let leaf14: Digest = random();
@@ -580,7 +584,7 @@ mod accumulator_mmr_tests {
         let membership_proof3 = archive_mmr_start.prove_membership(3).0;
         let accumulator_mmr_end: MmrAccumulator<H> = MmrAccumulator::new(leaf_hashes_end);
         assert!(accumulator_mmr_start.verify_batch_update(
-            &accumulator_mmr_end.get_peaks(),
+            &accumulator_mmr_end.get_peaks().await,
             &[],
             &[
                 (new_leafs[0], membership_proof1),
@@ -589,8 +593,8 @@ mod accumulator_mmr_tests {
         ));
     }
 
-    #[test]
-    fn batch_mutate_leaf_and_update_mps_test() {
+    #[tokio::test]
+    async fn batch_mutate_leaf_and_update_mps_test() {
         type H = blake3::Hasher;
 
         let mut rng = rand::thread_rng();
@@ -667,7 +671,7 @@ mod accumulator_mmr_tests {
             assert_eq!(mutated_mps_mmra, mutated_mps_ammr);
 
             // Verify that both MMRs end up with same peaks
-            assert_eq!(mmra.get_peaks(), ammr.get_peaks());
+            assert_eq!(mmra.get_peaks().await, ammr.get_peaks().await);
 
             // Verify that membership proofs from AMMR and MMRA are equal
             assert_eq!(membership_proof_count, mmra_mps.len());
@@ -678,17 +682,17 @@ mod accumulator_mmr_tests {
             assert!(mmra_mps
                 .iter()
                 .zip(terminal_leafs_for_mps.iter())
-                .all(|(mp, &leaf)| mp.verify(&mmra.get_peaks(), leaf, mmra.count_leaves()).0));
+                .all(|(mp, &leaf)| mp.verify(&mmra.get_peaks().await, leaf, mmra.count_leaves().await).0));
 
             // Manually construct an MMRA from the new data and verify that peaks and leaf count matches
             assert!(
-                mutated_leaf_count == 0 || ammr_copy.get_peaks() != ammr.get_peaks(),
+                mutated_leaf_count == 0 || ammr_copy.get_peaks().await != ammr.get_peaks().await,
                 "If mutated leaf count is non-zero, at least on peaks must be different"
             );
             mutation_data.into_iter().for_each(|(mp, digest)| {
                 ammr_copy.mutate_leaf_raw(mp.leaf_index, digest);
             });
-            assert_eq!(ammr_copy.get_peaks(), ammr.get_peaks(), "Mutation though batch mutation function must transform the MMR like a list of individual leaf mutations");
+            assert_eq!(ammr_copy.get_peaks().await, ammr.get_peaks().await, "Mutation though batch mutation function must transform the MMR like a list of individual leaf mutations");
         }
     }
 

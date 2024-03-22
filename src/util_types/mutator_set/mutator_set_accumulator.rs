@@ -15,7 +15,7 @@ use twenty_first::util_types::{
 use super::{
     active_window::ActiveWindow, addition_record::AdditionRecord,
     ms_membership_proof::MsMembershipProof, mutator_set_kernel::MutatorSetKernel,
-    mutator_set_trait::MutatorSet, removal_record::RemovalRecord,
+    mutator_set_trait::*, removal_record::RemovalRecord,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, GetSize, BFieldCodec)]
@@ -43,36 +43,37 @@ impl Default for MutatorSetAccumulator {
     }
 }
 
-impl MutatorSet for MutatorSetAccumulator {
-    fn prove(
+#[async_trait::async_trait]
+impl MutatorSetAsync for MutatorSetAccumulator {
+    async fn prove(
         &mut self,
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         self.kernel
-            .prove(item, sender_randomness, receiver_preimage)
+            .prove(item, sender_randomness, receiver_preimage).await
     }
 
-    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
-        self.kernel.verify(item, membership_proof)
+    async fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
+        self.kernel.verify(item, membership_proof).await
     }
 
     fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
         self.kernel.drop(item, membership_proof)
     }
 
-    fn add(&mut self, addition_record: &AdditionRecord) {
-        self.kernel.add_helper(addition_record);
+    async fn add(&mut self, addition_record: &AdditionRecord) {
+        self.kernel.add_helper(addition_record).await;
     }
 
-    fn remove(&mut self, removal_record: &RemovalRecord) {
-        self.kernel.remove_helper(removal_record);
+    async fn remove(&mut self, removal_record: &RemovalRecord) {
+        self.kernel.remove_helper(removal_record).await;
     }
 
-    fn hash(&self) -> Digest {
-        let aocl_mmr_bagged = self.kernel.aocl.bag_peaks();
-        let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks();
+    async fn hash(&self) -> Digest {
+        let aocl_mmr_bagged = self.kernel.aocl.bag_peaks().await;
+        let inactive_swbf_bagged = self.kernel.swbf_inactive.bag_peaks().await;
         let active_swbf_bagged = Hash::hash(&self.kernel.swbf_active);
         let default = Digest::default();
 
@@ -82,13 +83,13 @@ impl MutatorSet for MutatorSetAccumulator {
         )
     }
 
-    fn batch_remove(
+    async fn batch_remove(
         &mut self,
         removal_records: Vec<RemovalRecord>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof],
     ) {
         self.kernel
-            .batch_remove(removal_records, preserved_membership_proofs);
+            .batch_remove(removal_records, preserved_membership_proofs).await;
     }
 }
 
@@ -118,7 +119,7 @@ mod ms_accumulator_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage);
+            let membership_proof = accumulator.prove(item, sender_randomness, receiver_preimage).await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
@@ -128,7 +129,7 @@ mod ms_accumulator_tests {
             )
             .expect("MS membership update must work");
 
-            accumulator.add(&addition_record);
+            accumulator.add(&addition_record).await;
 
             membership_proofs.push(membership_proof);
             items.push(item);
@@ -147,14 +148,14 @@ mod ms_accumulator_tests {
         }
 
         for (mp, &item) in membership_proofs.iter().zip_eq(items.iter()) {
-            assert!(accumulator.verify(item, mp));
+            assert!(accumulator.verify(item, mp).await);
         }
 
         // Remove the entries with batch_remove
         accumulator.batch_remove(
             removal_records,
             &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
-        );
+        ).await;
 
         // Verify that the expected membership proofs fail/pass
         for (mp, &item, skipped) in izip!(
@@ -163,7 +164,7 @@ mod ms_accumulator_tests {
             skipped_removes.into_iter()
         ) {
             // If this removal record was not applied, then the membership proof must verify
-            assert_eq!(skipped, accumulator.verify(item, mp));
+            assert_eq!(skipped, accumulator.verify(item, mp).await);
         }
     }
 
@@ -198,7 +199,7 @@ mod ms_accumulator_tests {
             let mut last_ms_commitment: Option<Digest> = None;
             for i in 0..number_of_interactions {
                 // Verify that commitment to both the accumulator and archival data structure agree
-                let new_commitment = accumulator.hash();
+                let new_commitment = accumulator.hash().await;
                 assert_eq!(
                     new_commitment,
                     archival_after_remove.hash().await,
@@ -220,7 +221,7 @@ mod ms_accumulator_tests {
                     let addition_record: AdditionRecord =
                         commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
                     let membership_proof_acc =
-                        accumulator.prove(item, sender_randomness, receiver_preimage);
+                        accumulator.prove(item, sender_randomness, receiver_preimage).await;
 
                     // Update all membership proofs
                     // Uppdate membership proofs in batch
@@ -241,7 +242,7 @@ mod ms_accumulator_tests {
                         assert!(update_res_seq.is_ok());
                     }
 
-                    accumulator.add(&addition_record);
+                    accumulator.add(&addition_record).await;
                     archival_after_remove.add(&addition_record).await;
                     archival_before_remove.add(&addition_record).await;
 
@@ -250,7 +251,7 @@ mod ms_accumulator_tests {
                     for j in 0..items.len() {
                         if updated_mp_indices.contains(&j) {
                             assert!(
-                                !accumulator.verify(items[j], &previous_mps[j]),
+                                !accumulator.verify(items[j], &previous_mps[j]).await,
                                 "Verify must fail for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
                                 previous_mps[j].auth_path_aocl.leaf_index,
@@ -259,7 +260,7 @@ mod ms_accumulator_tests {
                             );
                         } else {
                             assert!(
-                                accumulator.verify(items[j], &previous_mps[j]),
+                                accumulator.verify(items[j], &previous_mps[j]).await,
                                 "Verify must succeed for old proof, j = {}. AOCL data index was: {}.\n\nOld mp:\n {:?}.\n\nNew mp is\n {:?}",
                                 j,
                                 previous_mps[j].auth_path_aocl.leaf_index,
@@ -313,9 +314,9 @@ mod ms_accumulator_tests {
                     }
 
                     // remove item from set
-                    assert!(accumulator.verify(removal_item, &removal_mp));
+                    assert!(accumulator.verify(removal_item, &removal_mp).await);
                     let removal_record_copy = removal_record.clone();
-                    accumulator.remove(&removal_record);
+                    accumulator.remove(&removal_record).await;
                     archival_after_remove.remove(&removal_record).await;
 
                     // Verify that removal record's indices are all set
@@ -328,7 +329,7 @@ mod ms_accumulator_tests {
                     }
 
                     archival_before_remove.remove(&removal_record_copy).await;
-                    assert!(!accumulator.verify(removal_item, &removal_mp));
+                    assert!(!accumulator.verify(removal_item, &removal_mp).await);
 
                     // Verify that the sequential `update_from_remove` return value is correct
                     // The return value from `update_from_remove` shows if the membership proof
@@ -341,7 +342,7 @@ mod ms_accumulator_tests {
                     ) {
                         if updated {
                             assert!(
-                                !accumulator.verify(item, original_mp),
+                                !accumulator.verify(item, original_mp).await,
                                 "j = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
                                 j,
                                 original_mp,
@@ -349,7 +350,7 @@ mod ms_accumulator_tests {
                             );
                         } else {
                             assert!(
-                                accumulator.verify(item, original_mp),
+                                accumulator.verify(item, original_mp).await,
                                 "j = {}, \n\nOriginal mp:\n{:#?}\n\nNew mp:\n{:#?}",
                                 j,
                                 original_mp,
@@ -367,7 +368,7 @@ mod ms_accumulator_tests {
                         .enumerate()
                     {
                         let item_was_updated = updated_indices.contains(&j);
-                        let item_verifies = accumulator.verify(item, original_mp);
+                        let item_verifies = accumulator.verify(item, original_mp).await;
                         let item_verifies_iff_not_updated = item_verifies != item_was_updated;
                         assert!(item_verifies_iff_not_updated);
                     }
@@ -383,7 +384,7 @@ mod ms_accumulator_tests {
                     items.iter(),
                     rands.iter()
                 ) {
-                    assert!(accumulator.verify(item, mp_batch));
+                    assert!(accumulator.verify(item, mp_batch).await);
 
                     // Verify that the membership proof can be restored from an archival instance
                     let arch_mp = archival_after_remove
@@ -450,7 +451,7 @@ mod ms_accumulator_tests {
                 for (_it, mp) in items_and_membership_proofs.iter_mut() {
                     mp.update_from_remove(&removal_record).unwrap();
                 }
-                msa.remove(&removal_record);
+                msa.remove(&removal_record).await;
             } else {
                 // addition
                 let item = rng.gen::<Digest>();
@@ -461,8 +462,8 @@ mod ms_accumulator_tests {
                     mp.update_from_addition(*it, &msa, &addition_record)
                         .unwrap();
                 }
-                let membership_proof = msa.prove(item, sender_randomness, receiver_preimage);
-                msa.add(&addition_record);
+                let membership_proof = msa.prove(item, sender_randomness, receiver_preimage).await;
+                msa.add(&addition_record).await;
                 items_and_membership_proofs.push((item, membership_proof));
             }
         }

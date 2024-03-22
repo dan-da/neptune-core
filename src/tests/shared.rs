@@ -89,7 +89,7 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::mutator_set_kernel::get_swbf_indices;
 use crate::util_types::mutator_set::mutator_set_trait::commit;
-use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+use crate::util_types::mutator_set::mutator_set_trait::*;
 use crate::util_types::mutator_set::removal_record::AbsoluteIndexSet;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::test_shared::mutator_set::pseudorandom_mmra;
@@ -147,7 +147,7 @@ pub async fn get_dummy_latest_block(
     input_block: Option<Block>,
 ) -> (Block, LatestBlockInfo, Arc<std::sync::Mutex<BlockHeader>>) {
     let block = match input_block {
-        None => Block::genesis_block(),
+        None => Block::genesis_block().await,
         Some(block) => block,
     };
 
@@ -445,7 +445,7 @@ pub fn pseudorandom_utxo(seed: [u8; 32]) -> Utxo {
     }
 }
 
-pub fn pseudorandom_removal_record_integrity_witness(
+pub async fn pseudorandom_removal_record_integrity_witness(
     seed: [u8; 32],
 ) -> RemovalRecordsIntegrityWitness {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -480,7 +480,7 @@ pub fn pseudorandom_removal_record_integrity_witness(
 
     for (mp, &cc) in mmr_mps.iter().zip_eq(canonical_commitments.iter()) {
         assert!(
-            mp.verify(&aocl.get_peaks(), cc, aocl.count_leaves()).0,
+            mp.verify(&aocl.get_peaks().await, cc, aocl.count_leaves().await).0,
             "Returned MPs must be valid for returned AOCL"
         );
     }
@@ -787,7 +787,7 @@ pub async fn make_mock_transaction_with_generation_key(
         fee,
         timestamp: BFieldElement::new(timestamp),
         coinbase: None,
-        mutator_set_hash: tip_msa.hash(),
+        mutator_set_hash: tip_msa.hash().await,
     };
 
     let input_utxos = input_utxos_mps_keys
@@ -902,7 +902,7 @@ pub fn make_mock_transaction_with_wallet(
 /// of a coinbase output.
 ///
 /// Returns (block, coinbase UTXO, Coinbase output randomness)
-pub fn make_mock_block(
+pub async fn make_mock_block(
     previous_block: &Block,
     // target_difficulty: Option<U32s<TARGET_DIFFICULTY_U32_SIZE>>,
     block_timestamp: Option<u64>,
@@ -927,7 +927,7 @@ pub fn make_mock_block(
 
     let coinbase_addition_record: AdditionRecord =
         commit(coinbase_digest, coinbase_output_randomness, receiver_digest);
-    next_mutator_set.add(&coinbase_addition_record);
+    next_mutator_set.add(&coinbase_addition_record).await;
 
     let block_timestamp = match block_timestamp {
         Some(ts) => ts,
@@ -941,7 +941,7 @@ pub fn make_mock_block(
         fee: NeptuneCoins::zero(),
         timestamp: BFieldElement::new(block_timestamp),
         coinbase: Some(coinbase_amount),
-        mutator_set_hash: previous_mutator_set.hash(),
+        mutator_set_hash: previous_mutator_set.hash().await,
     };
 
     let primitive_witness = PrimitiveWitness {

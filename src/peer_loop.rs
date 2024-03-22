@@ -133,7 +133,7 @@ impl PeerLoopHandler {
                 )))
                 .await?;
                 bail!("Failed to validate block due to insufficient PoW");
-            } else if !new_block.is_valid(previous_block, now) {
+            } else if !new_block.is_valid(previous_block, now).await {
                 warn!(
                     "Received invalid block of height {} from peer with IP {}",
                     new_block.kernel.header.height, self.peer_address
@@ -789,7 +789,7 @@ impl PeerLoopHandler {
                         .kernel
                         .body
                         .mutator_set_accumulator,
-                );
+                ).await;
                 if !confirmable {
                     warn!("Received unconfirmable tx");
                     self.punish(PeerSanctionReason::UnconfirmableTransaction)

@@ -10,6 +10,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
 // use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use crate::util_types::mutator_set::mmr_trait_async::*;
 
 use super::active_window::ActiveWindow;
@@ -39,18 +40,18 @@ where
     MmrStorage: StorageVec<Digest> + Send + Sync,
     ChunkStorage: StorageVec<Chunk> + StorageVecStream<Chunk> + Send + Sync,
 {
-    fn prove(
+    async fn prove(
         &mut self,
         item: Digest,
         sender_randomness: Digest,
         receiver_preimage: Digest,
     ) -> MsMembershipProof {
         self.kernel
-            .prove(item, sender_randomness, receiver_preimage)
+            .prove(item, sender_randomness, receiver_preimage).await
     }
 
-    fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
-        self.kernel.verify(item, membership_proof)
+    async fn verify(&self, item: Digest, membership_proof: &MsMembershipProof) -> bool {
+        self.kernel.verify(item, membership_proof).await
     }
 
     fn drop(&self, item: Digest, membership_proof: &MsMembershipProof) -> RemovalRecord {
@@ -58,7 +59,7 @@ where
     }
 
     async fn add(&mut self, addition_record: &AdditionRecord) {
-        let new_chunk: Option<(u64, Chunk)> = self.kernel.add_helper(addition_record);
+        let new_chunk: Option<(u64, Chunk)> = self.kernel.add_helper(addition_record).await;
         match new_chunk {
             None => (),
             Some((chunk_index, chunk)) => {
@@ -74,12 +75,12 @@ where
     }
 
     async fn remove(&mut self, removal_record: &RemovalRecord) {
-        let new_chunks: HashMap<u64, Chunk> = self.kernel.remove_helper(removal_record);
+        let new_chunks: HashMap<u64, Chunk> = self.kernel.remove_helper(removal_record).await;
         self.chunks.set_many(new_chunks).await;
     }
 
     async fn hash(&self) -> Digest {
-        self.accumulator().await.hash()
+        self.accumulator().await.hash().await
     }
 
     /// Apply a list of removal records while keeping a list of mutator-set membership proofs
@@ -91,7 +92,7 @@ where
     ) {
         let chunk_index_to_chunk_mutation = self
             .kernel
-            .batch_remove(removal_records, preserved_membership_proofs);
+            .batch_remove(removal_records, preserved_membership_proofs).await;
 
         self.chunks.set_many(chunk_index_to_chunk_mutation).await
     }
@@ -127,7 +128,7 @@ where
     pub async fn get_aocl_authentication_path(
         &self,
         index: u64,
-    ) -> Result<mmr::mmr_membership_proof::MmrMembershipProof<Hash>, Box<dyn Error>> {
+    ) -> Result<MmrMembershipProof<Hash>, Box<dyn Error>> {
         if self.kernel.aocl.count_leaves().await <= index {
             return Err(Box::new(
                 MutatorSetKernelError::RequestedAoclAuthPathOutOfBounds((
@@ -154,7 +155,7 @@ where
             ));
         }
 
-        let chunk_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> = self
+        let chunk_auth_path: MmrMembershipProof<Hash> = self
             .kernel
             .swbf_inactive
             .prove_membership(chunk_index)
@@ -190,7 +191,7 @@ where
         let auth_path_aocl = self.get_aocl_authentication_path(aocl_index).await?;
         let swbf_indices = get_swbf_indices(item, sender_randomness, receiver_preimage, aocl_index);
 
-        let batch_index = self.kernel.get_batch_index();
+        let batch_index = self.kernel.get_batch_index().await;
         let window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         let chunk_indices: BTreeSet<u64> = swbf_indices
@@ -232,7 +233,7 @@ where
     /// in a relevant chunk.
     pub async fn revert_remove(&mut self, removal_record: &RemovalRecord) {
         let removal_record_indices: Vec<u128> = removal_record.absolute_indices.to_vec();
-        let batch_index = self.kernel.get_batch_index();
+        let batch_index = self.kernel.get_batch_index().await;
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
         let mut chunkidx_to_difference_dict: HashMap<u64, Chunk> = HashMap::new();
 
@@ -312,7 +313,7 @@ where
     /// Determine whether the index `index` is set in the Bloom
     /// filter, whether in the active window, or in some chunk.
     pub async fn bloom_filter_contains(&mut self, index: u128) -> bool {
-        let batch_index = self.kernel.get_batch_index();
+        let batch_index = self.kernel.get_batch_index().await;
         let active_window_start = batch_index as u128 * CHUNK_SIZE as u128;
 
         if index >= active_window_start {
@@ -510,7 +511,7 @@ mod archival_mutator_set_tests {
             mps.push(membership_proof.clone());
 
             archival_mutator_set.add(&addition_record).await;
-            msa.add(&addition_record);
+            msa.add(&addition_record).await;
 
             let indices = membership_proof.compute_indices(item).to_vec();
 
@@ -537,14 +538,14 @@ mod archival_mutator_set_tests {
                 ms.verify(
                     items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
-                ),
+                ).await,
                 "First colliding MS MP must be valid"
             );
             assert!(
                 ms.verify(
                     items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
-                ),
+                ).await,
                 "Second colliding MS MP must be valid"
             );
         }
@@ -577,7 +578,7 @@ mod archival_mutator_set_tests {
         let rem0 =
             archival_mutator_set.drop(items[saw_collission_at.0 .0], &mps[saw_collission_at.0 .0]);
         archival_mutator_set.remove(&rem0).await;
-        msa.remove(&rem0);
+        msa.remove(&rem0).await;
         assert!(
             archival_mutator_set
                 .bloom_filter_contains(saw_collission_at.1)
@@ -594,7 +595,7 @@ mod archival_mutator_set_tests {
                 !ms.verify(
                     items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
-                ),
+                ).await,
                 "First colliding MS MP must be invalid after removal"
             );
         }
@@ -613,7 +614,7 @@ mod archival_mutator_set_tests {
         let rem1 =
             archival_mutator_set.drop(items[saw_collission_at.0 .1], &mps[saw_collission_at.0 .1]);
         archival_mutator_set.remove(&rem1).await;
-        msa.remove(&rem1);
+        msa.remove(&rem1).await;
         assert!(
             archival_mutator_set
                 .bloom_filter_contains(saw_collission_at.1)
@@ -630,7 +631,7 @@ mod archival_mutator_set_tests {
                 !ms.verify(
                     items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
-                ),
+                ).await,
                 "Second colliding MS MP must be invalid after removal"
             );
         }
@@ -647,7 +648,7 @@ mod archival_mutator_set_tests {
 
         // Verify that AMS and MSA agree now that we know we have an index in the Bloom filter
         // that was set twice
-        assert_eq!(archival_mutator_set.hash().await, msa.hash(), "Archival MS and MS accumulator must agree also with collissions in the Bloom filter indices");
+        assert_eq!(archival_mutator_set.hash().await, msa.hash().await, "Archival MS and MS accumulator must agree also with collissions in the Bloom filter indices");
 
         // Reverse 1st removal
         archival_mutator_set.revert_remove(&rem0).await;

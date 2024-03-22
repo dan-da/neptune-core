@@ -1,11 +1,12 @@
 use crate::twenty_first::shared_math::digest::Digest;
 use crate::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
-use crate::twenty_first::util_types::mmr::{
-    // mmr_accumulator::MmrAccumulator,
-    mmr_membership_proof::MmrMembershipProof,
-};
+// use crate::twenty_first::util_types::mmr::{
+//     // mmr_accumulator::MmrAccumulator,
+//     // mmr_membership_proof::MmrMembershipProof,
+// };
 use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 #[allow(async_fn_in_trait)]
 pub trait Mmr<H: AlgebraicHasher> {

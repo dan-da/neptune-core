@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use crate::models::blockchain::transaction;
-use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
-use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
+// use crate::models::blockchain::transaction::primitive_witness::arbitrary_primitive_witness_with;
+// use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::primitive_witness::SaltedUtxos;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
 use crate::models::blockchain::transaction::utxo::Coin;
-use crate::models::blockchain::transaction::PublicAnnouncement;
+// use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::consensus::mast_hash::MastHash;
 use crate::models::consensus::SecretWitness;
 use crate::models::consensus::ValidationLogic;
@@ -18,12 +18,12 @@ use crate::models::consensus::WitnessType;
 use crate::Hash;
 use get_size::GetSize;
 use itertools::Itertools;
-use num_traits::Zero;
-use proptest::arbitrary::Arbitrary;
-use proptest::collection::vec;
-use proptest::strategy::BoxedStrategy;
-use proptest::strategy::Strategy;
-use proptest_arbitrary_interop::arb;
+// use num_traits::Zero;
+// use proptest::arbitrary::Arbitrary;
+// use proptest::collection::vec;
+// use proptest::strategy::BoxedStrategy;
+// use proptest::strategy::Strategy;
+// use proptest_arbitrary_interop::arb;
 use serde::{Deserialize, Serialize};
 use tasm_lib::memory::encode_to_memory;
 use tasm_lib::memory::FIRST_NON_DETERMINISTICALLY_INITIALIZED_MEMORY_ADDRESS;
@@ -40,7 +40,7 @@ use tasm_lib::{
 use crate::models::consensus::tasm::builtins as tasm;
 use crate::models::consensus::tasm::program::ConsensusProgram;
 
-use super::neptune_coins::NeptuneCoins;
+// use super::neptune_coins::NeptuneCoins;
 use super::TypeScriptWitness;
 
 #[derive(Debug, Clone, Deserialize, Serialize, BFieldCodec, GetSize, PartialEq, Eq)]
@@ -489,7 +489,7 @@ impl From<transaction::primitive_witness::PrimitiveWitness> for TimeLockWitness 
         }
     }
 }
-
+/*
 impl Arbitrary for TimeLockWitness {
     /// Parameters are:
     ///  - release_dates : Vec<u64> One release date per input UTXO. 0 if the time lock
@@ -572,6 +572,7 @@ impl Arbitrary for TimeLockWitness {
             .boxed()
     }
 }
+*/
 
 #[cfg(test)]
 mod test {

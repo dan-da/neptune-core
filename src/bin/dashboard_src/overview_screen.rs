@@ -105,7 +105,7 @@ impl OverviewData {
             is_mining: Some(false),
             syncing: false,
             block_header: Some(
-                neptune_core::models::blockchain::block::Block::genesis_block()
+                neptune_core::models::blockchain::block::Block::genesis_block().await
                     .kernel
                     .header,
             ),

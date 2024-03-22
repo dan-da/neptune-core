@@ -13,11 +13,12 @@ use itertools::Itertools;
 
 use twenty_first::util_types::mmr::{
     // mmr_accumulator::MmrAccumulator,
-    mmr_membership_proof::MmrMembershipProof,
+    // mmr_membership_proof::MmrMembershipProof,
     shared_advanced, shared_basic,
 };
 use super::mmr_trait_async::*;
 use super::mmr_accumulator::MmrAccumulator;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
@@ -304,7 +305,7 @@ impl<H: AlgebraicHasher, Storage: StorageVec<Digest> + Send + Sync> ArchivalMmr<
     }
 
     /// Append an element to the archival MMR
-    pub fn append_raw(&mut self, new_leaf: Digest) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+    pub fn append_raw(&mut self, new_leaf: Digest) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             let node_index = self.digests.len().await;
             self.digests.push(new_leaf).await;

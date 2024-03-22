@@ -375,6 +375,7 @@ impl CompiledProgram for RemovalRecordsIntegrity {
     }
 }
 
+
 #[cfg(test)]
 
 mod tests {

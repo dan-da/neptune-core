@@ -370,7 +370,7 @@ mod wallet_tests {
         add_block, get_mock_global_state, get_mock_wallet_state, make_mock_block,
         make_mock_transaction_with_generation_key,
     };
-    use crate::util_types::mutator_set::mutator_set_trait::MutatorSet;
+    use crate::util_types::mutator_set::mutator_set_trait::*;
 
     async fn get_monitored_utxos(wallet_state: &WalletState) -> Vec<MonitoredUtxo> {
         // note: we could just return a DbtVec here and avoid cloning...
@@ -408,7 +408,7 @@ mod wallet_tests {
         );
 
         // Add 12 blocks and verify that membership proofs are still valid
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let mut next_block = genesis_block.clone();
         let other_wallet_secret = WalletSecret::new_random();
         let other_receiver_address = other_wallet_secret
@@ -466,7 +466,7 @@ mod wallet_tests {
             "Monitored UTXO list must be empty at init"
         );
 
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let own_spending_key = own_wallet_secret.nth_generation_spending_key(0);
         let own_recipient_address = own_spending_key.to_address();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
@@ -592,7 +592,7 @@ mod wallet_tests {
         let own_spending_key = own_wallet_state
             .wallet_secret
             .nth_generation_spending_key(0);
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
             None,
@@ -813,7 +813,7 @@ mod wallet_tests {
             .wallet_secret
             .nth_generation_spending_key(0);
         let own_address = own_spending_key.to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let premine_wallet = get_mock_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
@@ -881,7 +881,7 @@ mod wallet_tests {
             .await;
 
         // Verify the validity of the merged transaction and block
-        assert!(block_1.is_valid(&genesis_block, now + seven_months));
+        assert!(block_1.is_valid(&genesis_block, now + seven_months).await);
 
         // Update wallet state with block_1
         let mut monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
@@ -1124,7 +1124,7 @@ mod wallet_tests {
             make_mock_block(&block_2_b, None, own_address, rng.gen());
         now = Duration::from_millis(block_3_b.kernel.header.timestamp.value());
         assert!(
-            block_3_b.is_valid(&block_2_b, now),
+            block_3_b.is_valid(&block_2_b, now).await,
             "Block must be valid before merging txs"
         );
 
@@ -1148,7 +1148,7 @@ mod wallet_tests {
             )
             .await;
         assert!(
-            block_3_b.is_valid(&block_2_b, now),
+            block_3_b.is_valid(&block_2_b, now).await,
             "Block must be valid after accumulating txs"
         );
         own_wallet_state

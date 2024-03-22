@@ -190,7 +190,7 @@ impl ArchivalState {
         block_index_db: NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
         mut archival_mutator_set: RustyArchivalMutatorSet,
     ) -> Self {
-        let genesis_block = Box::new(Block::genesis_block());
+        let genesis_block = Box::new(Block::genesis_block().await);
 
         // If archival mutator set is empty, populate it with the addition records from genesis block
         // This assumes genesis block doesn't spend anything -- which it can't so that should be OK.
@@ -762,7 +762,7 @@ impl ArchivalState {
                 RemovalRecord::batch_update_from_addition(
                     &mut removal_records,
                     &mut self.archival_mutator_set.ams_mut().kernel,
-                );
+                ).await;
 
                 // Add the element to the mutator set
                 self.archival_mutator_set
@@ -790,7 +790,7 @@ impl ArchivalState {
             new_block
                 .kernel.body
                 .mutator_set_accumulator
-                .hash(),
+                .hash().await,
             self.archival_mutator_set.ams().hash().await,
             "Calculated archival mutator set commitment must match that from newly added block. Block Digest: {:?}", new_block.hash()
         );
@@ -854,7 +854,7 @@ mod archival_state_tests {
 
         let mut archival_state0 = make_test_archival_state(network).await;
 
-        let b = Block::genesis_block();
+        let b = Block::genesis_block().await;
         let some_wallet_secret = WalletSecret::new_random();
         let some_spending_key = some_wallet_secret.nth_generation_spending_key(0);
         let some_receiving_address = some_spending_key.to_address();
@@ -1174,7 +1174,7 @@ mod archival_state_tests {
             )
             .await;
 
-        assert!(block_1a.is_valid(&genesis_block, now + seven_months));
+        assert!(block_1a.is_valid(&genesis_block, now + seven_months).await);
 
         {
             archival_state
@@ -1304,7 +1304,7 @@ mod archival_state_tests {
                 .await;
 
             assert!(
-                next_block.is_valid(&previous_block, now + seven_months),
+                next_block.is_valid(&previous_block, now + seven_months).await,
                 "next block ({i}) not valid for devnet"
             );
 
@@ -1423,7 +1423,7 @@ mod archival_state_tests {
             get_mock_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
         let own_receiving_address = genesis_wallet.nth_generation_spending_key(0).to_address();
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let now = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         let (mut block_1_a, _, _) =
@@ -1432,7 +1432,7 @@ mod archival_state_tests {
 
         // Verify that block_1 that only contains the coinbase output is valid
         assert!(block_1_a.has_proof_of_work(&genesis_block));
-        assert!(block_1_a.is_valid(&genesis_block, now));
+        assert!(block_1_a.is_valid(&genesis_block, now).await);
 
         // Add a valid input to the block transaction
         let one_money: NeptuneCoins = NeptuneCoins::new(1);
@@ -1460,7 +1460,7 @@ mod archival_state_tests {
             .await;
 
         // Block with signed transaction must validate
-        assert!(block_1_a.is_valid(&genesis_block, now + seven_months));
+        assert!(block_1_a.is_valid(&genesis_block, now + seven_months).await);
 
         Ok(())
     }
@@ -1487,7 +1487,7 @@ mod archival_state_tests {
         let bob_spending_key = wallet_secret_bob.nth_generation_spending_key(0);
         let bob_state_lock = get_mock_global_state(network, 3, wallet_secret_bob).await;
 
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let launch = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
 
@@ -1563,7 +1563,7 @@ mod archival_state_tests {
                     &genesis_block.kernel.body.mutator_set_accumulator,
                 )
                 .await;
-            assert!(block_1.is_valid(&genesis_block, launch + seven_months));
+            assert!(block_1.is_valid(&genesis_block, launch + seven_months).await);
         }
 
         println!("Accumulated transaction into block_1.");
@@ -1778,7 +1778,7 @@ mod archival_state_tests {
         assert_eq!(4, block_2.kernel.body.transaction.kernel.inputs.len());
         assert_eq!(6, block_2.kernel.body.transaction.kernel.outputs.len());
         let now = Duration::from_millis(block_1.kernel.header.timestamp.value());
-        assert!(block_2.is_valid(&block_1, now));
+        assert!(block_2.is_valid(&block_1, now).await);
 
         // Update chain states
         for state_lock in [&genesis_state_lock, &alice_state_lock, &bob_state_lock] {

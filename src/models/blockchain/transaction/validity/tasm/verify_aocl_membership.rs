@@ -1,4 +1,7 @@
-use crate::prelude::{triton_vm, twenty_first};
+use crate::prelude::{
+    triton_vm,
+    // twenty_first
+};
 
 use crate::{
     models::blockchain::shared::Hash,
@@ -11,7 +14,7 @@ use tasm_lib::traits::basic_snippet::BasicSnippet;
 
 use triton_vm::triton_asm;
 
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 /// Given a membership proof and a canonical commitment, verify membership in the AOCL.
 /// Note that the AOCL MMR accumulator is given deep in the stack, accounting for a 3-wide

@@ -16,10 +16,10 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::other::log_2_floor;
 use twenty_first::shared_math::tip5::Digest;
-use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use twenty_first::util_types::mmr;
+// use twenty_first::util_types::mmr;
 // use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 // use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
@@ -198,7 +198,7 @@ impl MsMembershipProof {
         // So relegating that bookkeeping to this function instead would not be more
         // efficient.
         let mut mmr_membership_proofs_for_append: Vec<
-            &mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>,
+            &mut MmrMembershipProof<Hash>,
         > = vec![];
 
         // The `mmr_membership_proof_index_to_membership_proof_index` variable is to remember
@@ -216,7 +216,7 @@ impl MsMembershipProof {
         }
 
         let indices_for_mutated_values =
-            mmr::mmr_membership_proof::MmrMembershipProof::<Hash>::batch_update_from_append(
+            MmrMembershipProof::<Hash>::batch_update_from_append(
                 &mut mmr_membership_proofs_for_append,
                 mutator_set.swbf_inactive.count_leaves().await,
                 new_chunk_digest,
@@ -290,7 +290,7 @@ impl MsMembershipProof {
         // size of gigabytes, whereas the MMR accumulator should be in the size of
         // kilobytes.
         let mut mmra: MmrAccumulator<Hash> = mutator_set.kernel.swbf_inactive.to_accumulator().await;
-        let new_auth_path: mmr::mmr_membership_proof::MmrMembershipProof<Hash> =
+        let new_auth_path: MmrMembershipProof<Hash> =
             mmra.append(new_chunk_digest).await;
 
         let mut swbf_chunk_dictionary_updated = false;
@@ -408,7 +408,7 @@ impl MsMembershipProof {
         // mutated.
         // The chunk values contained in the MS membership proof's chunk dictionary has already
         // been updated by the `get_batch_mutation_argument_for_removal_record` function.
-        let mut own_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = vec![];
+        let mut own_mmr_mps: Vec<&mut MmrMembershipProof<Hash>> = vec![];
         let mut mmr_mp_index_to_input_index: Vec<usize> = vec![];
         for (i, chunk_dict) in chunk_dictionaries.iter_mut().enumerate() {
             for (_, (mp, _)) in chunk_dict.dictionary.iter_mut() {
@@ -419,7 +419,7 @@ impl MsMembershipProof {
 
         // Perform the batch mutation of the MMR membership proofs
         let mutated_mmr_mps =
-            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut own_mmr_mps,
                 mutation_argument,
             );
@@ -458,7 +458,7 @@ impl MsMembershipProof {
         // It would be sufficient to only update the membership proofs that live in the Merkle
         // trees that have been updated, but it probably will not give a measureable speedup
         // since this change would not reduce the amount of hashing needed
-        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = self
+        let mut chunk_mmr_mps: Vec<&mut MmrMembershipProof<Hash>> = self
             .target_chunks
             .dictionary
             .iter_mut()
@@ -466,7 +466,7 @@ impl MsMembershipProof {
             .collect();
 
         let mutated_mmr_mp_indices: Vec<usize> =
-            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut chunk_mmr_mps,
                 mutation_argument,
             );
@@ -497,7 +497,7 @@ impl MsMembershipProof {
         // Note that *all* MMR membership proofs must be updated. It's not sufficient to update
         // those whose leaf has changed, since an authentication path changes if *any* leaf
         // in the same Merkle tree (under the same MMR peak) changes.
-        let mut chunk_mmr_mps: Vec<&mut mmr::mmr_membership_proof::MmrMembershipProof<Hash>> = self
+        let mut chunk_mmr_mps: Vec<&mut MmrMembershipProof<Hash>> = self
             .target_chunks
             .dictionary
             .iter_mut()
@@ -505,7 +505,7 @@ impl MsMembershipProof {
             .collect();
 
         let mutated_mmr_mp_indices: Vec<usize> =
-            mmr::mmr_membership_proof::MmrMembershipProof::batch_update_from_batch_leaf_mutation(
+            MmrMembershipProof::batch_update_from_batch_leaf_mutation(
                 &mut chunk_mmr_mps,
                 batch_membership,
             );
@@ -560,7 +560,7 @@ mod ms_proof_tests {
     use rand::rngs::StdRng;
     use rand::{random, thread_rng, Rng, RngCore, SeedableRng};
     use twenty_first::shared_math::other::random_elements;
-    use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+    use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 
     #[test]
     fn mp_equality_test() {
@@ -629,8 +629,8 @@ mod ms_proof_tests {
         assert_ne!(mp_mutated, base_mp);
     }
 
-    #[test]
-    fn serialization_test() {
+    #[tokio::test]
+    async fn serialization_test() {
         // This test belongs here since the serialization for `Option<[T; $len]>` is implemented
         // in this code base as a macro. So this is basically a test of that macro.
         let accumulator: MutatorSetAccumulator = MutatorSetAccumulator::default();
@@ -639,7 +639,7 @@ mod ms_proof_tests {
 
             let mp = accumulator
                 .kernel
-                .prove(item, sender_randomness, receiver_preimage);
+                .prove(item, sender_randomness, receiver_preimage).await;
 
             let json: String = serde_json::to_string(&mp).unwrap();
             let mp_again = serde_json::from_str::<MsMembershipProof>(&json).unwrap();
@@ -926,7 +926,7 @@ mod ms_proof_tests {
                 let receiver_preimage: Digest = random();
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-                msa.add(&addition_record);
+                msa.add(&addition_record).await;
             }
 
             // Add own item with associated membership proof that we want to keep updated
@@ -938,8 +938,8 @@ mod ms_proof_tests {
                 own_sender_randomness,
                 own_receiver_preimage.hash::<Hash>(),
             );
-            let mut own_mp = msa.prove(own_item, own_sender_randomness, own_receiver_preimage);
-            msa.add(&own_addition_record);
+            let mut own_mp = msa.prove(own_item, own_sender_randomness, own_receiver_preimage).await;
+            msa.add(&own_addition_record).await;
             let msa_after_own_add = msa.clone();
 
             // Apply 1st batch of additions
@@ -952,9 +952,9 @@ mod ms_proof_tests {
                 own_mp
                     .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
-                msa.add(&addition_record);
+                msa.add(&addition_record).await;
                 assert!(
-                    msa.verify(own_item, &own_mp),
+                    msa.verify(own_item, &own_mp).await,
                     "Own mp must be valid after update"
                 );
             }
@@ -971,20 +971,20 @@ mod ms_proof_tests {
                 own_mp
                     .update_from_addition(own_item, &msa, &addition_record)
                     .unwrap();
-                msa.add(&addition_record);
+                msa.add(&addition_record).await;
                 assert!(
-                    msa.verify(own_item, &own_mp),
+                    msa.verify(own_item, &own_mp).await,
                     "Own mp must be valid after update"
                 );
             }
 
             // revert last batch
             own_mp.revert_update_from_batch_addition(&msa_after_first_batch).await;
-            assert!(msa_after_first_batch.verify(own_item, &own_mp));
+            assert!(msa_after_first_batch.verify(own_item, &own_mp).await);
 
             // revert first batch
             own_mp.revert_update_from_batch_addition(&msa_after_own_add).await;
-            assert!(msa_after_own_add.verify(own_item, &own_mp));
+            assert!(msa_after_own_add.verify(own_item, &own_mp).await);
         }
     }
 
@@ -1026,7 +1026,7 @@ mod ms_proof_tests {
                     assert!(archival_mutator_set
                         .accumulator()
                         .await
-                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()));
+                        .verify(own_item.unwrap(), own_membership_proof.as_ref().unwrap()).await);
                     own_membership_proof
                         .as_mut()
                         .unwrap()
@@ -1054,7 +1054,7 @@ mod ms_proof_tests {
 
                 memproof.revert_update_from_batch_addition(&mutator_set_before).await;
 
-                assert!(mutator_set_before.verify(own_item, &memproof));
+                assert!(mutator_set_before.verify(own_item, &memproof).await);
                 // assert!(previous_mutator_set.set_commitment.verify(own_item, self));
             }
         }

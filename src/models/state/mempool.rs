@@ -409,7 +409,7 @@ mod tests {
             get_mock_global_state, get_mock_wallet_state, make_mock_block,
             make_mock_transaction_with_wallet,
         },
-        util_types::mutator_set::mutator_set_trait::MutatorSet,
+        util_types::mutator_set::mutator_set_trait::*,
     };
     use anyhow::Result;
     use itertools::Itertools;
@@ -580,7 +580,7 @@ mod tests {
         let other_receiver_address = other_receiver_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance
-        let genesis_block = Block::genesis_block();
+        let genesis_block = Block::genesis_block().await;
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
 
@@ -706,7 +706,7 @@ mod tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .hash()
+                .hash().await
                 .emojihash()
         );
         debug!(
@@ -715,7 +715,7 @@ mod tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .hash()
+                .hash().await
                 .emojihash()
         );
 
@@ -731,7 +731,7 @@ mod tests {
             .await;
         now = Duration::from_millis(block_2.kernel.header.timestamp.value());
         assert!(
-            block_3_with_updated_tx.is_valid(&block_2, now + seven_months),
+            block_3_with_updated_tx.is_valid(&block_2, now + seven_months).await,
             "Block with tx with updated mutator set data must be valid"
         );
 
@@ -763,7 +763,7 @@ mod tests {
             .await;
         now = Duration::from_millis(previous_block.kernel.header.timestamp.value());
         assert!(
-            block_14.is_valid(&previous_block, now+seven_months),
+            block_14.is_valid(&previous_block, now+seven_months).await,
             "Block with tx with updated mutator set data must be valid after 10 blocks have been mined"
         );
 
