@@ -14,8 +14,8 @@ use std::time::Duration;
 use tasm_lib::triton_vm::proof::Proof;
 // use tasm_lib::twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 // use tasm_lib::twenty_first::util_types::mmr::mmr_trait::Mmr;
-use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
-use crate::util_types::mutator_set::mmr_trait_async::*;
+use crate::util_types::mmr::MmrAccumulator;
+use crate::util_types::mmr::traits::*;
 
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 
@@ -587,7 +587,7 @@ mod block_tests {
             state::UtxoReceiverData,
         },
         tests::shared::{get_mock_global_state, make_mock_block, make_mock_block_with_valid_pow},
-        util_types::mutator_set::archival_mmr::ArchivalMmr,
+        util_types::mmr::ArchivalMmr,
     };
     use tasm_lib::twenty_first::util_types::emojihash_trait::Emojihash;
 

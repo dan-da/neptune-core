@@ -15,7 +15,7 @@ use twenty_first::shared_math::tip5::{Digest, DIGEST_LENGTH};
 // use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 // use twenty_first::util_types::mmr::mmr_trait::Mmr;
 use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use super::mmr_trait_async::*;
+use crate::util_types::mmr::traits::*;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
@@ -556,7 +556,7 @@ mod accumulation_scheme_tests {
     use rand::Rng;
 
     // use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-    use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+    use crate::util_types::mmr::MmrAccumulator;
 
     use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
     use crate::util_types::mutator_set::mutator_set_trait::commit;

@@ -24,7 +24,7 @@ use crate::models::database::{
 };
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_trait::*;
-use crate::util_types::mutator_set::mmr_trait_async::*;
+use crate::util_types::mmr::traits::*;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 use crate::util_types::mutator_set::rusty_archival_mutator_set::RustyArchivalMutatorSet;
 

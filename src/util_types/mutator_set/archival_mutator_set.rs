@@ -5,17 +5,17 @@ use crate::prelude::twenty_first;
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 
+use twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
 use twenty_first::shared_math::tip5::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr;
-// use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
-use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-use crate::util_types::mutator_set::mmr_trait_async::*;
+
+use crate::util_types::mmr::MmrAccumulator;
+use crate::util_types::mmr::ArchivalMmr;
+use crate::util_types::mmr::traits::*;
 
 use super::active_window::ActiveWindow;
 use super::addition_record::AdditionRecord;
-use super::archival_mmr::ArchivalMmr;
 use super::chunk::Chunk;
 use super::chunk_dictionary::ChunkDictionary;
 use super::ms_membership_proof::MsMembershipProof;

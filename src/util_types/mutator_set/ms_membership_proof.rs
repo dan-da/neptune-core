@@ -22,8 +22,8 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 // use twenty_first::util_types::mmr;
 // use twenty_first::util_types::mmr::mmr_accumulator::MmrAccumulator;
 // use twenty_first::util_types::mmr::mmr_trait::Mmr;
-use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
-use crate::util_types::mutator_set::mmr_trait_async::*;
+use crate::util_types::mmr::MmrAccumulator;
+use crate::util_types::mmr::traits::*;
 
 
 use super::addition_record::AdditionRecord;

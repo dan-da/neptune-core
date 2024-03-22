@@ -6,22 +6,17 @@ use std::{collections::HashMap, fmt::Debug};
 use itertools::Itertools;
 use tasm_lib::structure::tasm_object::TasmObject;
 
-use super::mmr_trait_async::*;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
+use super::traits::*;
 
 use crate::twenty_first::util_types::mmr::{
     shared_basic,
     shared_advanced,
+    mmr_membership_proof::MmrMembershipProof,
 };
 use crate::twenty_first::shared_math::bfield_codec::BFieldCodec;
 use crate::twenty_first::shared_math::digest::Digest;
 use crate::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use crate::twenty_first::util_types::shared::bag_peaks;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary)]
-pub struct Foo<S: BFieldCodec> {
-    i: Vec<S>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject, Arbitrary)]
 pub struct MmrAccumulator<H: AlgebraicHasher>

@@ -1,7 +1,7 @@
 use crate::models::consensus::mast_hash::MastHash;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
-use crate::util_types::mutator_set::mmr_trait_async::*;
+use crate::util_types::mmr::traits::*;
 
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;

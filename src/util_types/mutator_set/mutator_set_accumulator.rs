@@ -5,8 +5,8 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::shared_math::bfield_codec::BFieldCodec;
 use twenty_first::shared_math::tip5::Digest;
-use super::mmr_trait_async::*;
-use super::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mmr::traits::*;
+use crate::util_types::mmr::MmrAccumulator;
 use twenty_first::util_types::{
     // algebraic_hasher::AlgebraicHasher, mmr::mmr_accumulator::MmrAccumulator,
     algebraic_hasher::AlgebraicHasher,

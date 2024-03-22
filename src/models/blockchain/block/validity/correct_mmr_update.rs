@@ -8,7 +8,7 @@ use tasm_lib::{
         // util_types::mmr::mmr_accumulator::MmrAccumulator,
     },
 };
-use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
+use crate::util_types::mmr::MmrAccumulator;
 
 
 use crate::models::consensus::SecretWitness;

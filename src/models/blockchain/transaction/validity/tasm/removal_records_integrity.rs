@@ -27,8 +27,8 @@ use twenty_first::{
         // mmr::{mmr_accumulator::MmrAccumulator, mmr_trait::Mmr},
     },
 };
-use crate::util_types::mutator_set::mmr_accumulator::MmrAccumulator;
-use crate::util_types::mutator_set::mmr_trait_async::*;
+use crate::util_types::mmr::MmrAccumulator;
+use crate::util_types::mmr::traits::*;
 
 
 use crate::models::blockchain::transaction::validity::removal_records_integrity::{

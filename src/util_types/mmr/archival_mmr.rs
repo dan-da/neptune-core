@@ -12,14 +12,11 @@ use std::pin::Pin;
 use itertools::Itertools;
 
 use twenty_first::util_types::mmr::{
-    // mmr_accumulator::MmrAccumulator,
-    // mmr_membership_proof::MmrMembershipProof,
+    mmr_membership_proof::MmrMembershipProof,
     shared_advanced, shared_basic,
 };
-use super::mmr_trait_async::*;
-use super::mmr_accumulator::MmrAccumulator;
-use crate::twenty_first::util_types::mmr::mmr_membership_proof::MmrMembershipProof;
-
+use super::traits::*;
+use super::MmrAccumulator;
 
 /// A Merkle Mountain Range is a datastructure for storing a list of hashes.
 ///

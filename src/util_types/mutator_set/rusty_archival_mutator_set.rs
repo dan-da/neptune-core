@@ -4,11 +4,12 @@ use crate::database::storage::storage_schema::{
 use crate::database::NeptuneLevelDb;
 use crate::prelude::twenty_first;
 use crate::Hash;
+use crate::util_types::mmr::ArchivalMmr;
 
 use twenty_first::shared_math::tip5::Digest;
 
 use super::{
-    active_window::ActiveWindow, archival_mmr::ArchivalMmr,
+    active_window::ActiveWindow,
     archival_mutator_set::ArchivalMutatorSet, chunk::Chunk, mutator_set_kernel::MutatorSetKernel,
 };
 
