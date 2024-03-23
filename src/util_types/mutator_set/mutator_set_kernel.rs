@@ -1020,8 +1020,7 @@ mod accumulation_scheme_tests {
             mutator_set.kernel.add_helper(&addition_record).await;
             assert!(mutator_set.verify(new_item, &membership_proof).await);
 
-            for j in 0..items_and_membership_proofs.len() {
-                let (old_item, mp) = &items_and_membership_proofs[j];
+            for (old_item, mp) in items_and_membership_proofs.iter() {
                 assert!(mutator_set.verify(*old_item, mp).await)
             }
 
@@ -1029,28 +1028,14 @@ mod accumulation_scheme_tests {
         }
 
         // Verify all membership proofs
-        for k in 0..items_and_membership_proofs.len() {
-            assert!(
-                mutator_set
-                    .verify(
-                        items_and_membership_proofs[k].0,
-                        &items_and_membership_proofs[k].1,
-                    )
-                    .await
-            );
+        for (item, mp) in items_and_membership_proofs.iter() {
+            assert!(mutator_set.verify(*item, mp).await);
         }
 
         // Remove items from MS, and verify correct updating of membership proof
         for i in 0..num_additions {
-            for k in i..items_and_membership_proofs.len() {
-                assert!(
-                    mutator_set
-                        .verify(
-                            items_and_membership_proofs[k].0,
-                            &items_and_membership_proofs[k].1,
-                        )
-                        .await
-                );
+            for (item, mp) in items_and_membership_proofs.iter().skip(i) {
+                assert!(mutator_set.verify(*item, mp).await);
             }
             let (item, mp) = items_and_membership_proofs[i].clone();
 
@@ -1060,30 +1045,18 @@ mod accumulation_scheme_tests {
             let removal_record: RemovalRecord = mutator_set.drop(item, &mp);
             assert!(removal_record.validate(&mutator_set.kernel).await);
             assert!(mutator_set.kernel.can_remove(&removal_record).await);
-            for k in i..items_and_membership_proofs.len() {
-                assert!(
-                    mutator_set
-                        .verify(
-                            items_and_membership_proofs[k].0,
-                            &items_and_membership_proofs[k].1,
-                        )
-                        .await
-                );
+            for (sub_item, sub_mp) in items_and_membership_proofs.iter().skip(i) {
+                assert!(mutator_set.verify(*sub_item, sub_mp).await);
             }
 
             // update membership proofs
-            for j in (i + 1)..num_additions {
-                assert!(
-                    mutator_set
-                        .verify(
-                            items_and_membership_proofs[j].0,
-                            &items_and_membership_proofs[j].1
-                        )
-                        .await
-                );
-                let update_res = items_and_membership_proofs[j]
-                    .1
-                    .update_from_remove(&removal_record.clone());
+            for (sub_item, sub_mp) in items_and_membership_proofs
+                .iter_mut()
+                .take(num_additions)
+                .skip(i + 1)
+            {
+                assert!(mutator_set.verify(*sub_item, sub_mp).await);
+                let update_res = sub_mp.update_from_remove(&removal_record.clone());
                 assert!(update_res.is_ok());
             }
 
@@ -1091,15 +1064,8 @@ mod accumulation_scheme_tests {
             mutator_set.kernel.remove_helper(&removal_record).await;
             assert!(!mutator_set.verify(item, &mp).await);
 
-            for k in (i + 1)..items_and_membership_proofs.len() {
-                assert!(
-                    mutator_set
-                        .verify(
-                            items_and_membership_proofs[k].0,
-                            &items_and_membership_proofs[k].1,
-                        )
-                        .await
-                );
+            for (sub_item, sub_mp) in items_and_membership_proofs.iter().skip(i + 1) {
+                assert!(mutator_set.verify(*sub_item, sub_mp).await);
             }
         }
     }

@@ -410,7 +410,7 @@ mod shared_tests_test {
         let ams = rms.ams_mut();
         let _ = get_all_indices_with_duplicates(ams).await;
         let _ = make_item_and_randomnesses();
-        let _ = insert_mock_item(&mut ams.kernel);
+        let _ = insert_mock_item(&mut ams.kernel).await;
     }
 
     #[tokio::test]
