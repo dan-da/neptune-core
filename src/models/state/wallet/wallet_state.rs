@@ -886,7 +886,8 @@ mod tests {
                 None,
                 own_recipient_address,
                 rng.gen(),
-            ).await;
+            )
+            .await;
         own_global_state
             .wallet_state
             .expected_utxos
@@ -1130,10 +1131,13 @@ mod tests {
                 .unwrap()
                 .1
                 .clone();
-            assert!(genesis_block
-                .body()
-                .mutator_set_accumulator
-                .verify(Hash::hash(&utxo), &ms_membership_proof).await);
+            assert!(
+                genesis_block
+                    .body()
+                    .mutator_set_accumulator
+                    .verify(Hash::hash(&utxo), &ms_membership_proof)
+                    .await
+            );
         }
     }
 }

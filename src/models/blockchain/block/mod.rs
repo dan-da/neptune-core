@@ -714,7 +714,8 @@ mod block_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen())
+                .await;
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::default();
         let timestamp = Duration::from_millis(genesis_block.kernel.header.timestamp.value());
@@ -732,7 +733,8 @@ mod block_tests {
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret.nth_generation_spending_key(0).to_address();
         let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen()).await;
+            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen())
+                .await;
 
         // Set block timestamp 1 hour in the future.  (is valid)
         let future_time1 = now + Duration::from_secs(60 * 60);
@@ -784,7 +786,10 @@ mod block_tests {
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash()).await;
-                assert_eq!(ammr.to_accumulator().await.bag_peaks().await, mmra.bag_peaks().await);
+                assert_eq!(
+                    ammr.to_accumulator().await.bag_peaks().await,
+                    mmra.bag_peaks().await
+                );
             }
             blocks.push(new_block);
         }

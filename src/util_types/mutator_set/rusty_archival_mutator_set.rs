@@ -103,11 +103,11 @@ mod tests {
     use rand::{random, thread_rng, RngCore};
     use twenty_first::shared_math::tip5::Tip5;
 
+    use crate::util_types::mmr::traits::*;
     use crate::util_types::mutator_set::{
         ms_membership_proof::MsMembershipProof, shared::BATCH_SIZE,
     };
     use crate::util_types::test_shared::mutator_set::*;
-    use crate::util_types::mmr::traits::*;
 
     use super::*;
 

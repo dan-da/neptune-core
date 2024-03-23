@@ -375,15 +375,17 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
+            let membership_proof = archival_mutator_set
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             let res = MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
                 &archival_mutator_set.kernel,
                 &addition_record,
-            ).await;
+            )
+            .await;
             assert!(res.is_ok());
 
             archival_mutator_set.add(&addition_record).await;
@@ -506,7 +508,8 @@ mod archival_mutator_set_tests {
                 &items.iter().cloned().collect_vec(),
                 &archival_mutator_set.accumulator().await.kernel,
                 &addition_record,
-            ).await
+            )
+            .await
             .unwrap();
 
             items.push(item);
@@ -559,14 +562,16 @@ mod archival_mutator_set_tests {
                 ms.verify(
                     items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
-                ).await,
+                )
+                .await,
                 "First colliding MS MP must be valid"
             );
             assert!(
                 ms.verify(
                     items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
-                ).await,
+                )
+                .await,
                 "Second colliding MS MP must be valid"
             );
         }
@@ -610,7 +615,8 @@ mod archival_mutator_set_tests {
                 !ms.verify(
                     items[saw_collission_at.0 .0],
                     &mps[saw_collission_at.0 .0].clone()
-                ).await,
+                )
+                .await,
                 "First colliding MS MP must be invalid after removal"
             );
         }
@@ -647,7 +653,8 @@ mod archival_mutator_set_tests {
                 !ms.verify(
                     items[saw_collission_at.0 .1],
                     &mps[saw_collission_at.0 .1].clone()
-                ).await,
+                )
+                .await,
                 "Second colliding MS MP must be invalid after removal"
             );
         }
@@ -771,17 +778,29 @@ mod archival_mutator_set_tests {
                 )
                 .await
                 .unwrap();
-            assert!(archival_mutator_set.verify(item, &restored_membership_proof).await);
+            assert!(
+                archival_mutator_set
+                    .verify(item, &restored_membership_proof)
+                    .await
+            );
 
             let removal_record = archival_mutator_set.drop(item, &restored_membership_proof);
             let commitment_before_remove = archival_mutator_set.hash().await;
             archival_mutator_set.remove(&removal_record).await;
-            assert!(!archival_mutator_set.verify(item, &restored_membership_proof).await);
+            assert!(
+                !archival_mutator_set
+                    .verify(item, &restored_membership_proof)
+                    .await
+            );
 
             archival_mutator_set.revert_remove(&removal_record).await;
             let commitment_after_revert = archival_mutator_set.hash().await;
             assert_eq!(commitment_before_remove, commitment_after_revert);
-            assert!(archival_mutator_set.verify(item, &restored_membership_proof).await);
+            assert!(
+                archival_mutator_set
+                    .verify(item, &restored_membership_proof)
+                    .await
+            );
         }
     }
 
@@ -799,15 +818,17 @@ mod archival_mutator_set_tests {
             let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
 
             let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-            let membership_proof =
-                archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
+            let membership_proof = archival_mutator_set
+                .prove(item, sender_randomness, receiver_preimage)
+                .await;
 
             MsMembershipProof::batch_update_from_addition(
                 &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                 &items,
                 &archival_mutator_set.kernel,
                 &addition_record,
-            ).await
+            )
+            .await
             .expect("MS membership update must work");
 
             archival_mutator_set.add(&addition_record).await;
@@ -847,15 +868,17 @@ mod archival_mutator_set_tests {
 
                 let addition_record =
                     commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-                let membership_proof =
-                    archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
+                let membership_proof = archival_mutator_set
+                    .prove(item, sender_randomness, receiver_preimage)
+                    .await;
 
                 MsMembershipProof::batch_update_from_addition(
                     &mut membership_proofs.iter_mut().collect::<Vec<_>>(),
                     &items,
                     &archival_mutator_set.kernel,
                     &addition_record,
-                ).await
+                )
+                .await
                 .expect("MS membership update must work");
 
                 archival_mutator_set.add(&addition_record).await;
@@ -917,8 +940,9 @@ mod archival_mutator_set_tests {
         let sender_randomness: Digest = rng.gen();
         let receiver_preimage: Digest = rng.gen();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-        let membership_proof =
-            archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
+        let membership_proof = archival_mutator_set
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
 
         (item, addition_record, membership_proof)
     }
@@ -931,8 +955,9 @@ mod archival_mutator_set_tests {
     ) -> (Digest, AdditionRecord, MsMembershipProof) {
         let (item, sender_randomness, receiver_preimage) = make_item_and_randomnesses();
         let addition_record = commit(item, sender_randomness, receiver_preimage.hash::<Hash>());
-        let membership_proof =
-            archival_mutator_set.prove(item, sender_randomness, receiver_preimage).await;
+        let membership_proof = archival_mutator_set
+            .prove(item, sender_randomness, receiver_preimage)
+            .await;
 
         (item, addition_record, membership_proof)
     }

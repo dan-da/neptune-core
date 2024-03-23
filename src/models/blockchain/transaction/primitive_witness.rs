@@ -385,10 +385,8 @@ pub(crate) fn arbitrary_primitive_witness_with(
 #[cfg(test)]
 mod test {
     use super::PrimitiveWitness;
-    use crate::models::blockchain::{
-        type_scripts::neptune_coins::NeptuneCoins,
-    };
-    
+    use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+
     use proptest::collection::vec;
     use proptest::prop_assert;
     use proptest_arbitrary_interop::arb;

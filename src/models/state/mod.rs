@@ -1240,7 +1240,8 @@ mod global_state_tests {
                         .kernel
                         .body
                         .mutator_set_accumulator
-                        .verify(Hash::hash(&monitored_utxo.utxo), &mp).await
+                        .verify(Hash::hash(&monitored_utxo.utxo), &mp)
+                        .await
                     {
                         return false;
                     }
@@ -1303,7 +1304,8 @@ mod global_state_tests {
             timestamp,
             mutator_set_accumulator,
             privacy,
-        ).await)
+        )
+        .await)
     }
 
     #[traced_test]
@@ -1498,7 +1500,8 @@ mod global_state_tests {
                         .get_latest_membership_proof_entry()
                         .unwrap()
                         .1,
-                ).await;
+                )
+                .await;
             assert_eq!(
                 mock_block_1.hash(),
                 own_premine_mutxo
@@ -1976,7 +1979,8 @@ mod global_state_tests {
             None,
             genesis_spending_key.to_address(),
             rng.gen(),
-        ).await;
+        )
+        .await;
 
         // Send two outputs each to Alice and Bob, from genesis receiver
         let fee = NeptuneCoins::one();
@@ -2243,7 +2247,8 @@ mod global_state_tests {
                 None,
                 genesis_spending_key.to_address(),
                 rng.gen(),
-            ).await;
+            )
+            .await;
         block_2
             .accumulate_transaction(tx_from_alice, &block_1.kernel.body.mutator_set_accumulator)
             .await;
@@ -2269,7 +2274,8 @@ mod global_state_tests {
         let wallet_secret = WalletSecret::new_random();
         let receiving_address = wallet_secret.nth_generation_spending_key(0).to_address();
         let (block_1, _cb_utxo, _cb_output_randomness) =
-            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen()).await;
+            make_mock_block_with_valid_pow(&genesis_block, None, receiving_address, rng.gen())
+                .await;
 
         add_block(&mut global_state, block_1).await.unwrap();
 

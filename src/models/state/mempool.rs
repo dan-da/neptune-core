@@ -793,7 +793,8 @@ mod tests {
         // Create a global state object, controlled by a preminer who receives a premine-UTXO.
         let preminer_state_lock =
             get_mock_global_state(Network::Alpha, 2, WalletSecret::devnet_wallet()).await;
-        let now = Duration::from_millis(Block::genesis_block().await.kernel.header.timestamp.value());
+        let now =
+            Duration::from_millis(Block::genesis_block().await.kernel.header.timestamp.value());
         let seven_months = Duration::from_millis(7 * 30 * 24 * 60 * 60 * 1000);
         let mut preminer_state = preminer_state_lock.lock_guard_mut().await;
         let premine_wallet_secret = &preminer_state.wallet_state.wallet_secret;

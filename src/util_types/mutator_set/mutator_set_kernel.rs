@@ -208,7 +208,8 @@ impl<M: Mmr<Hash>> MutatorSetKernel<M> {
         // If we want to update the membership proof with this removal, we
         // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data).await;
+            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data)
+            .await;
 
         new_target_chunks
             .dictionary
@@ -436,10 +437,12 @@ impl<M: Mmr<Hash>> MutatorSetKernel<M> {
 
         // Apply the batch-update to the inactive part of the sliding window Bloom filter.
         // This updates both the inactive part of the SWBF and the MMR membership proofs
-        self.swbf_inactive.batch_mutate_leaf_and_update_mps(
-            &mut preseved_mmr_membership_proofs,
-            swbf_inactive_mutation_data,
-        ).await;
+        self.swbf_inactive
+            .batch_mutate_leaf_and_update_mps(
+                &mut preseved_mmr_membership_proofs,
+                swbf_inactive_mutation_data,
+            )
+            .await;
 
         chunkidx_to_chunk_difference_dict
     }
@@ -624,7 +627,8 @@ mod accumulation_scheme_tests {
         set_with_swbf_inactive_append
             .kernel
             .swbf_inactive
-            .append(item0).await;
+            .append(item0)
+            .await;
         let hash_of_one_in_inactive = set_with_swbf_inactive_append.hash().await;
         assert_ne!(
             empty_hash, hash_of_one_in_inactive,
@@ -761,11 +765,10 @@ mod accumulation_scheme_tests {
             new_receiver_preimage.hash::<Hash>(),
         );
         let original_membership_proof = membership_proof.clone();
-        let changed_mp = match membership_proof.update_from_addition(
-            own_item,
-            &mutator_set,
-            &new_addition_record,
-        ).await {
+        let changed_mp = match membership_proof
+            .update_from_addition(own_item, &mutator_set, &new_addition_record)
+            .await
+        {
             Ok(changed) => changed,
             Err(err) => panic!("{}", err),
         };
@@ -829,7 +832,9 @@ mod accumulation_scheme_tests {
             // Update all membership proofs
             for (mp, itm) in membership_proofs_and_items.iter_mut() {
                 let original_mp = mp.clone();
-                let changed_res = mp.update_from_addition(*itm, &mutator_set, &addition_record).await;
+                let changed_res = mp
+                    .update_from_addition(*itm, &mutator_set, &addition_record)
+                    .await;
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly
@@ -844,10 +849,11 @@ mod accumulation_scheme_tests {
 
             // Verify that all membership proofs work
 
-            assert!(futures::stream::iter(membership_proofs_and_items
-                .clone()
-                .iter())
-                .all(|(mp, itm)| mutator_set.verify(*itm, mp)).await);
+            assert!(
+                futures::stream::iter(membership_proofs_and_items.clone().iter())
+                    .all(|(mp, itm)| mutator_set.verify(*itm, mp))
+                    .await
+            );
         }
     }
 
@@ -934,7 +940,8 @@ mod accumulation_scheme_tests {
                     &items,
                     &mutator_set.kernel,
                     &addition_record,
-                ).await;
+                )
+                .await;
                 assert!(batch_update_res.is_ok());
 
                 mutator_set.kernel.add_helper(&addition_record).await;
@@ -1001,8 +1008,9 @@ mod accumulation_scheme_tests {
             for (updatee_item, mp) in items_and_membership_proofs.iter_mut() {
                 let original_mp = mp.clone();
                 assert!(mutator_set.verify(*updatee_item, mp).await);
-                let changed_res =
-                    mp.update_from_addition(*updatee_item, &mutator_set, &addition_record).await;
+                let changed_res = mp
+                    .update_from_addition(*updatee_item, &mutator_set, &addition_record)
+                    .await;
                 assert!(changed_res.is_ok());
 
                 // verify that the boolean returned value from the updater method is set correctly
@@ -1022,19 +1030,27 @@ mod accumulation_scheme_tests {
 
         // Verify all membership proofs
         for k in 0..items_and_membership_proofs.len() {
-            assert!(mutator_set.verify(
-                items_and_membership_proofs[k].0,
-                &items_and_membership_proofs[k].1,
-            ).await);
+            assert!(
+                mutator_set
+                    .verify(
+                        items_and_membership_proofs[k].0,
+                        &items_and_membership_proofs[k].1,
+                    )
+                    .await
+            );
         }
 
         // Remove items from MS, and verify correct updating of membership proof
         for i in 0..num_additions {
             for k in i..items_and_membership_proofs.len() {
-                assert!(mutator_set.verify(
-                    items_and_membership_proofs[k].0,
-                    &items_and_membership_proofs[k].1,
-                ).await);
+                assert!(
+                    mutator_set
+                        .verify(
+                            items_and_membership_proofs[k].0,
+                            &items_and_membership_proofs[k].1,
+                        )
+                        .await
+                );
             }
             let (item, mp) = items_and_membership_proofs[i].clone();
 
@@ -1045,18 +1061,26 @@ mod accumulation_scheme_tests {
             assert!(removal_record.validate(&mutator_set.kernel).await);
             assert!(mutator_set.kernel.can_remove(&removal_record).await);
             for k in i..items_and_membership_proofs.len() {
-                assert!(mutator_set.verify(
-                    items_and_membership_proofs[k].0,
-                    &items_and_membership_proofs[k].1,
-                ).await);
+                assert!(
+                    mutator_set
+                        .verify(
+                            items_and_membership_proofs[k].0,
+                            &items_and_membership_proofs[k].1,
+                        )
+                        .await
+                );
             }
 
             // update membership proofs
             for j in (i + 1)..num_additions {
-                assert!(mutator_set.verify(
-                    items_and_membership_proofs[j].0,
-                    &items_and_membership_proofs[j].1
-                ).await);
+                assert!(
+                    mutator_set
+                        .verify(
+                            items_and_membership_proofs[j].0,
+                            &items_and_membership_proofs[j].1
+                        )
+                        .await
+                );
                 let update_res = items_and_membership_proofs[j]
                     .1
                     .update_from_remove(&removal_record.clone());
@@ -1068,10 +1092,14 @@ mod accumulation_scheme_tests {
             assert!(!mutator_set.verify(item, &mp).await);
 
             for k in (i + 1)..items_and_membership_proofs.len() {
-                assert!(mutator_set.verify(
-                    items_and_membership_proofs[k].0,
-                    &items_and_membership_proofs[k].1,
-                ).await);
+                assert!(
+                    mutator_set
+                        .verify(
+                            items_and_membership_proofs[k].0,
+                            &items_and_membership_proofs[k].1,
+                        )
+                        .await
+                );
             }
         }
     }

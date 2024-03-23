@@ -472,7 +472,8 @@ pub async fn pseudorandom_removal_record_integrity_witness(
         .iter()
         .map(|ar| ar.canonical_commitment)
         .collect_vec();
-    let (aocl, mmr_mps) = pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments).await;
+    let (aocl, mmr_mps) =
+        pseudorandom_mmra_with_mps(rng.gen::<[u8; 32]>(), &canonical_commitments).await;
     assert_eq!(num_inputs, mmr_mps.len());
     assert_eq!(num_inputs, canonical_commitments.len());
 
@@ -1005,14 +1006,16 @@ pub async fn make_mock_block_with_valid_pow(
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
-    ).await;
+    )
+    .await;
     while !block.has_proof_of_work(previous_block) {
         let (block_new, utxo_new, digest_new) = make_mock_block(
             previous_block,
             block_timestamp,
             coinbase_beneficiary,
             rng.gen(),
-        ).await;
+        )
+        .await;
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;
@@ -1032,14 +1035,16 @@ pub async fn make_mock_block_with_invalid_pow(
         block_timestamp,
         coinbase_beneficiary,
         rng.gen(),
-    ).await;
+    )
+    .await;
     while block.has_proof_of_work(previous_block) {
         let (block_new, utxo_new, digest_new) = make_mock_block(
             previous_block,
             block_timestamp,
             coinbase_beneficiary,
             rng.gen(),
-        ).await;
+        )
+        .await;
         block = block_new;
         utxo = utxo_new;
         digest = digest_new;

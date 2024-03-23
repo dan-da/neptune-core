@@ -350,12 +350,12 @@ pub(crate) mod mmr_test {
     use crate::database::storage::storage_schema::SimpleRustyStorage;
     use crate::database::storage::storage_vec::OrdinaryVec;
     use crate::database::NeptuneLevelDb;
+    use crate::util_types::mmr::MmrAccumulator;
     use twenty_first::shared_math::b_field_element::BFieldElement;
     use twenty_first::shared_math::other::*;
     use twenty_first::shared_math::tip5::Tip5;
     use twenty_first::util_types::merkle_tree::*;
     use twenty_first::util_types::merkle_tree_maker::MerkleTreeMaker;
-    use crate::util_types::mmr::MmrAccumulator;
     use twenty_first::util_types::mmr::shared_advanced::get_peak_heights_and_peak_node_indices;
 
     type Storage = OrdinaryVec<Digest>;
@@ -442,9 +442,15 @@ pub(crate) mod mmr_test {
 
         assert_eq!(0, archival_mmr.count_leaves().await);
         assert_eq!(0, accumulator_mmr.count_leaves().await);
-        assert_eq!(archival_mmr.get_peaks().await, accumulator_mmr.get_peaks().await);
+        assert_eq!(
+            archival_mmr.get_peaks().await,
+            accumulator_mmr.get_peaks().await
+        );
         assert_eq!(Vec::<Digest>::new(), accumulator_mmr.get_peaks().await);
-        assert_eq!(archival_mmr.bag_peaks().await, accumulator_mmr.bag_peaks().await);
+        assert_eq!(
+            archival_mmr.bag_peaks().await,
+            accumulator_mmr.bag_peaks().await
+        );
         assert_eq!(
             archival_mmr.bag_peaks().await,
             root_from_arbitrary_number_of_digests::<H>(&[]),
@@ -462,24 +468,31 @@ pub(crate) mod mmr_test {
             let archival_membership_proof = archival_mmr_appended.append(new_leaf).await;
 
             // Verify that the MMR update can be validated
-            assert!(archival_mmr.verify_batch_update(
-                &archival_mmr_appended.get_peaks().await,
-                &[new_leaf],
-                &[]
-            ).await);
+            assert!(
+                archival_mmr
+                    .verify_batch_update(&archival_mmr_appended.get_peaks().await, &[new_leaf], &[])
+                    .await
+            );
 
             // Verify that failing MMR update for empty MMR fails gracefully
-            assert!(!archival_mmr.verify_batch_update(
-                &archival_mmr_appended.get_peaks().await,
-                &[],
-                &[(new_leaf, archival_membership_proof)]
-            ).await);
+            assert!(
+                !archival_mmr
+                    .verify_batch_update(
+                        &archival_mmr_appended.get_peaks().await,
+                        &[],
+                        &[(new_leaf, archival_membership_proof)]
+                    )
+                    .await
+            );
         }
 
         // Make the append and verify that the new peaks match the one from the proofs
         let archival_membership_proof = archival_mmr.append(new_leaf).await;
         let accumulator_membership_proof = accumulator_mmr.append(new_leaf).await;
-        assert_eq!(archival_mmr.get_peaks().await, archival_mmr_appended.get_peaks().await);
+        assert_eq!(
+            archival_mmr.get_peaks().await,
+            archival_mmr_appended.get_peaks().await
+        );
         assert_eq!(
             accumulator_mmr.get_peaks().await,
             archival_mmr_appended.get_peaks().await
@@ -645,7 +658,8 @@ pub(crate) mod mmr_test {
         );
         let acc_small_bag_peaks = accumulator_mmr_small.bag_peaks().await;
         assert!(!accumulator_mmr_small
-            .get_peaks().await
+            .get_peaks()
+            .await
             .iter()
             .any(|peak| *peak == acc_small_bag_peaks));
     }
@@ -706,11 +720,21 @@ pub(crate) mod mmr_test {
                 // Verify the update operation using the batch verifier
                 archival.mutate_leaf_raw(i, new_leaf).await;
                 assert!(
-                    acc.verify_batch_update(&archival.get_peaks().await, &[], &[(new_leaf, mp.clone())]).await,
+                    acc.verify_batch_update(
+                        &archival.get_peaks().await,
+                        &[],
+                        &[(new_leaf, mp.clone())]
+                    )
+                    .await,
                     "Valid batch update parameters must succeed"
                 );
                 assert!(
-                    !acc.verify_batch_update(&archival.get_peaks().await, &[], &[(bad_leaf, mp.clone())]).await,
+                    !acc.verify_batch_update(
+                        &archival.get_peaks().await,
+                        &[],
+                        &[(bad_leaf, mp.clone())]
+                    )
+                    .await,
                     "Inalid batch update parameters must fail"
                 );
 
@@ -782,11 +806,15 @@ pub(crate) mod mmr_test {
 
             // Run a batch-append verification on the entire mutation of the MMR and verify that it succeeds
             let empty_accumulator = MmrAccumulator::<H>::default();
-            assert!(empty_accumulator.verify_batch_update(
-                &archival_batch.get_peaks().await,
-                &leaf_hashes_blake3,
-                &[],
-            ).await);
+            assert!(
+                empty_accumulator
+                    .verify_batch_update(
+                        &archival_batch.get_peaks().await,
+                        &leaf_hashes_blake3,
+                        &[],
+                    )
+                    .await
+            );
         }
     }
 
@@ -827,7 +855,9 @@ pub(crate) mod mmr_test {
 
         let new_peaks: Vec<Digest> = new_peaks_and_heights.iter().map(|x| x.0).collect();
         assert!(
-            original_mmr.verify_batch_update(&new_peaks, &[new_input_hash], &[]).await,
+            original_mmr
+                .verify_batch_update(&new_peaks, &[new_input_hash], &[])
+                .await,
             "verify batch update must succeed for a single append"
         );
 
@@ -855,7 +885,9 @@ pub(crate) mod mmr_test {
         }
 
         assert!(
-            mmr_after_append.verify_batch_update(&mmr.get_peaks().await, &[], &leaf_mutations).await,
+            mmr_after_append
+                .verify_batch_update(&mmr.get_peaks().await, &[], &leaf_mutations)
+                .await,
             "The batch update of two leaf mutations must verify"
         );
     }
@@ -968,7 +1000,8 @@ pub(crate) mod mmr_test {
             let orignal_peaks = mmr.get_peaks().await;
             let mp = mmr.append(new_leaf_hash).await;
             assert!(
-                mp.verify(&mmr.get_peaks().await, new_leaf_hash, leaf_count + 1).0,
+                mp.verify(&mmr.get_peaks().await, new_leaf_hash, leaf_count + 1)
+                    .0,
                 "Returned membership proof from append must verify"
             );
             assert_ne!(
@@ -1114,7 +1147,11 @@ pub(crate) mod mmr_test {
             // Make a new MMR where we append with a value and run the verify_append
             let new_leaf_hash: Digest = random();
             mmr.append(new_leaf_hash).await;
-            assert!(mmr_original.verify_batch_update(&mmr.get_peaks().await, &[new_leaf_hash], &[]).await);
+            assert!(
+                mmr_original
+                    .verify_batch_update(&mmr.get_peaks().await, &[new_leaf_hash], &[])
+                    .await
+            );
         }
     }
 

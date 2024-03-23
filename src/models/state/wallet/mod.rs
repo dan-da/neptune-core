@@ -442,7 +442,8 @@ mod wallet_tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .verify(Hash::hash(&genesis_block_output_utxo), &ms_membership_proof).await,
+                .verify(Hash::hash(&genesis_block_output_utxo), &ms_membership_proof)
+                .await,
             "Membership proof must be valid after updating wallet state with generated blocks"
         );
 
@@ -520,14 +521,17 @@ mod wallet_tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .verify(block_1_tx_output_digest, &ms_membership_proof).await;
+                .verify(block_1_tx_output_digest, &ms_membership_proof)
+                .await;
             assert!(membership_proof_is_valid);
         }
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _, _) = make_mock_block(&block_1, None, other_recipient_address, rng.gen()).await;
-        let (block_3, _, _) = make_mock_block(&block_2, None, other_recipient_address, rng.gen()).await;
+        let (block_2, _, _) =
+            make_mock_block(&block_1, None, other_recipient_address, rng.gen()).await;
+        let (block_3, _, _) =
+            make_mock_block(&block_2, None, other_recipient_address, rng.gen()).await;
         monitored_utxos = get_monitored_utxos(&own_wallet_state).await;
         {
             let block_1_tx_output_digest = Hash::hash(&block_1_coinbase_utxo);
@@ -572,7 +576,8 @@ mod wallet_tests {
                 .kernel
                 .body
                 .mutator_set_accumulator
-                .verify(block_1_tx_output_digest, &ms_membership_proof).await;
+                .verify(block_1_tx_output_digest, &ms_membership_proof)
+                .await;
             assert!(
                 membership_proof_is_valid,
                 "Membership proof must be valid after updating wallet state with generated blocks"
@@ -598,7 +603,8 @@ mod wallet_tests {
             None,
             own_spending_key.to_address(),
             rng.gen(),
-        ).await;
+        )
+        .await;
         let mining_reward = cb_utxo.get_native_currency_amount();
 
         // Add block to wallet state
@@ -662,7 +668,8 @@ mod wallet_tests {
                 None,
                 own_spending_key.to_address(),
                 rng.gen(),
-            ).await;
+            )
+            .await;
             own_wallet_state
                 .expected_utxos
                 .add_expected_utxo(
@@ -747,7 +754,8 @@ mod wallet_tests {
             None,
             own_spending_key.to_address(),
             rng.gen(),
-        ).await;
+        )
+        .await;
         assert_eq!(
             Into::<BlockHeight>::into(23u64),
             next_block.kernel.header.height
@@ -833,7 +841,8 @@ mod wallet_tests {
         );
 
         let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
-        let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address, rng.gen()).await;
+        let (mut block_1, _, _) =
+            make_mock_block(&genesis_block, None, own_address, rng.gen()).await;
 
         let receiver_data_12_to_other = UtxoReceiverData {
             public_announcement: PublicAnnouncement::default(),
@@ -936,12 +945,17 @@ mod wallet_tests {
         // Verify that all monitored UTXOs have valid membership proofs
         for monitored_utxo in monitored_utxos {
             assert!(
-                block_1.kernel.body.mutator_set_accumulator.verify(
-                    Hash::hash(&monitored_utxo.utxo),
-                    &monitored_utxo
-                        .get_membership_proof_for_block(block_1.hash())
-                        .unwrap()
-                ).await,
+                block_1
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(
+                        Hash::hash(&monitored_utxo.utxo),
+                        &monitored_utxo
+                            .get_membership_proof_for_block(block_1.hash())
+                            .unwrap()
+                    )
+                    .await,
                 "All membership proofs must be valid after block 1"
             )
         }
@@ -989,12 +1003,17 @@ mod wallet_tests {
             );
         for monitored_utxo in monitored_utxos {
             assert!(
-                block_18.kernel.body.mutator_set_accumulator.verify(
-                    Hash::hash(&monitored_utxo.utxo),
-                    &monitored_utxo
-                        .get_membership_proof_for_block(block_18.hash())
-                        .unwrap()
-                ).await,
+                block_18
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(
+                        Hash::hash(&monitored_utxo.utxo),
+                        &monitored_utxo
+                            .get_membership_proof_for_block(block_18.hash())
+                            .unwrap()
+                    )
+                    .await,
                 "All membership proofs must be valid after block 18"
             )
         }
@@ -1038,7 +1057,8 @@ mod wallet_tests {
             None,
             premine_wallet_spending_key.to_address(),
             rng.gen(),
-        ).await;
+        )
+        .await;
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_1.kernel.body.mutator_set_accumulator,
@@ -1070,12 +1090,17 @@ mod wallet_tests {
         // Verify that all monitored UTXOs (with synced MPs) have valid membership proofs
         for monitored_utxo in monitored_utxos_at_2b.iter() {
             assert!(
-                block_2_b.kernel.body.mutator_set_accumulator.verify(
-                    Hash::hash(&monitored_utxo.utxo),
-                    &monitored_utxo
-                        .get_membership_proof_for_block(block_2_b.hash())
-                        .unwrap()
-                ).await,
+                block_2_b
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(
+                        Hash::hash(&monitored_utxo.utxo),
+                        &monitored_utxo
+                            .get_membership_proof_for_block(block_2_b.hash())
+                            .unwrap()
+                    )
+                    .await,
                 "All synced membership proofs must be valid after block 2b fork"
             )
         }
@@ -1087,7 +1112,8 @@ mod wallet_tests {
             None,
             premine_wallet_spending_key.to_address(),
             rng.gen(),
-        ).await;
+        )
+        .await;
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_18.kernel.body.mutator_set_accumulator,
@@ -1108,12 +1134,17 @@ mod wallet_tests {
         // Verify that all monitored UTXOs have valid membership proofs
         for monitored_utxo in monitored_utxos_block_19.iter() {
             assert!(
-                block_19.kernel.body.mutator_set_accumulator.verify(
-                    Hash::hash(&monitored_utxo.utxo),
-                    &monitored_utxo
-                        .get_membership_proof_for_block(block_19.hash())
-                        .unwrap()
-                ).await,
+                block_19
+                    .kernel
+                    .body
+                    .mutator_set_accumulator
+                    .verify(
+                        Hash::hash(&monitored_utxo.utxo),
+                        &monitored_utxo
+                            .get_membership_proof_for_block(block_19.hash())
+                            .unwrap()
+                    )
+                    .await,
                 "All membership proofs must be valid after block 19"
             )
         }
@@ -1199,12 +1230,17 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_3b {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || block_3_b.kernel.body.mutator_set_accumulator.verify(
-                        Hash::hash(&monitored_utxo.utxo),
-                        &monitored_utxo
-                            .get_membership_proof_for_block(block_3_b.hash())
-                            .unwrap()
-                    ).await,
+                    || block_3_b
+                        .kernel
+                        .body
+                        .mutator_set_accumulator
+                        .verify(
+                            Hash::hash(&monitored_utxo.utxo),
+                            &monitored_utxo
+                                .get_membership_proof_for_block(block_3_b.hash())
+                                .unwrap()
+                        )
+                        .await,
                 "All membership proofs of unspent UTXOs must be valid after block 3b"
             )
         }
@@ -1215,7 +1251,8 @@ mod wallet_tests {
             None,
             premine_wallet_spending_key.to_address(),
             rng.gen(),
-        ).await;
+        )
+        .await;
         own_wallet_state
             .update_wallet_state_with_new_block(
                 &block_19.kernel.body.mutator_set_accumulator,
@@ -1237,12 +1274,17 @@ mod wallet_tests {
         for monitored_utxo in monitored_utxos_20.iter() {
             assert!(
                 monitored_utxo.spent_in_block.is_some()
-                    || block_20.kernel.body.mutator_set_accumulator.verify(
-                        Hash::hash(&monitored_utxo.utxo),
-                        &monitored_utxo
-                            .get_membership_proof_for_block(block_20.hash())
-                            .unwrap()
-                    ).await,
+                    || block_20
+                        .kernel
+                        .body
+                        .mutator_set_accumulator
+                        .verify(
+                            Hash::hash(&monitored_utxo.utxo),
+                            &monitored_utxo
+                                .get_membership_proof_for_block(block_20.hash())
+                                .unwrap()
+                        )
+                        .await,
                 "All membership proofs of unspent UTXOs must be valid after block 20"
             )
         }

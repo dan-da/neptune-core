@@ -490,7 +490,8 @@ mod removal_record_tests {
                     &items,
                     &accumulator.kernel,
                     &addition_record,
-                ).await;
+                )
+                .await;
                 assert!(
                     update_res_mp.is_ok(),
                     "batch update must return OK, i = {}",
@@ -585,7 +586,8 @@ mod removal_record_tests {
                 &items,
                 &accumulator.kernel,
                 &addition_record,
-            ).await;
+            )
+            .await;
             assert!(
                 update_res_mp.is_ok(),
                 "batch update must return OK, i = {}",
@@ -642,13 +644,19 @@ mod removal_record_tests {
 
         // Verify that the original removal record is no longer valid since its
         // MMR MPs are deprecated
-        assert!(original_first_removal_record
-            .as_ref()
-            .unwrap()
-            .validate(&accumulator.kernel).await);
-        assert!(!accumulator
-            .kernel
-            .can_remove(&original_first_removal_record.unwrap()).await);
+        assert!(
+            original_first_removal_record
+                .as_ref()
+                .unwrap()
+                .validate(&accumulator.kernel)
+                .await
+        );
+        assert!(
+            !accumulator
+                .kernel
+                .can_remove(&original_first_removal_record.unwrap())
+                .await
+        );
     }
 
     #[test]

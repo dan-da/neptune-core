@@ -89,7 +89,9 @@ pub async fn insert_mock_item<M: Mmr<Hash>>(
         sender_randomness,
         receiver_preimage.hash::<Hash>(),
     );
-    let membership_proof = mutator_set.prove(new_item, sender_randomness, receiver_preimage).await;
+    let membership_proof = mutator_set
+        .prove(new_item, sender_randomness, receiver_preimage)
+        .await;
     mutator_set.add_helper(&addition_record).await;
 
     (membership_proof, new_item)
