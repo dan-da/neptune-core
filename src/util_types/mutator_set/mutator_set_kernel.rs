@@ -208,7 +208,7 @@ impl<M: Mmr<Hash>> MutatorSetKernel<M> {
         // If we want to update the membership proof with this removal, we
         // could use the below function.
         self.swbf_inactive
-            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data);
+            .batch_mutate_leaf_and_update_mps(&mut [], mutation_data).await;
 
         new_target_chunks
             .dictionary
@@ -439,7 +439,7 @@ impl<M: Mmr<Hash>> MutatorSetKernel<M> {
         self.swbf_inactive.batch_mutate_leaf_and_update_mps(
             &mut preseved_mmr_membership_proofs,
             swbf_inactive_mutation_data,
-        );
+        ).await;
 
         chunkidx_to_chunk_difference_dict
     }
