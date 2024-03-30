@@ -23,10 +23,8 @@ use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulat
 use anyhow::{Context, Result};
 use futures::channel::oneshot;
 use num_traits::identities::Zero;
-use rand::rngs::StdRng;
-use rand::thread_rng;
 use rand::Rng;
-use rand::SeedableRng;
+use rayon::prelude::*;
 use std::ops::Deref;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -111,18 +109,13 @@ async fn mine_block(
     difficulty: U32s<5>,
     unrestricted_mining: bool,
 ) {
-    // We wrap mining loop with spawn_blocking() because it is a
-    // very lengthy and CPU intensive task, which should execute
-    // on its own thread.
-    //
-    // Instead of spawn_blocking(), we could start a native OS
-    // thread which avoids using one from tokio's threadpool
-    // but that doesn't seem a concern for neptune-core.
-    // Also we would need to use a oneshot channel to avoid
-    // blocking while joining the thread.
-    // see: https://ryhl.io/blog/async-what-is-blocking/
+    // We execute the mining loop with rayon so that:
+    //  1. it does not block async tasks on the same thread.
+    //  2. it can execute on multiple cores.
     //
     // note: there is no async code inside the mining loop.
+
+    // Spawn a task on rayon.
     tokio::task::spawn_blocking(move || {
         mine_block_worker(
             block_header,
@@ -134,7 +127,7 @@ async fn mine_block(
         )
     })
     .await
-    .unwrap()
+    .unwrap();
 }
 
 fn mine_block_worker(
@@ -152,31 +145,42 @@ fn mine_block_worker(
     );
     let threshold = Block::difficulty_to_digest_threshold(difficulty);
 
-    // The RNG used to sample nonces must be thread-safe, which `thread_rng()` is not.
-    // Solution: use `thread_rng()` to generate a seed, and generate a thread-safe RNG
-    // seeded with that seed. The `thread_rng()` object is dropped immediately.
-    let mut rng: StdRng = SeedableRng::from_seed(thread_rng().gen());
+    let (found, cancelled, nonce, hash) = rayon::iter::repeat(0)
+        // .into_par_iter()
+        .map_init(
+            || (block_header.clone(), rand::thread_rng()), // get the thread-local RNG
+            |(bh, rng), _x| {
+                // Mining takes place here
+                bh.nonce = rng.gen();
+                let hash = Hash::hash(bh);
+                let found = hash < threshold;
+                let cancelled = sender.is_canceled();
 
-    // Mining takes place here
-    while Hash::hash(&block_header) >= threshold {
-        if !unrestricted_mining {
-            std::thread::sleep(Duration::from_millis(100));
-        }
+                if !unrestricted_mining {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                // info!("mining loop, another hash generated");
 
-        // If the sender is cancelled, the parent to this thread most
-        // likely received a new block, and this thread hasn't been stopped
-        // yet by the operating system, although the call to abort this
-        // thread *has* been made.
-        if sender.is_canceled() {
-            info!(
-                "Abandoning mining of current block with height {}",
-                block_header.height
-            );
-            return;
-        }
+                (found, cancelled, bh.nonce, hash)
+            },
+        )
+        .skip_any_while(|(found, cancelled, ..)| !found && !cancelled)
+        .take_any_while(|(found, cancelled, ..)| *found || *cancelled)
+        .reduce_with(|a, _| a)
+        .unwrap();
+    // .collect();
 
-        block_header.nonce = rng.gen();
+    if cancelled && !found {
+        info!(
+            "Abandoning mining of current block with height {}",
+            block_header.height
+        );
     }
+
+    assert!(found);
+    assert!(hash < threshold);
+
+    block_header.nonce = nonce;
 
     info!(
         "Found valid block with nonce: ({}, {}, {}).",
