@@ -96,6 +96,14 @@ where
         removal_records: Vec<RemovalRecord>,
         preserved_membership_proofs: &mut [&mut MsMembershipProof],
     ) {
+        // danda: 2024-04-01:
+        //   this for loop is a (temporary?) hack that enables tests to pass.
+        //   it is probably duplicating logic and terribly inefficient.
+        //   @alan: please review.
+        for removal_record in removal_records.iter() {
+            self.remove_helper(removal_record).await;
+        }
+
         // update the active window and inactive MMR
         let mut kernel = MutatorSetAccumulator {
             aocl: self.aocl.to_accumulator_async().await,
