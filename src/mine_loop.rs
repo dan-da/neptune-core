@@ -145,8 +145,9 @@ fn mine_block_worker(
     );
     let threshold = Block::difficulty_to_digest_threshold(difficulty);
 
+    // note: this article discusses rayon strategies for mining.
+    // https://www.innoq.com/en/blog/2018/06/blockchain-mining-embarrassingly-parallel/
     let (found, cancelled, nonce, hash) = rayon::iter::repeat(0)
-        // .into_par_iter()
         .map_init(
             || (block_header.clone(), rand::thread_rng()), // get the thread-local RNG
             |(bh, rng), _x| {
@@ -159,22 +160,18 @@ fn mine_block_worker(
                 if !unrestricted_mining {
                     std::thread::sleep(Duration::from_millis(100));
                 }
-                // info!("mining loop, another hash generated");
-
                 (found, cancelled, bh.nonce, hash)
             },
         )
-        .skip_any_while(|(found, cancelled, ..)| !found && !cancelled)
-        .take_any_while(|(found, cancelled, ..)| *found || *cancelled)
-        .reduce_with(|a, _| a)
+        .find_any(|(found, cancelled, ..)| *found || *cancelled)
         .unwrap();
-    // .collect();
 
     if cancelled && !found {
         info!(
             "Abandoning mining of current block with height {}",
             block_header.height
         );
+        return;
     }
 
     assert!(found);
