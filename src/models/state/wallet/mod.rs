@@ -283,6 +283,7 @@ impl WalletSecret {
         use std::os::unix::prelude::OpenOptionsExt;
         fs::OpenOptions::new()
             .create(true)
+            .truncate(false)
             .write(true)
             .mode(0o600)
             .open(path)

@@ -58,6 +58,7 @@ impl DataDirectory {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(file_path)
             .await
             .context("open_ensure_parent_dir_exists")
