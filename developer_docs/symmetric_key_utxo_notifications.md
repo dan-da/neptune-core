@@ -42,37 +42,27 @@ to quantitatively understand the difference in ciphertext length for the same
 data encrypted with our existing Asymmetric algorithm vs any proposed Symmetric
 Key algorithm.
 
-A quick internet search did not turn up meaningful results.  I did find a
-statement indicating that:
+ The situation can be summarized as follows:
 
-* Symmetric-key ciphertext length is the same or smaller than the original plaintext.
+* Symmetric ciphertexts are a small constant number of bits larger than their corresponding plaintexts due to randomization and MACs. A "small constant number" is something on the order of the security level, say 256. We want to use an AEAD mode which implies both.
 
-* Asymmetric-key ciphertext length is the same or larger than the original plaintext.
+* Asymmetric ciphertexts are a larger constant number of bits larger than their corresponding plaintexts. Typically the KEM/DEM framework in used, wherein the asymmetric crypto is used to securely transmit a shared symmetric key (that's the Key Encapsulation Mechanism), which is then used to symmetrically encrypt the plaintext (that's the Data Encapsulation Mechanism and one might as well use an AEAD mode here). The phrase "larger constant" means something in the ballpark of 5x the security level.
 
-Other sources indicate that symmetric key ciphertext length is normally the same
-or a tiny bit larger than the plaintext, due to padding.
+* Post-quantum asymmetric ciphertexts are a large constant number of bits larger than their corresponding plaintexts. The same KEM/DEM framework applies except you need to use a different scheme for the KEM part. Using lattice-based KEMs, the ciphertext (for just the KEM part) is typically on the order of 1-4 kB. Quantum computers are rarely capable of speeding up attacks on symmetric key primitives, so there's no need to
+worry about the DEM part being vulnerable.
 
-So then, if our asymmetric ciphertext is also near the same size as the plaintext,
-we may not be saving any/much blockchain space by using symmetric keys.
+Neptune currently supports lattice-based KEM for its GenerationAddress format. That's the addresses that start with nolga. We can use this scheme to generate post-quantum ciphertexts and observe their sizes. Furthermore, since it uses the KEM/DEM framework, with we should be able to extract the symmetric part and use that for statistics on symmetric ciphertext sizes.
 
 Let's perform a test:
 
 TODO: test results.
 
-If we cannot obtain significant improvements in ciphertext length, then it is
-unclear if there is sufficient value in implementing symmetric keys rather than
-simply using the existing asymmetric keys for this purpose.  Symmetric keys are
-smaller and offer faster encryption and decryption, however those advantages do
-not help save any blockchain space.  Also, we would need to implement and
-maintain two keys systems instead of just one.
-
-Alan: perhaps you can provide some perspective here?
 
 
 ## UtxoNotifyMethod
 
-We already have `PublicAnnouncements` and `ExpectedUtxos`.  It seems clearer to
-call these `OnChain` and `OffChain` notifications, respectively.
+We already have `PublicAnnouncements` and `ExpectedUtxos`.  For our purposes, we can
+think of these as `OnChain` and `OffChain` notifications, respectively.
 
 A recent PR has introduced the following enum:
 
@@ -93,7 +83,9 @@ between `OnChainSymmetricKey` or `OffChain`.
 
 When Alice sends to Bob's wallet, she must use `OnChainPubKey`.
 
-### Alternate Construction
+### Alternate Construction(s)
+
+#### a. add UtxoOnChainNotifyMethod
 
 It might be semantically clearer to do something like this:
 
@@ -109,42 +101,66 @@ pub enum UtxoNotifyMethod {
 }
 ```
 
-### Naming consistency
+#### b. use PublicAnnouncement "type" field
 
-It might make sense to rename `PublicAnnouncement` and `ExpectedUtxo` to match the
-above enums.  So it could look like:
+`PublicAnnouncement` is simply a `Vec<BFieldElement>`.  By convention the first element of the list represents a type constant, eg GENERATION_FLAG means GenerationAddress and SYMMETRIC_FLAG could mean a Symmetric key.
+
+Using this field/convention, we could simplify to:
 
 ```
-// PublicAnnouncment --> UtxoOnChainNotification
-// ExpectedUtxo      --> UtxoOffChainNotification
-
-pub enum UtxoOnChainNotifyMethod {
-    PubKey(UtxoOnChainNotification)
-    SymmetricKey(UtxoOnChainNotification)
-}
-
 pub enum UtxoNotifyMethod {
-    OnChain(UtxoOnChainNotifyMethod),
-    OffChain(UtxoOffChainNotification),
+    OnChain(PublicAnnouncement),
+    OffChain(ExpectedUtxo),
 }
 ```
+
+If we are to rely on this however, I think it would be a good idea to formalize that index 0 means type by adding a PublicAnnouncement::type() method that returns it.
+
 
 ## Symmetric Key Cipher Selection
 
-TODO: More work/research needed here.
-
-Some possible candidates:  AES, RC6, Twofish, SPECK128, LEA, ChaCha20-Poly1305
+Possible candidates include AES, RC6, Twofish, SPECK128, LEA, ChaCha20-Poly1305.
 
 Paper: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6806263/#sec6-sensors-19-04312
 
-Considerations:
+Some considerations:
  * block cypher vs stream cypher.
- * target small ciphertext.  (maybe not relevant?)
- * should measure size of ciphertext vs GenerationAddress ciphertext in
-   PublicAnnouncement.
  * must be quantum-secure.
  * we want to derive from our existing wallet seed + index/nonce.
- * is it a crazy idea to use one-time pad?  how large are our plaintext secrets?
+
+Right now `GenerationAddress` uses AES-256 in GCM mode for the DEM part.  It has
+been decided to use this for our symmetric keys.
+
+Further analysis:
+
+If this choice turns out to be inadequate for whatever reason we could explore
+other options:
+
+cipher            | advice
+----------------- | -----------------------------------
+AES               | yes but you still need an AEAD mode
+RC6               | no
+TwoFish           | no
+SPECK128          | f** no
+LEA               | no
+ChaCha20-Poly1305 | yes
+
+There is no good reason not to use AES in our case. AES has received by far the most scrutiny and is by far the most widely deployed. Reasons not to use AES could be:
+
+* You need a cipher that is native to a different field, for instance the Oxfoi field, because it works in the context of some overlay protocol like a proof system or multi-party computation that fixes the field to something different from $\mathbb{F}_{2^8}$ (over which AES is defined).
+
+* The cipher needs to consume the lowest possible amount of energy. Actually, I am not sure this is an argument against using AES but it's certainly an argument researchers use to motivate studying other ciphers. The energy consumption is an issue for instance in pace makers, where yes you need to communicate with the outside world to receive updated programming, and yes this communication must be authenticated because you don't want to receive reprogramming from just anyone, and the cipher eats away in the pace maker's limited battery life, and you can't replace the battery or the entire pace maker every year. Energy consumption of cryptographic algorithms is not an issue for computers that are plugged into the grid or computers that are recharged often, like smart phones.
+
+* Cache timing attacks are an issue. If you can make the victim encrypt a lot of data and if you have fine-grained insight to the victim's response times, then you can extract the key based on whether there was a cache miss or not. If cache timing attacks are an issue, then ChaCha20-Poly1305 is an excellent choice. Note that:
+
+    * cache-independent implementations of AES do exist, but these are not widespread and generally slower
+
+    * modern CPUs come with native AES support which voids this entire class of attacks
+
+    * the ciphertexts are relatively short (kilobytes at most) whereas you need the victim to encrypt a lot of data to deploy the attack
+
+    * the victim is generally behind an internet connection, which adds a lot of noise to the timing info, making the attack that much harder to deploy.
+
 
 ## To Derive, or not to Derive
 
@@ -166,6 +182,12 @@ we should take, ceteris paribus.
 A consequence of using key derivation is that we may incur additional cost
 when scanning for utxos that our wallet can claim.  It is important to find an
 efficient construction.
+
+note: it has been requested/decided to implement derivation in stages.  So in
+the initial implementation, when a new key is requested, it will always use the
+key at index 0.  Nonetheless, this document presents a design for the key
+derivation approach, which can be used once the `Transaction` infrastructure is
+more complete.
 
 
 ## Key Derivation
@@ -204,7 +226,18 @@ This limits the number of derived keys to 65536, which is not really that much, 
 
 Further, it seems a hidden privacy bug as the counter will simply wrap around to 0,which means that keys can/will be re-used, perhaps over and over.
 
-I think we should re-consider this (mis?)-feature.  If we do decide to keep it, then at minimum we should carefully document it for end-users, as I would consider it "surprising behavior" that I'm unaware of in other cryptocurrencies.
+In a [recent discussion](https://github.com/Neptune-Crypto/neptune-core/issues/161#issue-2348545952) it has been decided to use a u32 or u64 for this field.  We will likely have a soft-limit that results in an error if the limit is reached.  Users would have the ability to increase the soft-limit via configuration.
+
+Quote:
+
+> That said, right now the counter is fixed to zero. In the future we will roll
+> out support for automatically incrementing it and when this happens (and even
+> before), having a u32 or even u64 for this value is just as cheap. What is
+> expensive is the range of counters searched through. As long as there is a
+> configuration option or command-line argument that defaults to something small
+> and that high-intensity users can manually set to something suitable for their
+> needs, I think all concerns are addressed.
+
 
 ### Index/Counter
 
@@ -219,6 +252,8 @@ fn next_symmetric_key(&mut self) -> SymmetricKey {
     key
 }
 ```
+
+note: the same or similar mechanism will also be used for the asymmetric keys, ie `GenerationAddress`.
 
 ### Announce & Claim Mechanism
 
@@ -391,6 +426,20 @@ Full details of the scheme can be found at:
 * Paper: https://web.getmonero.org/resources/research-lab/pubs/MRL-0006.pdf
 
 
+note that the Monero scheme involves elliptic curves and a one-time key that affords additional privacy in the event that an address is paid to multiple times, eg a donation address.  We may want to consider something similar, either now or in the future.
+
+Quote:
+
+> If I understand correctly, P, R, G and D' are elliptic curve points and *
+> denotes elliptic curve multiplication. So you have to do elliptic curve
+> operations in order to check whether you can claim 1 UTXO. This is expensive
+> relative to the Bloom filter solution for the equivalent problem in Neptune,
+> but in exchange you have an extremely low likelihood of recipient identifiers
+> or recipient-identifying data being reused. **In particular, in Neptune you can
+> generate multiple addresses (or you will be able to in the future) but you
+> cannot prevent users from donating to the same address twice -- and these
+> transactions will be linkable as benefiting the same user.**
+
 
 #### Improvement: combine the two approaches
 
@@ -431,10 +480,25 @@ Notes:
     has the same naive complexity of O(n*m) for claiming.
 
 
-Is it worth doing?  I think so.
+Is it worth doing?  perhaps.  But it may be obsoleted by the bloom-filter approach below.
 
-Can it be done later?   Probably, but if we do it now we can determine if there
+Can it be done later?   yes, but if we do it now we can determine if there
 are any hidden gotchas.
+
+#### Bloom filters.
+
+It has been suggested that bloom filters could greatly improve our efficiency.
+
+Quote:
+
+> The scenario where you have n receiver identifiers and you want to find out
+> which one of m blocks lists one of them screams for solution based on Bloom
+> filters. You populate a Bloom filter with your n receiver identifiers, and
+> then loop over all receiver identifiers announced in all blocks to see if
+> there is a likely match. Note that every query to the Bloom filter involves k
+> hash functions and that k is independent of n, so the total cost is O(m).
+
+Todo: investigate bloom filters further.
 
 
 
