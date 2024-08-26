@@ -6,7 +6,10 @@ use crate::{
 };
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
+
+use super::address::{ReceivingAddress, SpendingKey};
 
 /// represents utxo and secrets necessary for recipient to claim it.
 ///
@@ -72,4 +75,49 @@ pub enum UtxoNotifier {
     Cli,
     Myself,
     Premine,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
+pub struct UtxoTransfer {
+    pub utxo: Utxo,
+    pub sender_randomness: Digest,
+}
+
+impl UtxoTransfer {
+    pub fn new(utxo: Utxo, sender_randomness: Digest) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+        }
+    }
+
+    pub fn encrypt_to_address(
+        &self,
+        address: &ReceivingAddress,
+    ) -> anyhow::Result<UtxoTransferEncrypted> {
+        Ok(UtxoTransferEncrypted {
+            ciphertext: address.encrypt(&self.utxo, self.sender_randomness)?,
+            receiver_identifier: address.receiver_identifier(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
+pub struct UtxoTransferEncrypted {
+    pub ciphertext: Vec<BFieldElement>,
+    pub receiver_identifier: BFieldElement,
+}
+
+impl UtxoTransferEncrypted {
+    pub fn decrypt_with_spending_key(
+        &self,
+        spending_key: &SpendingKey,
+    ) -> anyhow::Result<UtxoTransfer> {
+        let (utxo, sender_randomness) = spending_key.decrypt(&self.ciphertext)?;
+
+        Ok(UtxoTransfer {
+            utxo,
+            sender_randomness,
+        })
+    }
 }

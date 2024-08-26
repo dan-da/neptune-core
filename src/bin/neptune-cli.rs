@@ -14,7 +14,8 @@ use clap_complete::Shell;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
-use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::KeyType;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
@@ -456,12 +457,15 @@ async fn main() -> Result<()> {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
 
+            // todo: make owned/unowned notify method configurable.
+
             client
                 .send(
                     ctx,
                     amount,
                     receiving_address,
-                    UtxoNotifyMethod::OnChain,
+                    OwnedUtxoNotifyMethod::OnChain,
+                    UnownedUtxoNotifyMethod::OnChain,
                     fee,
                 )
                 .await?;
@@ -473,8 +477,16 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
+            // todo: make owned/unowned notify method configurable.
+
             client
-                .send_to_many(ctx, parsed_outputs, UtxoNotifyMethod::OnChain, fee)
+                .send_to_many(
+                    ctx,
+                    parsed_outputs,
+                    OwnedUtxoNotifyMethod::OnChain,
+                    UnownedUtxoNotifyMethod::OnChain,
+                    fee,
+                )
                 .await?;
             println!("Send completed.");
         }

@@ -25,6 +25,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
 use wallet::expected_utxo::UtxoNotifier;
+use wallet::expected_utxo::UtxoTransfer;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -33,7 +34,8 @@ use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
-use crate::models::blockchain::transaction::UtxoNotifyMethod;
+use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::peer::HandshakeData;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -446,7 +448,8 @@ impl GlobalState {
     pub fn generate_tx_outputs(
         &self,
         outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     ) -> Result<TxOutputList> {
         let block_height = self.chain.light_state().header().height;
 
@@ -467,6 +470,7 @@ impl GlobalState {
                     amount,
                     sender_randomness,
                     owned_utxo_notify_method,
+                    unowned_utxo_notify_method,
                 )
             })
             .collect::<Result<_>>()?;
@@ -556,7 +560,7 @@ impl GlobalState {
         &self,
         tx_outputs: &mut TxOutputList,
         change_key: SpendingKey,
-        change_utxo_notify_method: UtxoNotifyMethod,
+        change_utxo_notify_method: OwnedUtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<Transaction> {
@@ -588,7 +592,7 @@ impl GlobalState {
                 );
 
                 match change_utxo_notify_method {
-                    UtxoNotifyMethod::OnChain => {
+                    OwnedUtxoNotifyMethod::OnChain => {
                         let public_announcement = change_key
                             .to_address()
                             .generate_public_announcement(&utxo, sender_randomness)?;
@@ -599,8 +603,20 @@ impl GlobalState {
                             public_announcement,
                         )
                     }
-                    UtxoNotifyMethod::OffChain => {
+                    OwnedUtxoNotifyMethod::OffChain => {
                         TxOutput::offchain(utxo, sender_randomness, change_key.privacy_preimage())
+                    }
+                    OwnedUtxoNotifyMethod::OffChainSerialized => {
+                        let change_address = change_key.to_address();
+                        let utxo_transfer_encrypted =
+                            UtxoTransfer::new(utxo.clone(), sender_randomness)
+                                .encrypt_to_address(&change_address)?;
+                        TxOutput::offchain_serialized(
+                            utxo,
+                            sender_randomness,
+                            change_address.privacy_digest(),
+                            utxo_transfer_encrypted,
+                        )
                     }
                 }
             };
@@ -681,7 +697,7 @@ impl GlobalState {
             .create_transaction(
                 &mut tx_outputs,
                 change_key.into(),
-                UtxoNotifyMethod::OffChain,
+                OwnedUtxoNotifyMethod::OffChain,
                 fee,
                 timestamp,
             )
@@ -2326,7 +2342,7 @@ mod global_state_tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn onchain_symmetric_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OnChain, KeyType::Symmetric).await
+            change_exists(OwnedUtxoNotifyMethod::OnChain, KeyType::Symmetric).await
         }
 
         /// test scenario: onchain/generation.
@@ -2337,7 +2353,7 @@ mod global_state_tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn onchain_generation_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OnChain, KeyType::Generation).await
+            change_exists(OwnedUtxoNotifyMethod::OnChain, KeyType::Generation).await
         }
 
         /// test scenario: offchain/symmetric.
@@ -2348,7 +2364,7 @@ mod global_state_tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn offchain_symmetric_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OffChain, KeyType::Symmetric).await
+            change_exists(OwnedUtxoNotifyMethod::OffChain, KeyType::Symmetric).await
         }
 
         /// test scenario: offchain/generation.
@@ -2359,7 +2375,7 @@ mod global_state_tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn offchain_generation_change_exists() -> Result<()> {
-            change_exists(UtxoNotifyMethod::OffChain, KeyType::Generation).await
+            change_exists(OwnedUtxoNotifyMethod::OffChain, KeyType::Generation).await
         }
 
         /// basic scenario:  alice receives 20,000 coins in the premine.  7 months
@@ -2409,7 +2425,8 @@ mod global_state_tests {
         /// redundant-storage-in-a-box to users that want to use offchain
         /// notification but keep their wallets local.
         async fn change_exists(
-            utxo_notify_method: UtxoNotifyMethod,
+            owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+            unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
             change_key_type: KeyType,
         ) -> Result<()> {
             // setup initial conditions
@@ -2457,8 +2474,11 @@ mod global_state_tests {
 
                 // create an output for bob, worth 20.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let mut tx_outputs =
-                    alice_state_mut.generate_tx_outputs(outputs, utxo_notify_method)?;
+                let mut tx_outputs = alice_state_mut.generate_tx_outputs(
+                    outputs,
+                    utxo_notify_method,
+                    unowned_utxo_notify_method,
+                )?;
 
                 // create tx.  utxo_notify_method is a test param.
                 let alice_to_bob_tx = alice_state_mut
@@ -2583,8 +2603,8 @@ mod global_state_tests {
                 // For onchain notification the balance will be 19979.
                 // For offchain notification, it will be 0.  Funds are lost!!!
                 let alice_expected_balance_by_method = match utxo_notify_method {
-                    UtxoNotifyMethod::OnChain => NeptuneCoins::new(19979),
-                    UtxoNotifyMethod::OffChain => NeptuneCoins::new(0),
+                    OwnedUtxoNotifyMethod::OnChain => NeptuneCoins::new(19979),
+                    OwnedUtxoNotifyMethod::OffChain => NeptuneCoins::new(0),
                 };
 
                 // verify that our on/offchain prediction is correct.

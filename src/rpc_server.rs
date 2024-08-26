@@ -29,7 +29,8 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::UtxoNotifyMethod;
+use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
 use crate::models::consensus::timestamp::Timestamp;
@@ -160,7 +161,8 @@ pub trait RPC {
     async fn send(
         amount: NeptuneCoins,
         address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -195,7 +197,8 @@ pub trait RPC {
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
 
@@ -615,11 +618,18 @@ impl RPC for NeptuneRPCServer {
         ctx: context::Context,
         amount: NeptuneCoins,
         address: ReceivingAddress,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
-        self.send_to_many(ctx, vec![(address, amount)], owned_utxo_notify_method, fee)
-            .await
+        self.send_to_many(
+            ctx,
+            vec![(address, amount)],
+            owned_utxo_notify_method,
+            unowned_utxo_notify_method,
+            fee,
+        )
+        .await
     }
 
     // Locking:
@@ -632,7 +642,8 @@ impl RPC for NeptuneRPCServer {
         mut self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
-        owned_utxo_notify_method: UtxoNotifyMethod,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
@@ -650,7 +661,11 @@ impl RPC for NeptuneRPCServer {
         };
 
         let state = self.state.lock_guard().await;
-        let mut tx_outputs = match state.generate_tx_outputs(outputs, owned_utxo_notify_method) {
+        let mut tx_outputs = match state.generate_tx_outputs(
+            outputs,
+            owned_utxo_notify_method,
+            unowned_utxo_notify_method,
+        ) {
             Ok(u) => u,
             Err(err) => {
                 tracing::error!("Could not generate tx outputs: {}", err);
@@ -918,7 +933,7 @@ mod rpc_server_tests {
                 ctx,
                 NeptuneCoins::one(),
                 own_receiving_address.clone(),
-                UtxoNotifyMethod::OffChain,
+                OwnedUtxoNotifyMethod::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -927,7 +942,7 @@ mod rpc_server_tests {
             .send_to_many(
                 ctx,
                 vec![(own_receiving_address, NeptuneCoins::one())],
-                UtxoNotifyMethod::OffChain,
+                OwnedUtxoNotifyMethod::OffChain,
                 NeptuneCoins::one(),
             )
             .await;
@@ -1467,7 +1482,7 @@ mod rpc_server_tests {
         // --- Operation: perform send_to_many
         let result = rpc_server
             .clone()
-            .send_to_many(ctx, outputs, UtxoNotifyMethod::OffChain, fee)
+            .send_to_many(ctx, outputs, OwnedUtxoNotifyMethod::OffChain, fee)
             .await;
 
         // --- Test: verify op returns a value.

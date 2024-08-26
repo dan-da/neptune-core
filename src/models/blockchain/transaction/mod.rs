@@ -15,10 +15,11 @@ use std::hash::Hasher as StdHasher;
 
 pub use transaction_input::TxInput;
 pub use transaction_input::TxInputList;
+pub use transaction_output::OwnedUtxoNotifyMethod;
 pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
+pub use transaction_output::UnownedUtxoNotifyMethod;
 pub use transaction_output::UtxoNotification;
-pub use transaction_output::UtxoNotifyMethod;
 
 use anyhow::bail;
 use anyhow::Result;

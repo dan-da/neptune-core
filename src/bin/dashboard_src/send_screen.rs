@@ -8,7 +8,8 @@ use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEventKind;
 use neptune_core::config_models::network::Network;
-use neptune_core::models::blockchain::transaction::UtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
 use neptune_core::rpc_server::RPCClient;
@@ -136,12 +137,16 @@ impl SendScreen {
         let mut send_ctx = context::current();
         const SEND_DEADLINE_IN_SECONDS: u64 = 40;
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
+
+        // todo: make owned/unowned notify method configurable.
+
         let send_result = rpc_client
             .send(
                 send_ctx,
                 valid_amount,
                 valid_address,
-                UtxoNotifyMethod::OnChain,
+                OwnedUtxoNotifyMethod::OnChain,
+                UnownedUtxoNotifyMethod::OnChain,
                 fee,
             )
             .await
