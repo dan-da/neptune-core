@@ -145,9 +145,9 @@ impl SendScreen {
                 send_ctx,
                 valid_amount,
                 valid_address,
-                OwnedUtxoNotifyMethod::OnChain,
-                UnownedUtxoNotifyMethod::OnChain,
                 fee,
+                OwnedUtxoNotifyMethod::default(),
+                UnownedUtxoNotifyMethod::default(),
             )
             .await
             .unwrap();

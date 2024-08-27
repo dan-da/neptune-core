@@ -11,6 +11,7 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::generate;
 use clap_complete::Shell;
+use itertools::Itertools;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
@@ -23,6 +24,7 @@ use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPo
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
 use neptune_core::rpc_server::RPCClient;
+use strum::IntoEnumIterator;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
@@ -123,12 +125,24 @@ enum Command {
         amount: NeptuneCoins,
         address: String,
         fee: NeptuneCoins,
+
+        #[clap(long, default_value_t=OwnedUtxoNotifyMethod::default(), value_parser=OwnedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+
+        #[clap(long, default_value_t=UnownedUtxoNotifyMethod::default(), value_parser=UnownedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
     SendToMany {
         /// format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
         fee: NeptuneCoins,
+
+        #[clap(long, default_value_t=OwnedUtxoNotifyMethod::default(), value_parser=OwnedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+
+        #[clap(long, default_value_t=UnownedUtxoNotifyMethod::default(), value_parser=UnownedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
     PauseMiner,
     RestartMiner,
@@ -453,6 +467,8 @@ async fn main() -> Result<()> {
             amount,
             address,
             fee,
+            owned_utxo_notify_method,
+            unowned_utxo_notify_method,
         } => {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
@@ -464,14 +480,19 @@ async fn main() -> Result<()> {
                     ctx,
                     amount,
                     receiving_address,
-                    OwnedUtxoNotifyMethod::OnChain,
-                    UnownedUtxoNotifyMethod::OnChain,
                     fee,
+                    owned_utxo_notify_method,
+                    unowned_utxo_notify_method,
                 )
                 .await?;
             println!("Send completed.");
         }
-        Command::SendToMany { outputs, fee } => {
+        Command::SendToMany {
+            outputs,
+            fee,
+            owned_utxo_notify_method,
+            unowned_utxo_notify_method,
+        } => {
             let parsed_outputs = outputs
                 .into_iter()
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
@@ -483,9 +504,9 @@ async fn main() -> Result<()> {
                 .send_to_many(
                     ctx,
                     parsed_outputs,
-                    OwnedUtxoNotifyMethod::OnChain,
-                    UnownedUtxoNotifyMethod::OnChain,
                     fee,
+                    owned_utxo_notify_method,
+                    unowned_utxo_notify_method,
                 )
                 .await?;
             println!("Send completed.");

@@ -161,9 +161,9 @@ pub trait RPC {
     async fn send(
         amount: NeptuneCoins,
         address: ReceivingAddress,
+        fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-        fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Send coins to multiple recipients
@@ -197,9 +197,9 @@ pub trait RPC {
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-        fee: NeptuneCoins,
     ) -> Option<Digest>;
 
     /// Stop miner if running
@@ -618,16 +618,16 @@ impl RPC for NeptuneRPCServer {
         ctx: context::Context,
         amount: NeptuneCoins,
         address: ReceivingAddress,
+        fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-        fee: NeptuneCoins,
     ) -> Option<Digest> {
         self.send_to_many(
             ctx,
             vec![(address, amount)],
+            fee,
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
-            fee,
         )
         .await
     }
@@ -642,9 +642,9 @@ impl RPC for NeptuneRPCServer {
         mut self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-        fee: NeptuneCoins,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
