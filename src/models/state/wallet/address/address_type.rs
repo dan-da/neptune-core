@@ -200,8 +200,29 @@ impl ReceivingAddress {
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
-            Self::Symmetric(_k) => bail!("bech32m not implemented for symmetric keys"),
+            Self::Symmetric(k) => k.to_bech32m(network),
         }
+    }
+
+    /// returns an abbreviated address of 23 chars.
+    ///
+    /// The idea is that this suitable for human recognition purposes
+    ///
+    /// format:  <hrp><start>...<end>
+    ///
+    ///     4 human readable part.
+    ///     8 start of address.
+    ///     8 end of address.
+    pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
+        let bech32 = self.to_bech32m(network)?;
+
+        assert!(bech32.len() > 20);
+
+        // hrp is len 4. plus 8 = 12.
+        let (first, _) = bech32.split_at(12);
+        let (_, last) = bech32.split_at(bech32.len() - 8);
+
+        Ok(format!("{}...{}", first, last))
     }
 
     /// parses an address from its bech32m encoding
@@ -210,13 +231,15 @@ impl ReceivingAddress {
     ///       at present.  There is no need to give them out to 3rd parties
     ///       in a serialized form.
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
-        let addr = generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)?;
-        Ok(addr.into())
+        if let Ok(addr) = generation_address::GenerationReceivingAddress::from_bech32m(encoded, network) {
+            return Ok(addr.into())
+        }
+
+        let key = symmetric_key::SymmetricKey::from_bech32m(encoded, network)?;
+        Ok(key.into())
 
         // when future addr types are supported, we would attempt each type in
         // turn.
-
-        // note: not implemented for SymmetricKey (yet?)
     }
 
     /// generates a lock script from the spending lock.

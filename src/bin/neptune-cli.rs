@@ -25,7 +25,6 @@ use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPo
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
 use neptune_core::rpc_server::RPCClient;
-use strum::IntoEnumIterator;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
@@ -123,26 +122,37 @@ enum Command {
         ip: IpAddr,
     },
     Send {
-        amount: NeptuneCoins,
+        /// recipient's address
         address: String,
+
+        /// amount to send
+        amount: NeptuneCoins,
+
+        /// transaction fee
         fee: NeptuneCoins,
 
-        #[clap(long, default_value_t=OwnedUtxoNotifyMethod::default(), value_parser=OwnedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        /// how to notify our wallet of utxos.
+        #[clap(long, value_enum, default_value_t)]
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
 
-        #[clap(long, default_value_t=UnownedUtxoNotifyMethod::default(), value_parser=UnownedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        /// how to notify recipient's wallet of utxos.
+        #[clap(long, value_enum, default_value_t)]
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
     SendToMany {
-        /// format: address:amount address:amount ...
+        /// transaction outputs. format: address:amount address:amount ...
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
+
+        /// transaction fee
         fee: NeptuneCoins,
 
-        #[clap(long, default_value_t=OwnedUtxoNotifyMethod::default(), value_parser=OwnedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        /// how to notify our wallet of utxos.
+        #[clap(long, value_enum, default_value_t)]
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
 
-        #[clap(long, default_value_t=UnownedUtxoNotifyMethod::default(), value_parser=UnownedUtxoNotifyMethod::iter().map(|v| v.to_string()).collect_vec())]
+        /// how to notify recipient's wallet(s) of utxos.
+        #[clap(long, value_enum, default_value_t)]
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
     PauseMiner,
@@ -465,8 +475,8 @@ async fn main() -> Result<()> {
             println!("Cleared standing of {}", ip);
         }
         Command::Send {
-            amount,
             address,
+            amount,
             fee,
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
@@ -475,7 +485,7 @@ async fn main() -> Result<()> {
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
             let parsed_outputs = vec![(receiving_address, amount)];
 
-            let (tx_input_list, tx_output_list) = client
+            let (tx_input_list, tx_output_list, outputs_map) = client
                 .generate_tx_inputs_and_outputs(
                     ctx,
                     parsed_outputs.clone(),
@@ -490,27 +500,26 @@ async fn main() -> Result<()> {
                 .send(ctx, tx_input_list, tx_output_list.clone(), fee)
                 .await?;
 
-            let lines = parsed_outputs
+            let lines = outputs_map
                 .iter()
-                .zip(tx_output_list.iter())
-                .filter_map(
-                    |((address, _), tx_output)| match &tx_output.utxo_notification {
-                        UtxoNotification::OffChainSerialized(x) => Some(format!(
-                            "{} --> {}",
-                            address.to_bech32m(args.network).unwrap(),
-                            x.to_bech32m(args.network).unwrap()
-                        )),
-                        _ => None,
-                    },
-                )
+                .filter_map(|(address, tx_output)| match &tx_output.utxo_notification {
+                    UtxoNotification::OffChainSerialized(x) => Some(format!(
+                        "-- Utxo for {}. amount: {} --\n{}\n-- End Utxo --\n",
+                        address.to_bech32m_abbreviated(args.network).unwrap(),
+                        tx_output.utxo.get_native_currency_amount(),
+                        x.to_bech32m(args.network).unwrap()
+                    )),
+                    _ => None,
+                })
                 .collect_vec();
 
             if !lines.is_empty() {
-                println!("-- Offchain Serialized --\n");
+                println!("\n===== Offchain Utxo Transfer =====\n");
                 for line in lines {
                     println!("{}", line);
                 }
-                println!("-- END --\n\n");
+                println!("Important!  You must provide the above Utxo(s) to the corresponding recipient(s) for claiming or else the funds will be lost.\n");
+                println!("===== End Offchain Utxo Transfer =====\n\n");
             }
 
             println!("Send completed.");
@@ -526,7 +535,7 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
-            let (tx_input_list, tx_output_list) = client
+            let (tx_input_list, tx_output_list, outputs_map) = client
                 .generate_tx_inputs_and_outputs(
                     ctx,
                     parsed_outputs.clone(),
@@ -541,19 +550,16 @@ async fn main() -> Result<()> {
                 .send(ctx, tx_input_list, tx_output_list.clone(), fee)
                 .await?;
 
-            let lines = parsed_outputs
+            let lines = outputs_map
                 .iter()
-                .zip(tx_output_list.iter())
-                .filter_map(
-                    |((address, _), tx_output)| match &tx_output.utxo_notification {
-                        UtxoNotification::OffChainSerialized(x) => Some(format!(
-                            "{} --> {}",
-                            address.to_bech32m(args.network).unwrap(),
-                            x.to_bech32m(args.network).unwrap()
-                        )),
-                        _ => None,
-                    },
-                )
+                .filter_map(|(address, tx_output)| match &tx_output.utxo_notification {
+                    UtxoNotification::OffChainSerialized(x) => Some(format!(
+                        "{} --> {}",
+                        address.to_bech32m(args.network).unwrap(),
+                        x.to_bech32m(args.network).unwrap()
+                    )),
+                    _ => None,
+                })
                 .collect_vec();
 
             if !lines.is_empty() {

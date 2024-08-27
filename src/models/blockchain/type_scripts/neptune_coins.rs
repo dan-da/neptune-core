@@ -65,7 +65,7 @@ impl NeptuneCoins {
         product
     }
 
-    /// Return the element that corresponds to 1. Use in tests only.
+    /// Return the element that corresponds to 1 nau. Use in tests only.
     pub fn one() -> NeptuneCoins {
         NeptuneCoins(1u128)
     }

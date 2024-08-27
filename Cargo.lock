@@ -815,27 +815,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_more"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
-dependencies = [
- "derive_more-impl",
-]
-
-[[package]]
-name = "derive_more-impl"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.58",
- "unicode-xid",
-]
-
-[[package]]
 name = "derive_tasm_object"
 version = "0.1.0"
 source = "git+https://github.com/TritonVM/tasm-lib.git?rev=694f27daf78aade0ed0dc07e3babaab036cd5572#694f27daf78aade0ed0dc07e3babaab036cd5572"
@@ -1604,7 +1583,6 @@ dependencies = [
  "clap_complete",
  "console-subscriber",
  "crossterm",
- "derive_more",
  "directories",
  "divan",
  "field_count",

@@ -24,44 +24,26 @@ use std::ops::DerefMut;
 /// enumerates how utxos should be transferred.
 ///
 /// see also: [UtxoNotification]
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    Serialize,
-    Deserialize,
-    derive_more::Display,
-    derive_more::FromStr,
-    strum::EnumIter,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, clap::ValueEnum)]
 pub enum OwnedUtxoNotifyMethod {
     #[default]
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain,
 
-    /// the utxo notification should be transferred to recipient off the blockchain
+    /// the utxo notification should be transferred to recipient off the blockchain by neptune-core
     OffChain,
 
+    /// the utxo notification should be transferred to recipient off the blockchain external to neptune-core
     OffChainSerialized,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    Serialize,
-    Deserialize,
-    derive_more::Display,
-    derive_more::FromStr,
-    strum::EnumIter,
-)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, clap::ValueEnum)]
 pub enum UnownedUtxoNotifyMethod {
     #[default]
     /// the utxo notification should be transferred to recipient encrypted on the blockchain
     OnChain,
 
+    /// the utxo notification should be transferred to recipient off the blockchain external to neptune-core
     OffChainSerialized,
 }
 

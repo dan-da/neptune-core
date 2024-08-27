@@ -443,9 +443,9 @@ impl GlobalState {
     /// future work:
     ///
     /// see future work comment in [TxOutput::auto()]
-    pub fn generate_tx_outputs(
+    pub fn generate_tx_outputs<'a>(
         &self,
-        outputs: impl IntoIterator<Item = (ReceivingAddress, NeptuneCoins)>,
+        outputs: impl Iterator<Item = &'a (ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     ) -> Result<TxOutputList> {
@@ -453,7 +453,6 @@ impl GlobalState {
 
         // Convert outputs.  [address:amount] --> TxOutputList
         let tx_outputs: Vec<_> = outputs
-            .into_iter()
             .map(|(address, amount)| {
                 let sender_randomness = self
                     .wallet_state
@@ -465,7 +464,7 @@ impl GlobalState {
                 TxOutput::auto(
                     &self.wallet_state,
                     &address,
-                    amount,
+                    *amount,
                     sender_randomness,
                     owned_utxo_notify_method,
                     unowned_utxo_notify_method,
@@ -484,7 +483,7 @@ impl GlobalState {
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         timestamp: Timestamp,
-    ) -> Result<(TxInputList, TxOutputList)> {
+    ) -> Result<(TxInputList, TxOutputList, Vec<(ReceivingAddress, TxOutput)>)> {
         let total_spend = outputs
             .iter()
             .map(|(_, amount)| *amount)
@@ -509,11 +508,21 @@ impl GlobalState {
         }
 
         let tx_output_list = self.generate_tx_outputs(
-            outputs,
+            outputs.iter(),
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
         )?;
-        Ok((tx_input_list, tx_output_list))
+
+        assert_eq!(tx_output_list.len(), outputs.len());
+
+        // map addresses to tx_output for caller.
+        let map = outputs
+            .into_iter()
+            .zip(tx_output_list.iter())
+            .map(|((address, _), tx_output)| (address, tx_output.clone()))
+            .collect_vec();
+
+        Ok((tx_input_list, tx_output_list, map))
     }
 
     /// creates a Transaction.

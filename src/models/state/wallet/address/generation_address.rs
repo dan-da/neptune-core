@@ -49,12 +49,13 @@ pub struct GenerationSpendingKey {
     pub seed: Digest,
 }
 
+// 2168 bytes.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GenerationReceivingAddress {
-    pub receiver_identifier: BFieldElement,
-    pub encryption_key: lattice::kem::PublicKey,
-    pub privacy_digest: Digest,
-    pub spending_lock: Digest,
+    pub receiver_identifier: BFieldElement,      //    8 bytes
+    pub encryption_key: lattice::kem::PublicKey, // 2080 bytes
+    pub privacy_digest: Digest,                  //   40 bytes
+    pub spending_lock: Digest,                   //   40 bytes
 }
 
 impl GenerationSpendingKey {

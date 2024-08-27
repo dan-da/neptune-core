@@ -32,6 +32,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TxInputList;
+use crate::models::blockchain::transaction::TxOutput;
 use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -164,7 +165,7 @@ pub trait RPC {
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxInputList, TxOutputList)>;
+    ) -> Option<(TxInputList, TxOutputList, Vec<(ReceivingAddress, TxOutput)>)>;
 
     /// Send coins to multiple recipients
     ///
@@ -696,7 +697,7 @@ impl RPC for NeptuneRPCServer {
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxInputList, TxOutputList)> {
+    ) -> Option<(TxInputList, TxOutputList, Vec<(ReceivingAddress, TxOutput)>)> {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
