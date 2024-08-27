@@ -30,6 +30,9 @@ use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TxInputList;
+use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
@@ -155,16 +158,13 @@ pub trait RPC {
     /// Clears standing for ip, whether connected or not
     async fn clear_standing_by_ip(ip: IpAddr);
 
-    /// Send coins to a single recipient.
-    ///
-    /// See docs for [send_to_many()](Self::send_to_many())
-    async fn send(
-        amount: NeptuneCoins,
-        address: ReceivingAddress,
+    /// Generate tx outputs, for use by send(), send-to-many()
+    async fn generate_tx_inputs_and_outputs(
+        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<Digest>;
+    ) -> Option<(TxInputList, TxOutputList)>;
 
     /// Send coins to multiple recipients
     ///
@@ -195,11 +195,10 @@ pub trait RPC {
     ///
     /// future work: add `unowned_utxo_notify_method` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
-    async fn send_to_many(
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+    async fn send(
+        tx_input_list: TxInputList,
+        tx_output_list: TxOutputList,
         fee: NeptuneCoins,
-        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
-        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     ) -> Option<Digest>;
 
     /// Stop miner if running
@@ -252,6 +251,45 @@ impl NeptuneRPCServer {
         match current_system.cpu_temp() {
             Ok(temp) => Some(temp),
             Err(_) => None,
+        }
+    }
+
+    async fn finalize_send(
+        &mut self,
+        transaction: Transaction,
+        tx_output_list: TxOutputList,
+    ) -> Option<Digest> {
+        // if the tx created offchain expected_utxos we must inform wallet.
+        if tx_output_list.has_offchain() {
+            // acquire write-lock
+            let mut gsm = self.state.lock_guard_mut().await;
+
+            // Inform wallet of any expected incoming utxos.
+            // note that this (briefly) mutates self.
+            if let Err(e) = gsm
+                .add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
+                .await
+            {
+                tracing::error!("Could not add expected utxos to wallet: {}", e);
+                return None;
+            }
+
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
+
+        // Send transaction message to main
+        let response: Result<(), SendError<RPCServerToMain>> = self
+            .rpc_server_to_main_tx
+            .send(RPCServerToMain::Send(Box::new(transaction.clone())))
+            .await;
+
+        match response {
+            Ok(_) => Some(Hash::hash(&transaction)),
+            Err(e) => {
+                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
+                None
+            }
         }
     }
 }
@@ -475,10 +513,6 @@ impl RPC for NeptuneRPCServer {
             .await
     }
 
-    // future: this should perhaps take a param indicating what type
-    //         of receiving address.  for now we just use/assume
-    //         a Generation address.
-    //
     // documented in trait. do not add doc-comment.
     async fn next_receiving_address(
         mut self,
@@ -612,44 +646,57 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
-    // documented in trait. do not add doc-comment.
-    async fn send(
-        self,
-        ctx: context::Context,
-        amount: NeptuneCoins,
-        address: ReceivingAddress,
-        fee: NeptuneCoins,
-        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
-        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<Digest> {
-        self.send_to_many(
-            ctx,
-            vec![(address, amount)],
-            fee,
-            owned_utxo_notify_method,
-            unowned_utxo_notify_method,
-        )
-        .await
-    }
-
     // Locking:
     //   * acquires `global_state_lock` for write
     //
     // TODO: add an endpoint to get recommended fee density.
     //
     // documented in trait. do not add doc-comment.
-    async fn send_to_many(
+    async fn send(
+        mut self,
+        _ctx: context::Context,
+        tx_input_list: TxInputList,
+        tx_output_list: TxOutputList,
+        fee: NeptuneCoins,
+    ) -> Option<Digest> {
+        let span = tracing::debug_span!("Constructing transaction");
+        let _enter = span.enter();
+        let now = Timestamp::now();
+
+        // Create the transaction
+        //
+        // Note that create_transaction() does not modify any state and only
+        // requires acquiring a read-lock which does not block other tasks.
+        // This is important because internally it calls prove() which is a very
+        // lengthy operation.
+        //
+        // note: A change output will be added to tx_outputs if needed.
+        let transaction = match self
+            .state
+            .lock_guard()
+            .await
+            .create_transaction(tx_input_list, tx_output_list.clone(), fee, now)
+            .await
+        {
+            Ok(tx) => tx,
+            Err(err) => {
+                tracing::error!("Could not create transaction: {}", err);
+                return None;
+            }
+        };
+
+        self.finalize_send(transaction, tx_output_list).await
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn generate_tx_inputs_and_outputs(
         mut self,
         _ctx: context::Context,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<Digest> {
-        let span = tracing::debug_span!("Constructing transaction");
-        let _enter = span.enter();
-        let now = Timestamp::now();
-
+    ) -> Option<(TxInputList, TxOutputList)> {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
@@ -661,73 +708,20 @@ impl RPC for NeptuneRPCServer {
         };
 
         let state = self.state.lock_guard().await;
-        let mut tx_outputs = match state.generate_tx_outputs(
-            outputs,
-            owned_utxo_notify_method,
-            unowned_utxo_notify_method,
-        ) {
-            Ok(u) => u,
-            Err(err) => {
-                tracing::error!("Could not generate tx outputs: {}", err);
-                return None;
-            }
-        };
-
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
-        // note: A change output will be added to tx_outputs if needed.
-        let transaction = match state
-            .create_transaction(
-                &mut tx_outputs,
+        match state
+            .generate_tx_inputs_and_outputs(
+                outputs,
                 change_key,
-                owned_utxo_notify_method,
                 fee,
-                now,
+                owned_utxo_notify_method,
+                unowned_utxo_notify_method,
+                Timestamp::now(),
             )
             .await
         {
-            Ok(tx) => tx,
+            Ok(u) => Some(u),
             Err(err) => {
-                tracing::error!("Could not create transaction: {}", err);
-                return None;
-            }
-        };
-        drop(state);
-
-        // if the tx created offchain expected_utxos we must inform wallet.
-        if tx_outputs.has_offchain() {
-            // acquire write-lock
-            let mut gsm = self.state.lock_guard_mut().await;
-
-            // Inform wallet of any expected incoming utxos.
-            // note that this (briefly) mutates self.
-            if let Err(e) = gsm
-                .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
-                .await
-            {
-                tracing::error!("Could not add expected utxos to wallet: {}", e);
-                return None;
-            }
-
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
-        }
-
-        // Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = self
-            .rpc_server_to_main_tx
-            .send(RPCServerToMain::Send(Box::new(transaction.clone())))
-            .await;
-
-        match response {
-            Ok(_) => Some(Hash::hash(&transaction)),
-            Err(e) => {
-                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
+                tracing::error!("Could not generate tx outputs: {}", err);
                 None
             }
         }

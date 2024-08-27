@@ -85,7 +85,7 @@ pub enum UnownedUtxoNotifyMethod {
 ///
 /// see comment for: [TxOutput::auto()]
 ///
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UtxoNotification {
     /// the utxo notification should be transferred to recipient on the blockchain as a [PublicAnnouncement]
     OnChain(PublicAnnouncement),
@@ -101,7 +101,7 @@ pub enum UtxoNotification {
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxOutput {
     pub utxo: Utxo,
     pub sender_randomness: Digest,
@@ -307,7 +307,7 @@ impl TxOutput {
 }
 
 /// Represents a list of [TxOutput]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TxOutputList(Vec<TxOutput>);
 
 impl Deref for TxOutputList {
@@ -321,6 +321,12 @@ impl Deref for TxOutputList {
 impl DerefMut for TxOutputList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl From<TxOutput> for TxOutputList {
+    fn from(v: TxOutput) -> Self {
+        Self(vec![v])
     }
 }
 
@@ -409,6 +415,14 @@ impl TxOutputList {
         self.0
             .iter()
             .any(|u| matches!(&u.utxo_notification, UtxoNotification::OffChain(_)))
+    }
+
+    /// retrieves expected_utxos from possible sub-set of the list
+    pub fn utxo_transfer_iter(&self) -> impl Iterator<Item = UtxoTransferEncrypted> + '_ {
+        self.0.iter().filter_map(|u| match &u.utxo_notification {
+            UtxoNotification::OffChainSerialized(ut) => Some(ut.clone()),
+            _ => None,
+        })
     }
 
     /// retrieves expected_utxos from possible sub-set of the list

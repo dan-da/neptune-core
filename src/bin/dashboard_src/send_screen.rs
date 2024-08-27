@@ -139,16 +139,20 @@ impl SendScreen {
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
 
         // todo: make owned/unowned notify method configurable.
-
-        let send_result = rpc_client
-            .send(
+        let (tx_input_list, tx_output_list) = rpc_client
+            .generate_tx_inputs_and_outputs(
                 send_ctx,
-                valid_amount,
-                valid_address,
+                vec![(valid_address, valid_amount)],
                 fee,
                 OwnedUtxoNotifyMethod::default(),
                 UnownedUtxoNotifyMethod::default(),
             )
+            .await
+            .unwrap()
+            .unwrap();
+
+        let send_result = rpc_client
+            .send(send_ctx, tx_input_list, tx_output_list, fee)
             .await
             .unwrap();
 

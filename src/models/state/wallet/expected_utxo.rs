@@ -1,9 +1,14 @@
+use crate::config_models::network::Network;
 use crate::models::blockchain::{shared::Hash, transaction::utxo::Utxo};
 use crate::{
     models::consensus::timestamp::Timestamp,
     prelude::twenty_first,
     util_types::mutator_set::{addition_record::AdditionRecord, commit},
 };
+use anyhow::bail;
+use anyhow::Result;
+use bech32::FromBase32;
+use bech32::ToBase32;
 use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use tasm_lib::triton_vm::prelude::BFieldElement;
@@ -119,5 +124,38 @@ impl UtxoTransferEncrypted {
             utxo,
             sender_randomness,
         })
+    }
+
+    pub fn to_bech32m(&self, network: Network) -> Result<String> {
+        let hrp = Self::get_hrp(network);
+        let payload = bincode::serialize(self)?;
+        let variant = bech32::Variant::Bech32m;
+        match bech32::encode(hrp, payload.to_base32(), variant) {
+            Ok(enc) => Ok(enc),
+            Err(e) => bail!("Could not encode UtxoTransferEncrypted as bech32m because error: {e}"),
+        }
+    }
+
+    pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
+        let (hrp, data, variant) = bech32::decode(encoded)?;
+
+        if variant != bech32::Variant::Bech32m {
+            bail!("Can only decode bech32m addresses.");
+        }
+
+        if hrp[0..=4] != *Self::get_hrp(network) {
+            bail!("Could not decode bech32m address because of invalid prefix");
+        }
+
+        let payload = Vec::<u8>::from_base32(&data)?;
+
+        match bincode::deserialize(&payload) {
+            Ok(ra) => Ok(ra),
+            Err(e) => bail!("Could not decode bech32m because of error: {e}"),
+        }
+    }
+
+    pub fn get_hrp(_network: Network) -> &'static str {
+        "utxo"
     }
 }

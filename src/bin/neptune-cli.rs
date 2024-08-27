@@ -17,6 +17,7 @@ use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::UtxoNotification;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use neptune_core::models::state::wallet::address::KeyType;
 use neptune_core::models::state::wallet::address::ReceivingAddress;
@@ -472,19 +473,46 @@ async fn main() -> Result<()> {
         } => {
             // Parse on client
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
+            let parsed_outputs = vec![(receiving_address, amount)];
 
-            // todo: make owned/unowned notify method configurable.
-
-            client
-                .send(
+            let (tx_input_list, tx_output_list) = client
+                .generate_tx_inputs_and_outputs(
                     ctx,
-                    amount,
-                    receiving_address,
+                    parsed_outputs.clone(),
                     fee,
                     owned_utxo_notify_method,
                     unowned_utxo_notify_method,
                 )
+                .await?
+                .unwrap();
+
+            client
+                .send(ctx, tx_input_list, tx_output_list.clone(), fee)
                 .await?;
+
+            let lines = parsed_outputs
+                .iter()
+                .zip(tx_output_list.iter())
+                .filter_map(
+                    |((address, _), tx_output)| match &tx_output.utxo_notification {
+                        UtxoNotification::OffChainSerialized(x) => Some(format!(
+                            "{} --> {}",
+                            address.to_bech32m(args.network).unwrap(),
+                            x.to_bech32m(args.network).unwrap()
+                        )),
+                        _ => None,
+                    },
+                )
+                .collect_vec();
+
+            if !lines.is_empty() {
+                println!("-- Offchain Serialized --\n");
+                for line in lines {
+                    println!("{}", line);
+                }
+                println!("-- END --\n\n");
+            }
+
             println!("Send completed.");
         }
         Command::SendToMany {
@@ -498,17 +526,44 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
-            // todo: make owned/unowned notify method configurable.
-
-            client
-                .send_to_many(
+            let (tx_input_list, tx_output_list) = client
+                .generate_tx_inputs_and_outputs(
                     ctx,
-                    parsed_outputs,
+                    parsed_outputs.clone(),
                     fee,
                     owned_utxo_notify_method,
                     unowned_utxo_notify_method,
                 )
+                .await?
+                .unwrap();
+
+            client
+                .send(ctx, tx_input_list, tx_output_list.clone(), fee)
                 .await?;
+
+            let lines = parsed_outputs
+                .iter()
+                .zip(tx_output_list.iter())
+                .filter_map(
+                    |((address, _), tx_output)| match &tx_output.utxo_notification {
+                        UtxoNotification::OffChainSerialized(x) => Some(format!(
+                            "{} --> {}",
+                            address.to_bech32m(args.network).unwrap(),
+                            x.to_bech32m(args.network).unwrap()
+                        )),
+                        _ => None,
+                    },
+                )
+                .collect_vec();
+
+            if !lines.is_empty() {
+                println!("-- Offchain Serialized --\n");
+                for line in lines {
+                    println!("{}", line);
+                }
+                println!("-- END --\n\n");
+            }
+
             println!("Send completed.");
         }
         Command::PauseMiner => {

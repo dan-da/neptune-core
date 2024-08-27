@@ -241,7 +241,7 @@ impl ReceivingAddress {
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),

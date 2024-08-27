@@ -8,13 +8,15 @@ use crate::models::state::wallet::address::SpendingKey;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
+use serde::Deserialize;
+use serde::Serialize;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use tasm_lib::twenty_first::prelude::AlgebraicHasher;
 
 /// represents a transaction input, as accepted by
 /// [create_transaction()](crate::models::state::GlobalState::create_transaction())
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxInput {
     pub spending_key: SpendingKey,
     pub utxo: Utxo,
@@ -23,7 +25,7 @@ pub struct TxInput {
 }
 
 /// Represents a list of [TxInput]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TxInputList(Vec<TxInput>);
 
 impl Deref for TxInputList {

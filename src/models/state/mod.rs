@@ -25,7 +25,6 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
 use wallet::expected_utxo::UtxoNotifier;
-use wallet::expected_utxo::UtxoTransfer;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -50,7 +49,6 @@ use super::blockchain::block::Block;
 use super::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
-use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::transaction::TxInputList;
@@ -478,6 +476,46 @@ impl GlobalState {
         Ok(tx_outputs.into())
     }
 
+    pub async fn generate_tx_inputs_and_outputs(
+        &self,
+        mut outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        change_key: SpendingKey,
+        fee: NeptuneCoins,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
+        timestamp: Timestamp,
+    ) -> Result<(TxInputList, TxOutputList)> {
+        let total_spend = outputs
+            .iter()
+            .map(|(_, amount)| *amount)
+            .sum::<NeptuneCoins>()
+            + fee;
+        let tip_hash = self.chain.light_state().hash();
+
+        // collect spendable inputs
+        let tx_input_list = self
+            .wallet_state
+            .allocate_sufficient_input_funds_from_lock(total_spend, tip_hash, timestamp)
+            .await?;
+
+        let input_amount = tx_input_list.total_native_coins();
+
+        if total_spend < input_amount {
+            let change_amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
+                anyhow::anyhow!("underflow subtracting total_spend from input_amount")
+            })?;
+
+            outputs.push((change_key.to_address(), change_amount));
+        }
+
+        let tx_output_list = self.generate_tx_outputs(
+            outputs,
+            owned_utxo_notify_method,
+            unowned_utxo_notify_method,
+        )?;
+        Ok((tx_input_list, tx_output_list))
+    }
+
     /// creates a Transaction.
     ///
     /// This API provides a simple-to-use interface for creating a transaction.
@@ -556,81 +594,84 @@ impl GlobalState {
     ///     .add_expected_utxos_to_wallet(tx_outputs.expected_utxos())
     ///     .await?;
     /// ```
-    pub async fn create_transaction(
-        &self,
-        tx_outputs: &mut TxOutputList,
-        change_key: SpendingKey,
-        change_utxo_notify_method: OwnedUtxoNotifyMethod,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-    ) -> Result<Transaction> {
-        // 1. create/add change output if necessary.
-        let total_spend = tx_outputs.total_native_coins() + fee;
+    // pub async fn create_transaction(
+    //     &self,
+    //     tx_outputs: &mut TxOutputList,
+    //     change_key: SpendingKey,
+    //     change_utxo_notify_method: OwnedUtxoNotifyMethod,
+    //     fee: NeptuneCoins,
+    //     timestamp: Timestamp,
+    // ) -> Result<Transaction> {
 
-        let tip_hash = self.chain.light_state().hash();
+    //     let (tx_input_list, tx_output_list) = self.generate_tx_inputs_and_outputs(outputs, owned_utxo_notify_method, unowned_utxo_notify_method)
 
-        // collect spendable inputs
-        let tx_inputs = self
-            .wallet_state
-            .allocate_sufficient_input_funds_from_lock(total_spend, tip_hash, timestamp)
-            .await?;
+    //     // 1. create/add change output if necessary.
+    //     let total_spend = tx_outputs.total_native_coins() + fee;
 
-        let input_amount = tx_inputs.total_native_coins();
+    //     let tip_hash = self.chain.light_state().hash();
 
-        if total_spend < input_amount {
-            let block_height = self.chain.light_state().header().height;
+    //     // collect spendable inputs
+    //     let tx_inputs = self
+    //         .wallet_state
+    //         .allocate_sufficient_input_funds_from_lock(total_spend, tip_hash, timestamp)
+    //         .await?;
 
-            let amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
-                anyhow::anyhow!("underflow subtracting total_spend from input_amount")
-            })?;
+    //     let input_amount = tx_inputs.total_native_coins();
 
-            let tx_output = {
-                let utxo = Utxo::new_native_coin(change_key.to_address().lock_script(), amount);
-                let sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
-                    block_height,
-                    change_key.to_address().privacy_digest(),
-                );
+    //     if total_spend < input_amount {
+    //         let block_height = self.chain.light_state().header().height;
 
-                match change_utxo_notify_method {
-                    OwnedUtxoNotifyMethod::OnChain => {
-                        let public_announcement = change_key
-                            .to_address()
-                            .generate_public_announcement(&utxo, sender_randomness)?;
-                        TxOutput::onchain(
-                            utxo,
-                            sender_randomness,
-                            change_key.to_address().privacy_digest(),
-                            public_announcement,
-                        )
-                    }
-                    OwnedUtxoNotifyMethod::OffChain => {
-                        TxOutput::offchain(utxo, sender_randomness, change_key.privacy_preimage())
-                    }
-                    OwnedUtxoNotifyMethod::OffChainSerialized => {
-                        let change_address = change_key.to_address();
-                        let utxo_transfer_encrypted =
-                            UtxoTransfer::new(utxo.clone(), sender_randomness)
-                                .encrypt_to_address(&change_address)?;
-                        TxOutput::offchain_serialized(
-                            utxo,
-                            sender_randomness,
-                            change_address.privacy_digest(),
-                            utxo_transfer_encrypted,
-                        )
-                    }
-                }
-            };
+    //         let amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
+    //             anyhow::anyhow!("underflow subtracting total_spend from input_amount")
+    //         })?;
 
-            tx_outputs.push(tx_output);
-        }
+    //         let tx_output = {
+    //             let utxo = Utxo::new_native_coin(change_key.to_address().lock_script(), amount);
+    //             let sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
+    //                 block_height,
+    //                 change_key.to_address().privacy_digest(),
+    //             );
 
-        // 2. Create the transaction
-        let transaction = self
-            .create_raw_transaction(tx_inputs, tx_outputs.clone(), fee, timestamp)
-            .await?;
+    //             match change_utxo_notify_method {
+    //                 OwnedUtxoNotifyMethod::OnChain => {
+    //                     let public_announcement = change_key
+    //                         .to_address()
+    //                         .generate_public_announcement(&utxo, sender_randomness)?;
+    //                     TxOutput::onchain(
+    //                         utxo,
+    //                         sender_randomness,
+    //                         change_key.to_address().privacy_digest(),
+    //                         public_announcement,
+    //                     )
+    //                 }
+    //                 OwnedUtxoNotifyMethod::OffChain => {
+    //                     TxOutput::offchain(utxo, sender_randomness, change_key.privacy_preimage())
+    //                 }
+    //                 OwnedUtxoNotifyMethod::OffChainSerialized => {
+    //                     let change_address = change_key.to_address();
+    //                     let utxo_transfer_encrypted =
+    //                         UtxoTransfer::new(utxo.clone(), sender_randomness)
+    //                             .encrypt_to_address(&change_address)?;
+    //                     TxOutput::offchain_serialized(
+    //                         utxo,
+    //                         sender_randomness,
+    //                         change_address.privacy_digest(),
+    //                         utxo_transfer_encrypted,
+    //                     )
+    //                 }
+    //             }
+    //         };
 
-        Ok(transaction)
-    }
+    //         tx_outputs.push(tx_output);
+    //     }
+
+    //     // 2. Create the transaction
+    //     let transaction = self
+    //         .create_raw_transaction(tx_inputs, tx_outputs.clone(), fee, timestamp)
+    //         .await?;
+
+    //     Ok(transaction)
+    // }
 
     /// creates a Transaction.
     ///
@@ -659,7 +700,7 @@ impl GlobalState {
     /// Example:
     ///
     /// See the implementation of [Self::create_transaction()].
-    pub async fn create_raw_transaction(
+    pub async fn create_transaction(
         &self,
         tx_inputs: TxInputList,
         tx_outputs: TxOutputList,
