@@ -66,11 +66,19 @@ impl NeptuneCoins {
     }
 
     /// Return the element that corresponds to 1 nau. Use in tests only.
-    pub fn one() -> NeptuneCoins {
+    pub fn one_nau() -> NeptuneCoins {
         NeptuneCoins(1u128)
     }
 
-    /// Create an Amount object of the given number of coins.
+    pub fn max() -> NeptuneCoins {
+        Self::new(42000000)
+    }
+
+    // pub fn zero() -> NeptuneCoins {
+    //     Self::new(0)
+    // }
+
+    /// Create an Amount object of the given number of whole coins.
     pub fn new(num_coins: u32) -> NeptuneCoins {
         assert!(
             num_coins <= 42000000,
@@ -580,5 +588,49 @@ mod amount_tests {
         let a0 = NeptuneCoins(1u128 << 126);
         let a1 = NeptuneCoins(1u128 << 126);
         assert!(a0.safe_add(a1).is_none());
+    }
+
+    #[test]
+    fn eq() -> anyhow::Result<()> {
+        assert_ne!(NeptuneCoins::zero(), NeptuneCoins::one_nau());
+        Ok(())
+    }
+
+    #[test]
+    fn ord() -> anyhow::Result<()> {
+        assert_eq!(NeptuneCoins::zero() < NeptuneCoins::one_nau(), true);
+        assert_eq!(NeptuneCoins::zero() <= NeptuneCoins::one_nau(), true);
+        assert_eq!(NeptuneCoins::one_nau() > NeptuneCoins::zero(), true);
+        assert_eq!(NeptuneCoins::one_nau() >= NeptuneCoins::zero(), true);
+        Ok(())
+    }
+
+    #[test]
+    fn display_one_nau() {
+        assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
+    }
+
+    #[test]
+    fn display_decimal_without_trailing_zero() {
+        assert_eq!(NeptuneCoins::from_str("0.1").unwrap().to_string(), "0.1");
+    }
+
+    #[test]
+    fn display_amounts() -> anyhow::Result<()> {
+        assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
+
+        for i in 0..20 {
+            let decimal = format!("0.{:0width$}", 1, width = i);
+            assert_eq!(NeptuneCoins::from_str(&decimal)?.to_string(), decimal);
+        }
+
+        assert_eq!(NeptuneCoins::from_str("0.1")?.to_string(), "0.1");
+        assert_eq!(
+            NeptuneCoins::from_str("0.00000001")?.to_string(),
+            "0.00000001"
+        );
+        assert_ne!(NeptuneCoins::one_nau().to_string(), "0.0000000001");
+
+        Ok(())
     }
 }

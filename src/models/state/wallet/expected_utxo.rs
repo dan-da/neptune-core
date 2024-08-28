@@ -80,6 +80,7 @@ pub enum UtxoNotifier {
     Cli,
     Myself,
     Premine,
+    Claim,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, GetSize, Serialize, Deserialize)]
@@ -143,7 +144,7 @@ impl UtxoTransferEncrypted {
             bail!("Can only decode bech32m addresses.");
         }
 
-        if hrp[0..=4] != *Self::get_hrp(network) {
+        if hrp != *Self::get_hrp(network) {
             bail!("Could not decode bech32m address because of invalid prefix");
         }
 

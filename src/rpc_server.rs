@@ -29,10 +29,11 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
+use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TxAddressOutput;
 use crate::models::blockchain::transaction::TxInputList;
-use crate::models::blockchain::transaction::TxOutput;
 use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -44,9 +45,13 @@ use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
+use crate::models::state::wallet::expected_utxo::UtxoTransfer;
+use crate::models::state::wallet::expected_utxo::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::util_types::mutator_set::commit;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
@@ -161,11 +166,11 @@ pub trait RPC {
 
     /// Generate tx outputs, for use by send(), send-to-many()
     async fn generate_tx_inputs_and_outputs(
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<TxAddressOutput>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxInputList, TxOutputList, Vec<(ReceivingAddress, TxOutput)>)>;
+    ) -> Option<(TxInputList, TxOutputList, Vec<TxAddressOutput>)>;
 
     /// Send coins to multiple recipients
     ///
@@ -201,6 +206,8 @@ pub trait RPC {
         tx_output_list: TxOutputList,
         fee: NeptuneCoins,
     ) -> Option<Digest>;
+
+    async fn claim_utxo(utxo_transfer_encrypted: String) -> bool;
 
     /// Stop miner if running
     async fn pause_miner();
@@ -689,15 +696,66 @@ impl RPC for NeptuneRPCServer {
         self.finalize_send(transaction, tx_output_list).await
     }
 
+    async fn claim_utxo(self, _ctx: context::Context, utxo_transfer_encrypted_str: String) -> bool {
+        let utxo_transfer_encrypted = UtxoTransferEncrypted::from_bech32m(
+            &utxo_transfer_encrypted_str,
+            self.state.cli().network,
+        )
+        .unwrap();
+
+        let spending_key = self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .find_known_spending_key_for_receiver_identifier(
+                utxo_transfer_encrypted.receiver_identifier,
+            )
+            .ok_or(anyhow::anyhow!("utxo does not match any known wallet key"))
+            .unwrap();
+
+        let UtxoTransfer {
+            utxo,
+            sender_randomness,
+        } = utxo_transfer_encrypted
+            .decrypt_with_spending_key(&spending_key)
+            .unwrap();
+        let receiver_preimage = spending_key.privacy_preimage();
+        let receiver_digest = receiver_preimage.hash::<Hash>();
+
+        // and join those with the receiver digest to get a commitment
+        // Note: the commitment is computed in the same way as in the mutator set.
+        let announced_utxo = AnnouncedUtxo {
+            addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+        };
+
+        // acquire write-lock
+        let mut gsm = self.state.lock_guard_mut().await;
+
+        // Inform wallet of expected incoming utxos.
+        // note that this (briefly) mutates self.
+        gsm.add_expected_utxos_to_wallet([(announced_utxo, UtxoNotifier::Claim).into()])
+            .await
+            .unwrap();
+
+        // ensure we write new wallet state out to disk.
+        gsm.persist_wallet().await.expect("flushed wallet");
+
+        true
+    }
+
     // documented in trait. do not add doc-comment.
     async fn generate_tx_inputs_and_outputs(
         mut self,
         _ctx: context::Context,
-        outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        outputs: Vec<TxAddressOutput>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxInputList, TxOutputList, Vec<(ReceivingAddress, TxOutput)>)> {
+    ) -> Option<(TxInputList, TxOutputList, Vec<TxAddressOutput>)> {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
@@ -825,6 +883,7 @@ mod rpc_server_tests {
 
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::peer::PeerSanctionReason;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -863,6 +922,24 @@ mod rpc_server_tests {
         )
     }
 
+    async fn mine_block_to_wallet(global_state_lock: &GlobalStateLock) -> (Block, Utxo, Digest) {
+        let mut rng = rand::thread_rng();
+        let genesis_block = Block::genesis_block(global_state_lock.cli().network);
+
+        let wallet_spending_key = global_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation);
+
+        make_mock_block_with_valid_pow(
+            &genesis_block,
+            None,
+            wallet_spending_key.to_address().try_into().unwrap(),
+            rng.gen(),
+        )
+    }
+
     #[tokio::test]
     async fn network_response_is_consistent() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
@@ -881,8 +958,13 @@ mod rpc_server_tests {
         // requests do not crash the server.
 
         let network = Network::RegTest;
-        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let (rpc_server, global_state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+        mine_block_to_wallet(&global_state_lock).await;
+
         let ctx = context::current();
+
         let _ = rpc_server.clone().network(ctx).await;
         let _ = rpc_server.clone().own_listen_address_for_peers(ctx).await;
         let _ = rpc_server.clone().own_instance_id(ctx).await;
@@ -922,24 +1004,34 @@ mod rpc_server_tests {
             .clone()
             .clear_standing_by_ip(ctx, "127.0.0.1".parse().unwrap())
             .await;
+
+        let (tx_input_list, tx_output_list, _) = rpc_server
+            .clone()
+            .generate_tx_inputs_and_outputs(
+                ctx,
+                vec![(own_receiving_address.clone(), NeptuneCoins::new(1))],
+                NeptuneCoins::one_nau(),
+                OwnedUtxoNotifyMethod::OffChainSerialized,
+                UnownedUtxoNotifyMethod::default(),
+            )
+            .await
+            .unwrap();
+
         let _ = rpc_server
             .clone()
             .send(
                 ctx,
-                NeptuneCoins::one(),
-                own_receiving_address.clone(),
-                OwnedUtxoNotifyMethod::OffChain,
-                NeptuneCoins::one(),
+                tx_input_list,
+                tx_output_list.clone(),
+                NeptuneCoins::one_nau(),
             )
             .await;
+
+        let utxo_transfer_encrypted = tx_output_list.utxo_transfer_iter().next().unwrap();
+
         let _ = rpc_server
             .clone()
-            .send_to_many(
-                ctx,
-                vec![(own_receiving_address, NeptuneCoins::one())],
-                OwnedUtxoNotifyMethod::OffChain,
-                NeptuneCoins::one(),
-            )
+            .claim_utxo(ctx, utxo_transfer_encrypted.to_bech32m(network)?)
             .await;
         let _ = rpc_server.clone().pause_miner(ctx).await;
         let _ = rpc_server.clone().restart_miner(ctx).await;
@@ -1461,8 +1553,19 @@ mod rpc_server_tests {
         };
 
         // --- Setup. assemble outputs and fee ---
-        let outputs = vec![output1, output2];
+        // let outputs = vec![output1, output2];
         let fee = NeptuneCoins::new(1);
+        let (tx_input_list, tx_output_list, _) = rpc_server
+            .clone()
+            .generate_tx_inputs_and_outputs(
+                ctx,
+                vec![output1, output2],
+                fee,
+                OwnedUtxoNotifyMethod::OffChain,
+                UnownedUtxoNotifyMethod::default(),
+            )
+            .await
+            .unwrap();
 
         // --- Store: store num expected utxo before spend ---
         let num_expected_utxo = state_lock
@@ -1474,10 +1577,10 @@ mod rpc_server_tests {
             .len()
             .await;
 
-        // --- Operation: perform send_to_many
+        // --- Operation: perform send
         let result = rpc_server
             .clone()
-            .send_to_many(ctx, outputs, OwnedUtxoNotifyMethod::OffChain, fee)
+            .send(ctx, tx_input_list, tx_output_list, fee)
             .await;
 
         // --- Test: verify op returns a value.

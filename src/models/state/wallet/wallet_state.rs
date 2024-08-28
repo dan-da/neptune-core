@@ -9,6 +9,7 @@ use itertools::Itertools;
 use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
+use tasm_lib::triton_vm::prelude::BFieldElement;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -397,6 +398,17 @@ impl WalletState {
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
     }
 
+    // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
+    // wallet keys.
+    pub fn find_known_spending_key_for_receiver_identifier(
+        &self,
+        receiver_identifier: BFieldElement,
+    ) -> Option<SpendingKey> {
+        self.get_all_known_spending_keys()
+            .into_iter()
+            .find(|k| k.receiver_identifier() == receiver_identifier)
+    }
+
     /// returns all spending keys of all key types with derivation index less than current counter
     pub fn get_all_known_spending_keys(&self) -> Vec<SpendingKey> {
         KeyType::all_types()
@@ -412,6 +424,16 @@ impl WalletState {
             KeyType::Symmetric => self.get_known_symmetric_keys(),
         }
     }
+
+    /// finds spending key that corresponds to a given address, if any
+    // pub fn find_known_spending_key_for_address(
+    //     &self,
+    //     receiving_address: ReceivingAddress,
+    // ) -> Option<SpendingKey> {
+    //     self.get_known_spending_keys(KeyType::from(&receiving_address))
+    //         .iter()
+    //         .find(|k| k.recipient_identifier() == receiving_address.recipient_identifier())
+    // }
 
     // TODO: These spending keys should probably be derived dynamically from some
     // state in the wallet. And we should allow for other types than just generation
@@ -849,7 +871,7 @@ impl WalletState {
             .await
     }
 
-    pub async fn get_wallet_status_from_lock(&self, tip_digest: Digest) -> WalletStatus {
+    pub async fn get_wallet_status(&self, tip_digest: Digest) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
         let mut unsynced_unspent = vec![];
@@ -895,7 +917,7 @@ impl WalletState {
         }
     }
 
-    pub async fn allocate_sufficient_input_funds_from_lock(
+    pub async fn allocate_sufficient_input_funds_at_timestamp(
         &self,
         requested_amount: NeptuneCoins,
         tip_digest: Digest,
@@ -903,15 +925,15 @@ impl WalletState {
     ) -> Result<TxInputList> {
         // We only attempt to generate a transaction using those UTXOs that have up-to-date
         // membership proofs.
-        let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
+        let wallet_status = self.get_wallet_status(tip_digest).await;
 
         // First check that we have enough. Otherwise return an error.
         if wallet_status.synced_unspent_available_amount(timestamp) < requested_amount {
             bail!(
-                "Insufficient synced amount to create transaction. Requested: {}, Total synced UTXOs: {}. Total synced amount: {}. Synced unspent available amount: {}. Synced unspent timelocked amount: {}. Total unsynced UTXOs: {}. Unsynced unspent amount: {}. Block is: {}",
+                "Insufficient synced amount to create transaction.\n Requested: {}\n synced UTXOs: {}\n synced unspent amount: {}\n synced unspent available amount: {}\n Synced unspent timelocked amount: {}\n unsynced UTXOs: {}\n unsynced unspent amount: {}\n block is: {}",
                 requested_amount,
                 wallet_status.synced_unspent.len(),
-                wallet_status.synced_unspent.iter().map(|(wse, _msmp)| wse.utxo.get_native_currency_amount()).sum::<NeptuneCoins>(),
+                wallet_status.synced_unspent_amount(),
                 wallet_status.synced_unspent_available_amount(timestamp),
                 wallet_status.synced_unspent_timelocked_amount(timestamp),
                 wallet_status.unsynced_unspent.len(),
@@ -961,7 +983,7 @@ impl WalletState {
         tip_digest: Digest,
     ) -> Result<TxInputList> {
         let now = Timestamp::now();
-        self.allocate_sufficient_input_funds_from_lock(requested_amount, tip_digest, now)
+        self.allocate_sufficient_input_funds_at_timestamp(requested_amount, tip_digest, now)
             .await
     }
 

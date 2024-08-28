@@ -79,6 +79,25 @@ impl TryFrom<&PublicAnnouncement> for KeyType {
     }
 }
 
+// impl TryFrom<(&str, Network)> for KeyType {
+//     type Error = anyhow::Error;
+
+//     fn try_from(v: (&str, Network)) -> Result<Self> {
+//         let (address, network) = v;
+
+//         let gen_hrp = generation::Generation::get_hrp(network);
+//         let sym_hrp = symmetric::SymmetricKey::get_hrp(network);
+
+//         if address.starts_with(gen_hrp) {
+//             Ok(Self::Generation);
+//         } else if address.starts_with(sym_hrp) {
+//             Ok(Self::Symmetric);
+//         } else {
+//             Err(anyhow::anyhow!("address not recognized"))
+//         }
+//     }
+// }
+
 impl KeyType {
     /// returns all available `KeyType`
     pub fn all_types() -> Vec<KeyType> {
@@ -204,7 +223,14 @@ impl ReceivingAddress {
         }
     }
 
-    /// returns an abbreviated address of 23 chars.
+    pub fn get_hrp(&self, network: Network) -> String {
+        match self {
+            Self::Generation(_) => generation_address::GenerationReceivingAddress::get_hrp(network),
+            Self::Symmetric(_) => symmetric_key::SymmetricKey::get_hrp(network).to_string(),
+        }
+    }
+
+    /// returns an abbreviated address.
     ///
     /// The idea is that this suitable for human recognition purposes
     ///
@@ -215,12 +241,13 @@ impl ReceivingAddress {
     ///     8 end of address.
     pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
         let bech32 = self.to_bech32m(network)?;
+        let first_len = self.get_hrp(network).len() + 8usize;
+        let last_len = 8usize;
 
-        assert!(bech32.len() > 20);
+        assert!(bech32.len() > first_len + last_len);
 
-        // hrp is len 4. plus 8 = 12.
-        let (first, _) = bech32.split_at(12);
-        let (_, last) = bech32.split_at(bech32.len() - 8);
+        let (first, _) = bech32.split_at(first_len);
+        let (_, last) = bech32.split_at(bech32.len() - last_len);
 
         Ok(format!("{}...{}", first, last))
     }
@@ -231,8 +258,10 @@ impl ReceivingAddress {
     ///       at present.  There is no need to give them out to 3rd parties
     ///       in a serialized form.
     pub fn from_bech32m(encoded: &str, network: Network) -> Result<Self> {
-        if let Ok(addr) = generation_address::GenerationReceivingAddress::from_bech32m(encoded, network) {
-            return Ok(addr.into())
+        if let Ok(addr) =
+            generation_address::GenerationReceivingAddress::from_bech32m(encoded, network)
+        {
+            return Ok(addr.into());
         }
 
         let key = symmetric_key::SymmetricKey::from_bech32m(encoded, network)?;
@@ -455,7 +484,6 @@ mod test {
     }
 
     /// tests bech32m serialize, deserialize with a symmetric key
-    #[should_panic(expected = "bech32m not implemented for symmetric keys")]
     #[proptest]
     fn test_bech32m_conversion_symmetric(#[strategy(arb())] seed: Digest) {
         worker::test_bech32m_conversion(SymmetricKey::from_seed(seed).into());

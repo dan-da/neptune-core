@@ -16,6 +16,7 @@ use std::hash::Hasher as StdHasher;
 pub use transaction_input::TxInput;
 pub use transaction_input::TxInputList;
 pub use transaction_output::OwnedUtxoNotifyMethod;
+pub use transaction_output::TxAddressOutput;
 pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
 pub use transaction_output::UnownedUtxoNotifyMethod;
@@ -46,9 +47,11 @@ use validity::TransactionValidationLogic;
 
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::consensus::mast_hash::MastHash;
+use crate::models::consensus::timestamp::Timestamp;
 use crate::models::consensus::ValidityTree;
 use crate::models::consensus::WitnessType;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
+use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::prelude::triton_vm;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
@@ -83,6 +86,21 @@ impl From<&ExpectedUtxo> for AnnouncedUtxo {
             utxo: eu.utxo.clone(),
             sender_randomness: eu.sender_randomness,
             receiver_preimage: eu.receiver_preimage,
+        }
+    }
+}
+
+impl From<(AnnouncedUtxo, UtxoNotifier)> for ExpectedUtxo {
+    fn from(inputs: (AnnouncedUtxo, UtxoNotifier)) -> Self {
+        let (au, un) = inputs;
+        Self {
+            addition_record: au.addition_record,
+            utxo: au.utxo,
+            sender_randomness: au.sender_randomness,
+            receiver_preimage: au.receiver_preimage,
+            received_from: un,
+            notification_received: Timestamp::now(),
+            mined_in_block: None,
         }
     }
 }

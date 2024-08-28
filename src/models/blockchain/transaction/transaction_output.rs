@@ -21,6 +21,8 @@ use serde::Serialize;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+pub type TxAddressOutput = (ReceivingAddress, NeptuneCoins);
+
 /// enumerates how utxos should be transferred.
 ///
 /// see also: [UtxoNotification]
@@ -437,7 +439,7 @@ mod tests {
         let seed: Digest = rng.gen();
         let address = GenerationReceivingAddress::derive_from_seed(seed);
 
-        let amount = NeptuneCoins::one();
+        let amount = NeptuneCoins::one_nau();
         let utxo = Utxo::new_native_coin(address.lock_script(), amount);
 
         let sender_randomness = state
@@ -445,8 +447,9 @@ mod tests {
             .wallet_secret
             .generate_sender_randomness(block_height, address.privacy_digest);
 
-        for utxo_notify_method in [
+        for owned_utxo_notify_method in [
             OwnedUtxoNotifyMethod::OffChain,
+            OwnedUtxoNotifyMethod::OffChainSerialized,
             OwnedUtxoNotifyMethod::OnChain,
         ] {
             let utxo_receiver = TxOutput::auto(
@@ -454,7 +457,8 @@ mod tests {
                 &address.into(),
                 amount,
                 sender_randomness,
-                utxo_notify_method, // how to notify of owned utxos.
+                owned_utxo_notify_method, // how to notify of owned utxos.
+                UnownedUtxoNotifyMethod::OnChain,
             )?;
 
             // we should have OnChain transfer regardless of owned_transfer_method setting
@@ -498,10 +502,14 @@ mod tests {
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
 
-        let amount = NeptuneCoins::one();
+        let amount = NeptuneCoins::one_nau();
 
-        for (transfer_method, address) in [
+        for (owned_utxo_notify_method, address) in [
             (OwnedUtxoNotifyMethod::OffChain, address_gen.clone()),
+            (
+                OwnedUtxoNotifyMethod::OffChainSerialized,
+                address_gen.clone(),
+            ),
             (OwnedUtxoNotifyMethod::OnChain, address_sym.clone()),
         ] {
             let utxo = Utxo::new_native_coin(address.lock_script(), amount);
@@ -515,14 +523,21 @@ mod tests {
                 &address,
                 amount,
                 sender_randomness,
-                transfer_method, // how to notify of owned utxos.
+                owned_utxo_notify_method, // how to notify of owned utxos.
+                UnownedUtxoNotifyMethod::OnChain,
             )?;
 
             let transfer_is_correct = match utxo_receiver.utxo_notification {
                 UtxoNotification::OffChain(_) => {
-                    matches!(transfer_method, OwnedUtxoNotifyMethod::OffChain)
+                    matches!(owned_utxo_notify_method, OwnedUtxoNotifyMethod::OffChain)
                 }
-                UtxoNotification::OnChain(ref pa) => match transfer_method {
+                UtxoNotification::OffChainSerialized(_) => {
+                    matches!(
+                        owned_utxo_notify_method,
+                        OwnedUtxoNotifyMethod::OffChainSerialized
+                    )
+                }
+                UtxoNotification::OnChain(ref pa) => match owned_utxo_notify_method {
                     OwnedUtxoNotifyMethod::OnChain => {
                         address.matches_public_announcement_key_type(pa)
                     }
@@ -530,7 +545,7 @@ mod tests {
                 },
             };
 
-            println!("owned_transfer_method: {:#?}", transfer_method);
+            println!("owned_transfer_method: {:#?}", owned_utxo_notify_method);
             println!("utxo_transfer: {:#?}", utxo_receiver.utxo_notification);
 
             assert!(transfer_is_correct);

@@ -684,7 +684,7 @@ mod wallet_tests {
         assert_eq!(
             1,
             own_wallet_state
-                .allocate_sufficient_input_funds(NeptuneCoins::one(), block_1.hash())
+                .allocate_sufficient_input_funds(NeptuneCoins::one_nau(), block_1.hash())
                 .await
                 .unwrap()
                 .len()
@@ -693,7 +693,7 @@ mod wallet_tests {
             1,
             own_wallet_state
                 .allocate_sufficient_input_funds(
-                    mining_reward.checked_sub(&NeptuneCoins::one()).unwrap(),
+                    mining_reward.checked_sub(&NeptuneCoins::one_nau()).unwrap(),
                     block_1.hash()
                 )
                 .await
@@ -711,7 +711,10 @@ mod wallet_tests {
 
         // Cannot allocate more than we have: `mining_reward`
         assert!(own_wallet_state
-            .allocate_sufficient_input_funds(mining_reward + NeptuneCoins::one(), block_1.hash())
+            .allocate_sufficient_input_funds(
+                mining_reward + NeptuneCoins::one_nau(),
+                block_1.hash()
+            )
             .await
             .is_err());
 
@@ -754,7 +757,7 @@ mod wallet_tests {
             6,
             own_wallet_state
                 .allocate_sufficient_input_funds(
-                    mining_reward.scalar_mul(5) + NeptuneCoins::one(),
+                    mining_reward.scalar_mul(5) + NeptuneCoins::one_nau(),
                     next_block.hash()
                 )
                 .await
@@ -775,7 +778,7 @@ mod wallet_tests {
         // Cannot allocate more than we have: 22 * mining reward
         assert!(own_wallet_state
             .allocate_sufficient_input_funds(
-                expected_balance + NeptuneCoins::one(),
+                expected_balance + NeptuneCoins::one_nau(),
                 next_block.hash()
             )
             .await
@@ -1058,9 +1061,7 @@ mod wallet_tests {
         );
 
         // Check that `WalletStatus` is returned correctly
-        let wallet_status = own_wallet_state
-            .get_wallet_status_from_lock(block_18.hash())
-            .await;
+        let wallet_status = own_wallet_state.get_wallet_status(block_18.hash()).await;
         assert_eq!(
             19,
             wallet_status.synced_unspent.len(),

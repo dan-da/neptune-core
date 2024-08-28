@@ -200,7 +200,7 @@ impl GenerationReceivingAddress {
     }
 
     /// returns human readable prefix (hrp) of an address.
-    fn get_hrp(network: Network) -> String {
+    pub fn get_hrp(network: Network) -> String {
         // NOLGA: Neptune lattice-based generation address
         let mut hrp = "nolga".to_string();
         let network_byte: char = match network {
@@ -229,7 +229,7 @@ impl GenerationReceivingAddress {
             bail!("Can only decode bech32m addresses.");
         }
 
-        if hrp[0..=5] != Self::get_hrp(network) {
+        if hrp != Self::get_hrp(network) {
             bail!("Could not decode bech32m address because of invalid prefix");
         }
 

@@ -51,6 +51,7 @@ use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::Transaction;
+use super::blockchain::transaction::TxAddressOutput;
 use super::blockchain::transaction::TxInputList;
 use super::blockchain::transaction::TxOutput;
 use super::blockchain::transaction::TxOutputList;
@@ -277,9 +278,7 @@ impl GlobalState {
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let tip_digest = self.chain.light_state().hash();
-        self.wallet_state
-            .get_wallet_status_from_lock(tip_digest)
-            .await
+        self.wallet_state.get_wallet_status(tip_digest).await
     }
 
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
@@ -463,7 +462,7 @@ impl GlobalState {
                 // based on whether the address belongs to our wallet or not
                 TxOutput::auto(
                     &self.wallet_state,
-                    &address,
+                    address,
                     *amount,
                     sender_randomness,
                     owned_utxo_notify_method,
@@ -475,15 +474,61 @@ impl GlobalState {
         Ok(tx_outputs.into())
     }
 
+    /// Generates TxInputList and TxOutputList (including change output) from an
+    /// existing TxOutputList that represents all outputs except for the change
+    /// output.
+    ///
+    /// This is useful when ReceivingAddress is not available, such as when
+    /// creating output Utxo directly from lockscripts.  Otherwise
+    /// [generate_tx_inputs_and_outputs_from_list()] is preferred.
+    pub async fn generate_tx_inputs_and_outputs_from_list(
+        &self,
+        mut tx_output_list: TxOutputList,
+        change_key: SpendingKey,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        fee: NeptuneCoins,
+        timestamp: Timestamp,
+    ) -> Result<(TxInputList, TxOutputList)> {
+        let total_spend = tx_output_list.total_native_coins() + fee;
+        let tip_hash = self.chain.light_state().hash();
+
+        // collect spendable inputs
+        let tx_input_list = self
+            .wallet_state
+            .allocate_sufficient_input_funds_at_timestamp(total_spend, tip_hash, timestamp)
+            .await?;
+
+        let input_amount = tx_input_list.total_native_coins();
+
+        if total_spend < input_amount {
+            let change_amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
+                anyhow::anyhow!("underflow subtracting total_spend from input_amount")
+            })?;
+
+            let change_outputs = [(change_key.to_address(), change_amount)];
+            let mut change_output_list = self.generate_tx_outputs(
+                change_outputs.iter(),
+                owned_utxo_notify_method,
+                UnownedUtxoNotifyMethod::OnChain,
+            )?;
+
+            assert_eq!(change_output_list.len(), 1);
+
+            tx_output_list.append(&mut change_output_list);
+        }
+
+        Ok((tx_input_list, tx_output_list))
+    }
+
     pub async fn generate_tx_inputs_and_outputs(
         &self,
-        mut outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
+        mut outputs: Vec<TxAddressOutput>,
         change_key: SpendingKey,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         timestamp: Timestamp,
-    ) -> Result<(TxInputList, TxOutputList, Vec<(ReceivingAddress, TxOutput)>)> {
+    ) -> Result<(TxInputList, TxOutputList, Vec<TxAddressOutput>)> {
         let total_spend = outputs
             .iter()
             .map(|(_, amount)| *amount)
@@ -494,7 +539,7 @@ impl GlobalState {
         // collect spendable inputs
         let tx_input_list = self
             .wallet_state
-            .allocate_sufficient_input_funds_from_lock(total_spend, tip_hash, timestamp)
+            .allocate_sufficient_input_funds_at_timestamp(total_spend, tip_hash, timestamp)
             .await?;
 
         let input_amount = tx_input_list.total_native_coins();
@@ -515,14 +560,7 @@ impl GlobalState {
 
         assert_eq!(tx_output_list.len(), outputs.len());
 
-        // map addresses to tx_output for caller.
-        let map = outputs
-            .into_iter()
-            .zip(tx_output_list.iter())
-            .map(|((address, _), tx_output)| (address, tx_output.clone()))
-            .collect_vec();
-
-        Ok((tx_input_list, tx_output_list, map))
+        Ok((tx_input_list, tx_output_list, outputs))
     }
 
     /// creates a Transaction.
@@ -622,7 +660,7 @@ impl GlobalState {
     //     // collect spendable inputs
     //     let tx_inputs = self
     //         .wallet_state
-    //         .allocate_sufficient_input_funds_from_lock(total_spend, tip_hash, timestamp)
+    //         .allocate_sufficient_input_funds(total_spend, tip_hash, timestamp)
     //         .await?;
 
     //     let input_amount = tx_inputs.total_native_coins();
@@ -733,8 +771,6 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
-        let mut tx_outputs = TxOutputList::from(tx_output_vec);
-
         // note: should use next_unused_generation_spending_key()
         // but that requires &mut self.
         let change_key = self
@@ -742,18 +778,21 @@ impl GlobalState {
             .wallet_secret
             .nth_symmetric_key_for_tests(0);
 
-        let len = tx_outputs.len();
-        let transaction = self
-            .create_transaction(
-                &mut tx_outputs,
+        let (tx_input_list, tx_output_list) = self
+            .generate_tx_inputs_and_outputs_from_list(
+                tx_output_vec.into(),
                 change_key.into(),
                 OwnedUtxoNotifyMethod::OffChain,
                 fee,
                 timestamp,
             )
             .await?;
-        info!("receivers len before: {len}, after: {}", tx_outputs.len());
-        Ok((transaction, (&tx_outputs).into()))
+
+        let transaction = self
+            .create_transaction(tx_input_list, tx_output_list.clone(), fee, timestamp)
+            .await?;
+
+        Ok((transaction, (&tx_output_list).into()))
     }
 
     /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
@@ -880,14 +919,7 @@ impl GlobalState {
         expected_utxos: impl IntoIterator<Item = ExpectedUtxo>,
     ) -> Result<()> {
         for expected_utxo in expected_utxos.into_iter() {
-            self.wallet_state
-                .add_expected_utxo(ExpectedUtxo::new(
-                    expected_utxo.utxo,
-                    expected_utxo.sender_randomness,
-                    expected_utxo.receiver_preimage,
-                    expected_utxo.received_from,
-                ))
-                .await;
+            self.wallet_state.add_expected_utxo(expected_utxo).await;
         }
         Ok(())
     }
@@ -1465,6 +1497,7 @@ mod global_state_tests {
 
     use crate::config_models::network::Network;
     use crate::models::blockchain::block::Block;
+    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::tests::shared::add_block_to_light_state;
     use crate::tests::shared::make_mock_block;
@@ -1821,7 +1854,7 @@ mod global_state_tests {
         // Verify that wallet has monitored UTXOs, from genesis and from block_1a
         let wallet_status = global_state
             .wallet_state
-            .get_wallet_status_from_lock(mock_block_1a.hash())
+            .get_wallet_status(mock_block_1a.hash())
             .await;
         assert_eq!(2, wallet_status.synced_unspent.len());
 
@@ -1847,7 +1880,7 @@ mod global_state_tests {
         // Verify that one MUTXO is unsynced, and that 1 (from genesis) is synced
         let wallet_status_after_forking = global_state
             .wallet_state
-            .get_wallet_status_from_lock(parent_block.hash())
+            .get_wallet_status(parent_block.hash())
             .await;
         assert_eq!(1, wallet_status_after_forking.synced_unspent.len());
         assert_eq!(1, wallet_status_after_forking.unsynced_unspent.len());
@@ -1911,7 +1944,7 @@ mod global_state_tests {
             // Verify that UTXO was recorded
             let wallet_status_after_1a = global_state
                 .wallet_state
-                .get_wallet_status_from_lock(mock_block_1a.hash())
+                .get_wallet_status(mock_block_1a.hash())
                 .await;
             assert_eq!(2, wallet_status_after_1a.synced_unspent.len());
         }
@@ -1931,7 +1964,7 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_a_block.hash())
+            .get_wallet_status(fork_a_block.hash())
             .await;
 
         assert_eq!(2, wallet_status_on_a_fork.synced_unspent.len());
@@ -1951,7 +1984,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let wallet_status_on_b_fork_before_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash())
+            .get_wallet_status(fork_b_block.hash())
             .await;
         assert_eq!(
             0,
@@ -1969,7 +2002,7 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_b_fork_after_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash())
+            .get_wallet_status(fork_b_block.hash())
             .await;
         assert_eq!(2, wallet_status_on_b_fork_after_resync.synced_unspent.len());
         assert_eq!(
@@ -1994,7 +2027,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let wallet_status_on_c_fork_before_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash())
+            .get_wallet_status(fork_c_block.hash())
             .await;
         assert_eq!(
             0,
@@ -2013,7 +2046,7 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_c_fork_after_resync = global_state
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash())
+            .get_wallet_status(fork_c_block.hash())
             .await;
         assert_eq!(1, wallet_status_on_c_fork_after_resync.synced_unspent.len());
         assert_eq!(
@@ -2094,7 +2127,7 @@ mod global_state_tests {
         );
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let fee = NeptuneCoins::one();
+        let fee = NeptuneCoins::one_nau();
         let sender_randomness: Digest = rng.gen();
         let tx_outputs_for_alice = vec![
             TxOutput::fake_address(
@@ -2476,7 +2509,6 @@ mod global_state_tests {
         /// notification but keep their wallets local.
         async fn change_exists(
             owned_utxo_notify_method: OwnedUtxoNotifyMethod,
-            unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
             change_key_type: KeyType,
         ) -> Result<()> {
             // setup initial conditions
@@ -2485,6 +2517,7 @@ mod global_state_tests {
             let launch = genesis_block.kernel.header.timestamp;
             let seven_months_post_launch = launch + Timestamp::months(7);
             let miner_address = GenerationReceivingAddress::derive_from_seed(random());
+            let unowned_utxo_notify_method = UnownedUtxoNotifyMethod::OnChain;
 
             // amounts used in alice-to-bob transaction.
             let alice_to_bob_amount = NeptuneCoins::new(20);
@@ -2523,28 +2556,33 @@ mod global_state_tests {
                     .next_unused_spending_key(change_key_type);
 
                 // create an output for bob, worth 20.
+                // owned_utxo_notify_method is a test param.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let mut tx_outputs = alice_state_mut.generate_tx_outputs(
-                    outputs,
-                    utxo_notify_method,
-                    unowned_utxo_notify_method,
-                )?;
+                let (tx_input_list, tx_output_list, _) = alice_state_mut
+                    .generate_tx_inputs_and_outputs(
+                        outputs,
+                        alice_change_key,
+                        alice_to_bob_fee,
+                        owned_utxo_notify_method,
+                        unowned_utxo_notify_method,
+                        seven_months_post_launch,
+                    )
+                    .await?;
 
-                // create tx.  utxo_notify_method is a test param.
+                // create tx.
                 let alice_to_bob_tx = alice_state_mut
                     .create_transaction(
-                        &mut tx_outputs,
-                        alice_change_key,
-                        utxo_notify_method,
+                        tx_input_list,
+                        tx_output_list.clone(),
                         alice_to_bob_fee,
                         seven_months_post_launch,
                     )
                     .await?;
 
                 // Inform alice wallet of any expected incoming utxos.
-                // note: no-op when all utxo notifications are sent on-chain.
+                // note: no-op when owned utxo notifications are sent on-chain.
                 alice_state_mut
-                    .add_expected_utxos_to_wallet(tx_outputs.expected_utxos_iter())
+                    .add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
                     .await?;
 
                 // the block gets mined.
@@ -2652,9 +2690,11 @@ mod global_state_tests {
 
                 // For onchain notification the balance will be 19979.
                 // For offchain notification, it will be 0.  Funds are lost!!!
-                let alice_expected_balance_by_method = match utxo_notify_method {
+                // For offchain-serialized notification, it will be 0.  funds may still be claimed.
+                let alice_expected_balance_by_method = match owned_utxo_notify_method {
                     OwnedUtxoNotifyMethod::OnChain => NeptuneCoins::new(19979),
                     OwnedUtxoNotifyMethod::OffChain => NeptuneCoins::new(0),
+                    OwnedUtxoNotifyMethod::OffChainSerialized => NeptuneCoins::new(0),
                 };
 
                 // verify that our on/offchain prediction is correct.

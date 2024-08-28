@@ -1507,7 +1507,7 @@ mod archival_state_tests {
         );
 
         // Send two outputs each to Alice and Bob, from genesis receiver
-        let fee = NeptuneCoins::one();
+        let fee = NeptuneCoins::one_nau();
         let sender_randomness: Digest = random();
         let tx_outputs_for_alice = vec![
             TxOutput::fake_address(
@@ -2980,17 +2980,17 @@ mod archival_state_tests {
 
         // Test `get_block_header`
         {
-            let block_header_2_from_lock_method = archival_state
+            let block_header_2_method = archival_state
                 .get_block_header(mock_block_2.hash())
                 .await
                 .unwrap();
-            assert_eq!(mock_block_2.kernel.header, block_header_2_from_lock_method);
+            assert_eq!(mock_block_2.kernel.header, block_header_2_method);
 
-            let genesis_header_from_lock_method = archival_state
+            let genesis_header_method = archival_state
                 .get_block_header(genesis.hash())
                 .await
                 .unwrap();
-            assert_eq!(genesis.kernel.header, genesis_header_from_lock_method);
+            assert_eq!(genesis.kernel.header, genesis_header_method);
         }
 
         // Test `block_height_to_block_headers`

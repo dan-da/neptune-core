@@ -12,8 +12,8 @@ use aead::KeyInit;
 use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
-use bech32::ToBase32;
 use bech32::FromBase32;
+use bech32::ToBase32;
 use rand::thread_rng;
 use rand::Rng;
 use serde::Deserialize;
@@ -193,7 +193,7 @@ impl SymmetricKey {
         let hrp = Self::get_hrp(network);
         let payload = bincode::serialize(self)?;
         let variant = bech32::Variant::Bech32m;
-        match bech32::encode(&hrp, payload.to_base32(), variant) {
+        match bech32::encode(hrp, payload.to_base32(), variant) {
             Ok(enc) => Ok(enc),
             Err(e) => bail!("Could not encode UtxoTransferEncrypted as bech32m because error: {e}"),
         }
@@ -206,7 +206,7 @@ impl SymmetricKey {
             bail!("Can only decode bech32m addresses.");
         }
 
-        if hrp[0..=3] != *Self::get_hrp(network) {
+        if hrp != *Self::get_hrp(network) {
             bail!("Could not decode bech32m address because of invalid prefix");
         }
 
@@ -219,8 +219,8 @@ impl SymmetricKey {
     }
 
     // nsk: Neptune symmetric key
+    // todo: make it vary by network.
     pub fn get_hrp(_network: Network) -> &'static str {
         "nsk"
     }
-
 }

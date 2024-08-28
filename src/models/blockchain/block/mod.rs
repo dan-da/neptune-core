@@ -58,6 +58,7 @@ use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Utxo;
 use super::transaction::validity::TransactionValidationLogic;
 use super::transaction::Transaction;
+use super::transaction::TxAddressOutput;
 use super::type_scripts::neptune_coins::NeptuneCoins;
 use super::type_scripts::time_lock::TimeLock;
 
@@ -330,7 +331,7 @@ impl Block {
         Self::new(header, body, BlockType::Genesis)
     }
 
-    fn premine_distribution(_network: Network) -> Vec<(ReceivingAddress, NeptuneCoins)> {
+    fn premine_distribution(_network: Network) -> Vec<TxAddressOutput> {
         // The premine UTXOs can be hardcoded here.
         let authority_wallet = WalletSecret::devnet_wallet();
         let authority_receiving_address = authority_wallet

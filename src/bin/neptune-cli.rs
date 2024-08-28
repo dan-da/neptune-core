@@ -155,6 +155,11 @@ enum Command {
         #[clap(long, value_enum, default_value_t)]
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
+    /// claim an off-chain utxo-transfer.
+    Claim {
+        /// a bech32m encoded utxo transfer as returned from `send`
+        utxo_transfer_encrypted: String,
+    },
     PauseMiner,
     RestartMiner,
     PruneAbandonedMonitoredUtxos,
@@ -502,15 +507,18 @@ async fn main() -> Result<()> {
 
             let lines = outputs_map
                 .iter()
-                .filter_map(|(address, tx_output)| match &tx_output.utxo_notification {
-                    UtxoNotification::OffChainSerialized(x) => Some(format!(
-                        "-- Utxo for {}. amount: {} --\n{}\n-- End Utxo --\n",
-                        address.to_bech32m_abbreviated(args.network).unwrap(),
-                        tx_output.utxo.get_native_currency_amount(),
-                        x.to_bech32m(args.network).unwrap()
-                    )),
-                    _ => None,
-                })
+                .zip(tx_output_list.iter())
+                .filter_map(
+                    |((address, _), tx_output)| match &tx_output.utxo_notification {
+                        UtxoNotification::OffChainSerialized(x) => Some(format!(
+                            "-- Utxo for {}. amount: {} --\n{}\n-- End Utxo --\n",
+                            address.to_bech32m_abbreviated(args.network).unwrap(),
+                            tx_output.utxo.get_native_currency_amount(),
+                            x.to_bech32m(args.network).unwrap()
+                        )),
+                        _ => None,
+                    },
+                )
                 .collect_vec();
 
             if !lines.is_empty() {
@@ -552,14 +560,17 @@ async fn main() -> Result<()> {
 
             let lines = outputs_map
                 .iter()
-                .filter_map(|(address, tx_output)| match &tx_output.utxo_notification {
-                    UtxoNotification::OffChainSerialized(x) => Some(format!(
-                        "{} --> {}",
-                        address.to_bech32m(args.network).unwrap(),
-                        x.to_bech32m(args.network).unwrap()
-                    )),
-                    _ => None,
-                })
+                .zip(tx_output_list.iter())
+                .filter_map(
+                    |((address, _), tx_output)| match &tx_output.utxo_notification {
+                        UtxoNotification::OffChainSerialized(x) => Some(format!(
+                            "{} --> {}",
+                            address.to_bech32m(args.network).unwrap(),
+                            x.to_bech32m(args.network).unwrap()
+                        )),
+                        _ => None,
+                    },
+                )
                 .collect_vec();
 
             if !lines.is_empty() {
@@ -571,6 +582,12 @@ async fn main() -> Result<()> {
             }
 
             println!("Send completed.");
+        }
+        Command::Claim {
+            utxo_transfer_encrypted,
+        } => {
+            client.claim_utxo(ctx, utxo_transfer_encrypted).await?;
+            println!("Success!");
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");
