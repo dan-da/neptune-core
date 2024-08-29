@@ -1654,7 +1654,7 @@ mod rpc_server_tests {
             .generate_tx_inputs_and_outputs(
                 ctx,
                 pay_to_self_outputs,
-                NeptuneCoins::one_nau(),
+                NeptuneCoins::zero(),
                 OwnedUtxoNotifyMethod::OffChainSerialized,
                 UnownedUtxoNotifyMethod::default(),
             )
@@ -1681,6 +1681,26 @@ mod rpc_server_tests {
                 .await;
             assert!(result);
         }
+
+        assert_eq!(
+            vec![
+                NeptuneCoins::new(100), // from coinbase
+                NeptuneCoins::new(1),   // claimed via generation addr
+                NeptuneCoins::new(2),   // claimed via symmetric addr
+                NeptuneCoins::new(97)   // change (symmetric addr)
+            ],
+            global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .expected_utxos()
+                .get_all()
+                .await
+                .iter()
+                .map(|eu| eu.utxo.get_native_currency_amount())
+                .collect_vec()
+        );
 
         Ok(())
     }
@@ -1759,6 +1779,24 @@ mod rpc_server_tests {
                     .await;
                 assert!(result);
             }
+
+            assert_eq!(
+                vec![
+                    NeptuneCoins::new(1), // claimed via generation addr
+                    NeptuneCoins::new(2), // claimed via symmetric addr
+                ],
+                bob_global_state_lock
+                    .lock_guard()
+                    .await
+                    .wallet_state
+                    .wallet_db
+                    .expected_utxos()
+                    .get_all()
+                    .await
+                    .iter()
+                    .map(|eu| eu.utxo.get_native_currency_amount())
+                    .collect_vec()
+            );
         }
 
         Ok(())

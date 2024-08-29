@@ -196,6 +196,10 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.resync_membership_proofs().await
     }
 
+    pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
+        self.lock_guard().await.get_wallet_status_for_tip().await
+    }
+
     pub async fn prune_abandoned_monitored_utxos(
         &mut self,
         block_depth_threshhold: usize,
