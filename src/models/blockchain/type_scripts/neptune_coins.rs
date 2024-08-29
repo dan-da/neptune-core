@@ -598,10 +598,10 @@ mod amount_tests {
 
     #[test]
     fn ord() -> anyhow::Result<()> {
-        assert_eq!(NeptuneCoins::zero() < NeptuneCoins::one_nau(), true);
-        assert_eq!(NeptuneCoins::zero() <= NeptuneCoins::one_nau(), true);
-        assert_eq!(NeptuneCoins::one_nau() > NeptuneCoins::zero(), true);
-        assert_eq!(NeptuneCoins::one_nau() >= NeptuneCoins::zero(), true);
+        assert!(NeptuneCoins::zero() < NeptuneCoins::one_nau());
+        assert!(NeptuneCoins::zero() <= NeptuneCoins::one_nau());
+        assert!(NeptuneCoins::one_nau() > NeptuneCoins::zero());
+        assert!(NeptuneCoins::one_nau() >= NeptuneCoins::zero());
         Ok(())
     }
 

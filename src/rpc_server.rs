@@ -696,7 +696,7 @@ impl RPC for NeptuneRPCServer {
         self.finalize_send(transaction, tx_output_list).await
     }
 
-    async fn claim_utxo(self, _ctx: context::Context, utxo_transfer_encrypted_str: String) -> bool {
+    async fn claim_utxo(mut self, _ctx: context::Context, utxo_transfer_encrypted_str: String) -> bool {
         let utxo_transfer_encrypted = UtxoTransferEncrypted::from_bech32m(
             &utxo_transfer_encrypted_str,
             self.state.cli().network,
@@ -922,7 +922,7 @@ mod rpc_server_tests {
         )
     }
 
-    async fn mine_block_to_wallet(global_state_lock: &GlobalStateLock) -> (Block, Utxo, Digest) {
+    async fn mine_block_to_wallet(global_state_lock: &mut GlobalStateLock) -> (Block, Utxo, Digest) {
         let mut rng = rand::thread_rng();
         let genesis_block = Block::genesis_block(global_state_lock.cli().network);
 
@@ -958,10 +958,10 @@ mod rpc_server_tests {
         // requests do not crash the server.
 
         let network = Network::RegTest;
-        let (rpc_server, global_state_lock) =
+        let (rpc_server, mut global_state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
-        mine_block_to_wallet(&global_state_lock).await;
+        mine_block_to_wallet(&mut global_state_lock).await;
 
         let ctx = context::current();
 
