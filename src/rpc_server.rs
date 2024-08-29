@@ -696,7 +696,11 @@ impl RPC for NeptuneRPCServer {
         self.finalize_send(transaction, tx_output_list).await
     }
 
-    async fn claim_utxo(mut self, _ctx: context::Context, utxo_transfer_encrypted_str: String) -> bool {
+    async fn claim_utxo(
+        mut self,
+        _ctx: context::Context,
+        utxo_transfer_encrypted_str: String,
+    ) -> bool {
         let utxo_transfer_encrypted = UtxoTransferEncrypted::from_bech32m(
             &utxo_transfer_encrypted_str,
             self.state.cli().network,
@@ -874,6 +878,7 @@ mod rpc_server_tests {
     use std::net::SocketAddr;
 
     use anyhow::Result;
+    use itertools::Itertools;
     use num_traits::One;
     use num_traits::Zero;
     use rand::Rng;
@@ -922,7 +927,9 @@ mod rpc_server_tests {
         )
     }
 
-    async fn mine_block_to_wallet(global_state_lock: &mut GlobalStateLock) -> (Block, Utxo, Digest) {
+    async fn mine_block_to_wallet(
+        global_state_lock: &mut GlobalStateLock,
+    ) -> (Block, Utxo, Digest) {
         let mut rng = rand::thread_rng();
         let genesis_block = Block::genesis_block(global_state_lock.cli().network);
 
@@ -932,12 +939,27 @@ mod rpc_server_tests {
             .wallet_state
             .next_unused_spending_key(KeyType::Generation);
 
-        make_mock_block_with_valid_pow(
+        let (block1, utxo, coinbase_randomness) = make_mock_block_with_valid_pow(
             &genesis_block,
             None,
             wallet_spending_key.to_address().try_into().unwrap(),
             rng.gen(),
-        )
+        );
+
+        global_state_lock
+            .store_coinbase_block(
+                block1.clone(),
+                ExpectedUtxo::new(
+                    utxo.clone(),
+                    coinbase_randomness,
+                    wallet_spending_key.privacy_preimage(),
+                    UtxoNotifier::OwnMiner,
+                ),
+            )
+            .await
+            .unwrap();
+
+        (block1, utxo, coinbase_randomness)
     }
 
     #[tokio::test]
@@ -1599,6 +1621,145 @@ mod rpc_server_tests {
                 .await,
             num_expected_utxo + 2
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claim_utxo_owned() -> Result<()> {
+        let network = Network::RegTest;
+        let (rpc_server, mut global_state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+        mine_block_to_wallet(&mut global_state_lock).await;
+
+        let ctx = context::current();
+
+        let receiving_address_generation = rpc_server
+            .clone()
+            .next_receiving_address(context::current(), KeyType::Generation)
+            .await;
+        let receiving_address_symmetric = rpc_server
+            .clone()
+            .next_receiving_address(context::current(), KeyType::Symmetric)
+            .await;
+
+        let pay_to_self_outputs = vec![
+            (receiving_address_generation, NeptuneCoins::new(1)),
+            (receiving_address_symmetric, NeptuneCoins::new(2)),
+        ];
+
+        let (tx_input_list, tx_output_list, _) = rpc_server
+            .clone()
+            .generate_tx_inputs_and_outputs(
+                ctx,
+                pay_to_self_outputs,
+                NeptuneCoins::one_nau(),
+                OwnedUtxoNotifyMethod::OffChainSerialized,
+                UnownedUtxoNotifyMethod::default(),
+            )
+            .await
+            .unwrap();
+
+        let _ = rpc_server
+            .clone()
+            .send(
+                ctx,
+                tx_input_list,
+                tx_output_list.clone(),
+                NeptuneCoins::one_nau(),
+            )
+            .await;
+
+        for utxo_transfer_encrypted in tx_output_list.utxo_transfer_iter() {
+            let result = rpc_server
+                .clone()
+                .claim_utxo(
+                    context::current(),
+                    utxo_transfer_encrypted.to_bech32m(network)?,
+                )
+                .await;
+            assert!(result);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claim_utxo_unowned() -> Result<()> {
+        let network = Network::RegTest;
+
+        // bob's node
+        let (pay_to_bob_outputs, bob_rpc_server, mut bob_global_state_lock) = {
+            let (rpc_server, global_state_lock) =
+                test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+            let receiving_address_generation = rpc_server
+                .clone()
+                .next_receiving_address(context::current(), KeyType::Generation)
+                .await;
+            let receiving_address_symmetric = rpc_server
+                .clone()
+                .next_receiving_address(context::current(), KeyType::Symmetric)
+                .await;
+
+            let pay_to_bob_outputs = vec![
+                (receiving_address_generation, NeptuneCoins::new(1)),
+                (receiving_address_symmetric, NeptuneCoins::new(2)),
+            ];
+
+            (pay_to_bob_outputs, rpc_server, global_state_lock)
+        };
+
+        // alice's node
+        let (block1, alice_utxo_transfer_encrypted_to_bob_list) = {
+            let (rpc_server, mut global_state_lock) =
+                test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+            let (block1, ..) = mine_block_to_wallet(&mut global_state_lock).await;
+
+            let fee = NeptuneCoins::zero();
+
+            let (tx_input_list, tx_output_list, _) = rpc_server
+                .clone()
+                .generate_tx_inputs_and_outputs(
+                    context::current(),
+                    pay_to_bob_outputs,
+                    fee,
+                    OwnedUtxoNotifyMethod::default(),
+                    UnownedUtxoNotifyMethod::OffChainSerialized,
+                )
+                .await
+                .unwrap();
+
+            let _ = rpc_server
+                .clone()
+                .send(
+                    context::current(),
+                    tx_input_list,
+                    tx_output_list.clone(),
+                    fee,
+                )
+                .await;
+
+            (block1, tx_output_list.utxo_transfer_iter().collect_vec())
+        };
+
+        // bob's node claims each utxo
+        {
+            bob_global_state_lock.store_block(block1).await?;
+
+            for utxo_transfer_encrypted in alice_utxo_transfer_encrypted_to_bob_list.iter() {
+                let result = bob_rpc_server
+                    .clone()
+                    .claim_utxo(
+                        context::current(),
+                        utxo_transfer_encrypted.to_bech32m(network)?,
+                    )
+                    .await;
+                assert!(result);
+            }
+        }
 
         Ok(())
     }

@@ -619,7 +619,7 @@ mod amount_tests {
     fn display_amounts() -> anyhow::Result<()> {
         assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
 
-        for i in 0..20 {
+        for i in 0..30 {
             let decimal = format!("0.{:0width$}", 1, width = i);
             assert_eq!(NeptuneCoins::from_str(&decimal)?.to_string(), decimal);
         }
