@@ -33,7 +33,6 @@ use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TxAddressOutput;
-use crate::models::blockchain::transaction::TxInputList;
 use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -50,6 +49,7 @@ use crate::models::state::wallet::expected_utxo::UtxoTransfer;
 use crate::models::state::wallet::expected_utxo::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
+use crate::models::state::TransactionParams;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 
@@ -165,12 +165,12 @@ pub trait RPC {
     async fn clear_standing_by_ip(ip: IpAddr);
 
     /// Generate tx outputs, for use by send(), send-to-many()
-    async fn generate_tx_inputs_and_outputs(
+    async fn generate_tx_params(
         outputs: Vec<TxAddressOutput>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxInputList, TxOutputList, Vec<TxAddressOutput>)>;
+    ) -> Option<(TransactionParams, Vec<TxAddressOutput>)>;
 
     /// Send coins to multiple recipients
     ///
@@ -201,11 +201,7 @@ pub trait RPC {
     ///
     /// future work: add `unowned_utxo_notify_method` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
-    async fn send(
-        tx_input_list: TxInputList,
-        tx_output_list: TxOutputList,
-        fee: NeptuneCoins,
-    ) -> Option<Digest>;
+    async fn send(tx_params: TransactionParams) -> Option<Digest>;
 
     async fn claim_utxo(utxo_transfer_encrypted: String) -> bool;
 
@@ -663,13 +659,12 @@ impl RPC for NeptuneRPCServer {
     async fn send(
         mut self,
         _ctx: context::Context,
-        tx_input_list: TxInputList,
-        tx_output_list: TxOutputList,
-        fee: NeptuneCoins,
+        tx_params: TransactionParams,
     ) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
-        let now = Timestamp::now();
+
+        let tx_output_list = tx_params.tx_output_list().clone();
 
         // Create the transaction
         //
@@ -683,12 +678,12 @@ impl RPC for NeptuneRPCServer {
             .state
             .lock_guard()
             .await
-            .create_transaction(tx_input_list, tx_output_list.clone(), fee, now)
+            .create_transaction(tx_params)
             .await
         {
-            Ok(tx) => tx,
-            Err(err) => {
-                tracing::error!("Could not create transaction: {}", err);
+            Ok(t) => t,
+            Err(e) => {
+                tracing::error!("Could not create transaction: {}", e);
                 return None;
             }
         };
@@ -752,14 +747,14 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn generate_tx_inputs_and_outputs(
+    async fn generate_tx_params(
         mut self,
         _ctx: context::Context,
         outputs: Vec<TxAddressOutput>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxInputList, TxOutputList, Vec<TxAddressOutput>)> {
+    ) -> Option<(TransactionParams, Vec<TxAddressOutput>)> {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
@@ -772,7 +767,7 @@ impl RPC for NeptuneRPCServer {
 
         let state = self.state.lock_guard().await;
         match state
-            .generate_tx_inputs_and_outputs(
+            .generate_tx_params(
                 outputs,
                 change_key,
                 fee,
@@ -1027,9 +1022,9 @@ mod rpc_server_tests {
             .clear_standing_by_ip(ctx, "127.0.0.1".parse().unwrap())
             .await;
 
-        let (tx_input_list, tx_output_list, _) = rpc_server
+        let (tx_params, _) = rpc_server
             .clone()
-            .generate_tx_inputs_and_outputs(
+            .generate_tx_params(
                 ctx,
                 vec![(own_receiving_address.clone(), NeptuneCoins::new(1))],
                 NeptuneCoins::one_nau(),
@@ -1039,17 +1034,13 @@ mod rpc_server_tests {
             .await
             .unwrap();
 
-        let _ = rpc_server
-            .clone()
-            .send(
-                ctx,
-                tx_input_list,
-                tx_output_list.clone(),
-                NeptuneCoins::one_nau(),
-            )
-            .await;
+        let utxo_transfer_encrypted = tx_params
+            .tx_output_list()
+            .utxo_transfer_iter()
+            .next()
+            .unwrap();
 
-        let utxo_transfer_encrypted = tx_output_list.utxo_transfer_iter().next().unwrap();
+        let _ = rpc_server.clone().send(ctx, tx_params).await;
 
         let _ = rpc_server
             .clone()
@@ -1577,9 +1568,9 @@ mod rpc_server_tests {
         // --- Setup. assemble outputs and fee ---
         // let outputs = vec![output1, output2];
         let fee = NeptuneCoins::new(1);
-        let (tx_input_list, tx_output_list, _) = rpc_server
+        let (tx_params, _) = rpc_server
             .clone()
-            .generate_tx_inputs_and_outputs(
+            .generate_tx_params(
                 ctx,
                 vec![output1, output2],
                 fee,
@@ -1600,10 +1591,7 @@ mod rpc_server_tests {
             .await;
 
         // --- Operation: perform send
-        let result = rpc_server
-            .clone()
-            .send(ctx, tx_input_list, tx_output_list, fee)
-            .await;
+        let result = rpc_server.clone().send(ctx, tx_params).await;
 
         // --- Test: verify op returns a value.
         assert!(result.is_some());
@@ -1649,9 +1637,9 @@ mod rpc_server_tests {
             (receiving_address_symmetric, NeptuneCoins::new(2)),
         ];
 
-        let (tx_input_list, tx_output_list, _) = rpc_server
+        let (tx_params, _) = rpc_server
             .clone()
-            .generate_tx_inputs_and_outputs(
+            .generate_tx_params(
                 ctx,
                 pay_to_self_outputs,
                 NeptuneCoins::zero(),
@@ -1661,15 +1649,9 @@ mod rpc_server_tests {
             .await
             .unwrap();
 
-        let _ = rpc_server
-            .clone()
-            .send(
-                ctx,
-                tx_input_list,
-                tx_output_list.clone(),
-                NeptuneCoins::one_nau(),
-            )
-            .await;
+        let tx_output_list = tx_params.tx_output_list().clone();
+
+        let _ = rpc_server.clone().send(ctx, tx_params).await;
 
         for utxo_transfer_encrypted in tx_output_list.utxo_transfer_iter() {
             let result = rpc_server
@@ -1740,9 +1722,9 @@ mod rpc_server_tests {
 
             let fee = NeptuneCoins::zero();
 
-            let (tx_input_list, tx_output_list, _) = rpc_server
+            let (tx_params, _) = rpc_server
                 .clone()
-                .generate_tx_inputs_and_outputs(
+                .generate_tx_params(
                     context::current(),
                     pay_to_bob_outputs,
                     fee,
@@ -1752,17 +1734,14 @@ mod rpc_server_tests {
                 .await
                 .unwrap();
 
-            let _ = rpc_server
-                .clone()
-                .send(
-                    context::current(),
-                    tx_input_list,
-                    tx_output_list.clone(),
-                    fee,
-                )
-                .await;
+            let utxo_transfer_list = tx_params
+                .tx_output_list()
+                .utxo_transfer_iter()
+                .collect_vec();
 
-            (block1, tx_output_list.utxo_transfer_iter().collect_vec())
+            let _ = rpc_server.clone().send(context::current(), tx_params).await;
+
+            (block1, utxo_transfer_list)
         };
 
         // bob's node claims each utxo

@@ -17,6 +17,8 @@ use itertools::Itertools;
 use mempool::Mempool;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -62,12 +64,76 @@ use super::blockchain::type_scripts::TypeScript;
 use super::consensus::tasm::program::ConsensusProgram;
 use super::consensus::timestamp::Timestamp;
 
-#[derive(Debug, Clone)]
-struct TransactionDetails {
-    pub tx_inputs: TxInputList,
-    pub tx_outputs: TxOutputList,
-    pub fee: NeptuneCoins,
-    pub timestamp: Timestamp,
+// the goal is to impl Deserialize with validation to ensure
+// correct-by-construction using the "parse, don't validate" design philosophy.
+//
+// unfortunately serde does not yet directly support validating along with
+// derive Deserialize.  So a workaround pattern is to create a shadow
+// struct with the same fields that gets deserialized without validation
+// and then use try_from to validate and construct the target.
+//
+// see: https://github.com/serde-rs/serde/issues/642#issuecomment-683276351
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "TransactionParamsShadow")]
+pub struct TransactionParams {
+    tx_input_list: TxInputList,
+    tx_output_list: TxOutputList,
+    timestamp: Timestamp,
+}
+
+// note: this only exists to get deserialized without validation.
+#[derive(Deserialize)]
+struct TransactionParamsShadow {
+    tx_input_list: TxInputList,
+    tx_output_list: TxOutputList,
+    timestamp: Timestamp,
+}
+
+impl std::convert::TryFrom<TransactionParamsShadow> for TransactionParams {
+    type Error = anyhow::Error;
+    fn try_from(s: TransactionParamsShadow) -> Result<Self, Self::Error> {
+        Self::new_with_timestamp(s.tx_input_list, s.tx_output_list, s.timestamp)
+    }
+}
+
+impl TransactionParams {
+    pub fn new(tx_inputs: TxInputList, tx_outputs: TxOutputList) -> Result<Self> {
+        Self::new_with_timestamp(tx_inputs, tx_outputs, Timestamp::now())
+    }
+
+    pub fn new_with_timestamp(
+        tx_input_list: TxInputList,
+        tx_output_list: TxOutputList,
+        timestamp: Timestamp,
+    ) -> Result<Self> {
+        if tx_input_list.total_native_coins() < tx_output_list.total_native_coins() {
+            bail!("outputs exceed inputs.");
+        }
+
+        Ok(Self {
+            tx_input_list,
+            tx_output_list,
+            timestamp,
+        })
+    }
+
+    /// fee will always be >= 0, guaranteed by Self::new()
+    pub fn fee(&self) -> NeptuneCoins {
+        self.tx_input_list.total_native_coins() - self.tx_output_list.total_native_coins()
+    }
+
+    pub fn tx_input_list(&self) -> &TxInputList {
+        &self.tx_input_list
+    }
+
+    pub fn tx_output_list(&self) -> &TxOutputList {
+        &self.tx_output_list
+    }
+
+    pub fn timestamp(&self) -> &Timestamp {
+        &self.timestamp
+    }
 }
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
@@ -524,7 +590,7 @@ impl GlobalState {
         Ok((tx_input_list, tx_output_list))
     }
 
-    pub async fn generate_tx_inputs_and_outputs(
+    pub async fn generate_tx_params(
         &self,
         mut outputs: Vec<TxAddressOutput>,
         change_key: SpendingKey,
@@ -532,7 +598,7 @@ impl GlobalState {
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         timestamp: Timestamp,
-    ) -> Result<(TxInputList, TxOutputList, Vec<TxAddressOutput>)> {
+    ) -> Result<(TransactionParams, Vec<TxAddressOutput>)> {
         let total_spend = outputs
             .iter()
             .map(|(_, amount)| *amount)
@@ -564,7 +630,10 @@ impl GlobalState {
 
         assert_eq!(tx_output_list.len(), outputs.len());
 
-        Ok((tx_input_list, tx_output_list, outputs))
+        let tx_details =
+            TransactionParams::new_with_timestamp(tx_input_list, tx_output_list, timestamp)?;
+
+        Ok((tx_details, outputs))
     }
 
     /// creates a Transaction.
@@ -751,19 +820,30 @@ impl GlobalState {
     /// Example:
     ///
     /// See the implementation of [Self::create_transaction()].
-    pub async fn create_transaction(
-        &self,
-        tx_inputs: TxInputList,
-        tx_outputs: TxOutputList,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-    ) -> Result<Transaction> {
-        // UTXO data: inputs, outputs, and supporting witness data
-        let tx_data = self
-            .generate_tx_details_for_transaction(tx_inputs, tx_outputs, fee, timestamp)
-            .await?;
+    pub async fn create_transaction(&self, tx_params: TransactionParams) -> Result<Transaction> {
+        let mutator_set_accumulator = self
+            .chain
+            .light_state()
+            .kernel
+            .body
+            .mutator_set_accumulator
+            .clone();
+        let privacy = self.cli().privacy;
 
-        self.create_transaction_from_data(tx_data).await
+        // note: this executes the prover which can take a very
+        //       long time, perhaps minutes.  As such, we use
+        //       spawn_blocking() to execute on tokio's blocking
+        //       threadpool and avoid blocking the tokio executor
+        //       and other async tasks.
+        let transaction = tokio::task::spawn_blocking(move || {
+            Self::create_transaction_worker(
+                tx_params,
+                mutator_set_accumulator,
+                privacy,
+            )
+        })
+        .await?;
+        Ok(transaction)
     }
 
     /// This is a simple wrapper around create_transaction
@@ -792,75 +872,15 @@ impl GlobalState {
             )
             .await?;
 
-        let transaction = self
-            .create_transaction(tx_input_list, tx_output_list.clone(), fee, timestamp)
-            .await?;
+        let tx_params = TransactionParams::new_with_timestamp(
+            tx_input_list,
+            tx_output_list.clone(),
+            timestamp,
+        )?;
+
+        let transaction = self.create_transaction(tx_params).await?;
 
         Ok((transaction, (&tx_output_list).into()))
-    }
-
-    /// Given a list of UTXOs with receiver data, assemble owned and synced and spendable
-    /// UTXOs that unlock enough funds, add (and track) a change UTXO if necessary, and
-    /// and produce a list of removal records, input UTXOs (with lock scripts and
-    /// membership proofs), addition records, and output UTXOs.
-    async fn generate_tx_details_for_transaction(
-        &self,
-        tx_inputs: TxInputList,
-        tx_outputs: TxOutputList,
-        fee: NeptuneCoins,
-        timestamp: Timestamp,
-    ) -> Result<TransactionDetails> {
-        // total amount to be spent -- determines how many and which UTXOs to use
-        let total_spend: NeptuneCoins = tx_outputs.total_native_coins() + fee;
-        let input_amount = tx_inputs.total_native_coins();
-
-        // sanity check: do we even have enough funds?
-        if total_spend > input_amount {
-            debug!("Insufficient funds. total_spend: {total_spend}, input_amount: {input_amount}");
-            bail!("Not enough available funds.");
-        }
-        if total_spend < input_amount {
-            let diff = total_spend - input_amount;
-            bail!("Missing change output in the amount of {}", diff);
-        }
-
-        Ok(TransactionDetails {
-            tx_inputs,
-            tx_outputs,
-            fee,
-            timestamp,
-        })
-    }
-
-    /// Assembles a transaction kernel and supporting witness or proof(s) from
-    /// the given transaction data.
-    async fn create_transaction_from_data(
-        &self,
-        transaction_details: TransactionDetails,
-    ) -> Result<Transaction> {
-        let mutator_set_accumulator = self
-            .chain
-            .light_state()
-            .kernel
-            .body
-            .mutator_set_accumulator
-            .clone();
-        let privacy = self.cli().privacy;
-
-        // note: this executes the prover which can take a very
-        //       long time, perhaps minutes.  As such, we use
-        //       spawn_blocking() to execute on tokio's blocking
-        //       threadpool and avoid blocking the tokio executor
-        //       and other async tasks.
-        let transaction = tokio::task::spawn_blocking(move || {
-            Self::create_transaction_from_data_worker(
-                transaction_details,
-                mutator_set_accumulator,
-                privacy,
-            )
-        })
-        .await?;
-        Ok(transaction)
     }
 
     // note: this executes the prover which can take a very
@@ -869,33 +889,28 @@ impl GlobalState {
     //       Use create_transaction_from_data() instead.
     //
     // fixme: why is _privacy param unused?
-    fn create_transaction_from_data_worker(
-        transaction_details: TransactionDetails,
+    fn create_transaction_worker(
+        tx_params: TransactionParams,
         mutator_set_accumulator: MutatorSetAccumulator,
         _privacy: bool,
     ) -> Transaction {
-        let TransactionDetails {
-            tx_inputs,
-            tx_outputs,
-            fee,
-            timestamp,
-        } = transaction_details;
-
         // complete transaction kernel
         let kernel = TransactionKernel {
-            inputs: tx_inputs.removal_records(&mutator_set_accumulator),
-            outputs: tx_outputs.addition_records(),
-            public_announcements: tx_outputs.public_announcements(),
-            fee,
-            timestamp,
+            inputs: tx_params
+                .tx_input_list()
+                .removal_records(&mutator_set_accumulator),
+            outputs: tx_params.tx_output_list().addition_records(),
+            public_announcements: tx_params.tx_output_list().public_announcements(),
+            fee: tx_params.fee(),
+            timestamp: *tx_params.timestamp(),
             coinbase: None,
             mutator_set_hash: mutator_set_accumulator.hash(),
         };
 
         // populate witness
         let primitive_witness = Self::generate_primitive_witness(
-            &tx_inputs,
-            &tx_outputs,
+            tx_params.tx_input_list(),
+            tx_params.tx_output_list(),
             kernel.clone(),
             mutator_set_accumulator,
         );
@@ -2562,8 +2577,8 @@ mod global_state_tests {
                 // create an output for bob, worth 20.
                 // owned_utxo_notify_method is a test param.
                 let outputs = vec![(bob_address, alice_to_bob_amount)];
-                let (tx_input_list, tx_output_list, _) = alice_state_mut
-                    .generate_tx_inputs_and_outputs(
+                let (tx_params, _) = alice_state_mut
+                    .generate_tx_params(
                         outputs,
                         alice_change_key,
                         alice_to_bob_fee,
@@ -2573,15 +2588,10 @@ mod global_state_tests {
                     )
                     .await?;
 
+                let tx_output_list = tx_params.tx_output_list.clone();
+
                 // create tx.
-                let alice_to_bob_tx = alice_state_mut
-                    .create_transaction(
-                        tx_input_list,
-                        tx_output_list.clone(),
-                        alice_to_bob_fee,
-                        seven_months_post_launch,
-                    )
-                    .await?;
+                let alice_to_bob_tx = alice_state_mut.create_transaction(tx_params).await?;
 
                 // Inform alice wallet of any expected incoming utxos.
                 // note: no-op when owned utxo notifications are sent on-chain.

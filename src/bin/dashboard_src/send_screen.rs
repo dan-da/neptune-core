@@ -139,8 +139,8 @@ impl SendScreen {
         send_ctx.deadline = SystemTime::now() + Duration::from_secs(SEND_DEADLINE_IN_SECONDS);
 
         // todo: make owned/unowned notify method configurable.
-        let (tx_input_list, tx_output_list, _outputs_map) = rpc_client
-            .generate_tx_inputs_and_outputs(
+        let (tx_params, _outputs_map) = rpc_client
+            .generate_tx_params(
                 send_ctx,
                 vec![(valid_address, valid_amount)],
                 fee,
@@ -151,10 +151,7 @@ impl SendScreen {
             .unwrap()
             .unwrap();
 
-        let send_result = rpc_client
-            .send(send_ctx, tx_input_list, tx_output_list, fee)
-            .await
-            .unwrap();
+        let send_result = rpc_client.send(send_ctx, tx_params).await.unwrap();
 
         if send_result.is_none() {
             *notice_arc.lock().await = "Could not send due to error.".to_string();

@@ -490,8 +490,8 @@ async fn main() -> Result<()> {
             let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
             let parsed_outputs = vec![(receiving_address, amount)];
 
-            let (tx_input_list, tx_output_list, outputs_map) = client
-                .generate_tx_inputs_and_outputs(
+            let (tx_params, outputs_map) = client
+                .generate_tx_params(
                     ctx,
                     parsed_outputs.clone(),
                     fee,
@@ -501,9 +501,9 @@ async fn main() -> Result<()> {
                 .await?
                 .unwrap();
 
-            client
-                .send(ctx, tx_input_list, tx_output_list.clone(), fee)
-                .await?;
+            let tx_output_list = tx_params.tx_output_list().clone();
+
+            client.send(ctx, tx_params).await?;
 
             let lines = outputs_map
                 .iter()
@@ -543,8 +543,8 @@ async fn main() -> Result<()> {
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
-            let (tx_input_list, tx_output_list, outputs_map) = client
-                .generate_tx_inputs_and_outputs(
+            let (tx_params, outputs_map) = client
+                .generate_tx_params(
                     ctx,
                     parsed_outputs.clone(),
                     fee,
@@ -554,9 +554,9 @@ async fn main() -> Result<()> {
                 .await?
                 .unwrap();
 
-            client
-                .send(ctx, tx_input_list, tx_output_list.clone(), fee)
-                .await?;
+            let tx_output_list = tx_params.tx_output_list().clone();
+
+            client.send(ctx, tx_params).await?;
 
             let lines = outputs_map
                 .iter()
