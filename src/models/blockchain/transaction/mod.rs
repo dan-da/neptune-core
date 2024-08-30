@@ -7,6 +7,7 @@ pub mod validity;
 
 mod transaction_input;
 mod transaction_output;
+mod transaction_params;
 
 use std::cmp::max;
 use std::collections::HashMap;
@@ -21,6 +22,7 @@ pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
 pub use transaction_output::UnownedUtxoNotifyMethod;
 pub use transaction_output::UtxoNotification;
+pub use transaction_params::TransactionParams;
 
 use anyhow::bail;
 use anyhow::Result;

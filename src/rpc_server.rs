@@ -32,6 +32,7 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::Transaction;
+use crate::models::blockchain::transaction::TransactionParams;
 use crate::models::blockchain::transaction::TxAddressOutput;
 use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
@@ -49,7 +50,6 @@ use crate::models::state::wallet::expected_utxo::UtxoTransfer;
 use crate::models::state::wallet::expected_utxo::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
-use crate::models::state::TransactionParams;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 

@@ -17,8 +17,6 @@ use itertools::Itertools;
 use mempool::Mempool;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
-use serde::Deserialize;
-use serde::Serialize;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -53,6 +51,7 @@ use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::Transaction;
+use super::blockchain::transaction::TransactionParams;
 use super::blockchain::transaction::TxAddressOutput;
 use super::blockchain::transaction::TxInputList;
 use super::blockchain::transaction::TxOutput;
@@ -63,78 +62,6 @@ use super::blockchain::type_scripts::time_lock::TimeLock;
 use super::blockchain::type_scripts::TypeScript;
 use super::consensus::tasm::program::ConsensusProgram;
 use super::consensus::timestamp::Timestamp;
-
-// the goal is to impl Deserialize with validation to ensure
-// correct-by-construction using the "parse, don't validate" design philosophy.
-//
-// unfortunately serde does not yet directly support validating along with
-// derive Deserialize.  So a workaround pattern is to create a shadow
-// struct with the same fields that gets deserialized without validation
-// and then use try_from to validate and construct the target.
-//
-// see: https://github.com/serde-rs/serde/issues/642#issuecomment-683276351
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "TransactionParamsShadow")]
-pub struct TransactionParams {
-    tx_input_list: TxInputList,
-    tx_output_list: TxOutputList,
-    timestamp: Timestamp,
-}
-
-// note: this only exists to get deserialized without validation.
-#[derive(Deserialize)]
-struct TransactionParamsShadow {
-    tx_input_list: TxInputList,
-    tx_output_list: TxOutputList,
-    timestamp: Timestamp,
-}
-
-impl std::convert::TryFrom<TransactionParamsShadow> for TransactionParams {
-    type Error = anyhow::Error;
-    fn try_from(s: TransactionParamsShadow) -> Result<Self, Self::Error> {
-        Self::new_with_timestamp(s.tx_input_list, s.tx_output_list, s.timestamp)
-    }
-}
-
-impl TransactionParams {
-    pub fn new(tx_inputs: TxInputList, tx_outputs: TxOutputList) -> Result<Self> {
-        Self::new_with_timestamp(tx_inputs, tx_outputs, Timestamp::now())
-    }
-
-    pub fn new_with_timestamp(
-        tx_input_list: TxInputList,
-        tx_output_list: TxOutputList,
-        timestamp: Timestamp,
-    ) -> Result<Self> {
-        if tx_input_list.total_native_coins() < tx_output_list.total_native_coins() {
-            bail!("outputs exceed inputs.");
-        }
-
-        Ok(Self {
-            tx_input_list,
-            tx_output_list,
-            timestamp,
-        })
-    }
-
-    /// fee will always be >= 0, guaranteed by Self::new()
-    pub fn fee(&self) -> NeptuneCoins {
-        self.tx_input_list.total_native_coins() - self.tx_output_list.total_native_coins()
-    }
-
-    pub fn tx_input_list(&self) -> &TxInputList {
-        &self.tx_input_list
-    }
-
-    pub fn tx_output_list(&self) -> &TxOutputList {
-        &self.tx_output_list
-    }
-
-    pub fn timestamp(&self) -> &Timestamp {
-        &self.timestamp
-    }
-}
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
 /// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
@@ -836,11 +763,7 @@ impl GlobalState {
         //       threadpool and avoid blocking the tokio executor
         //       and other async tasks.
         let transaction = tokio::task::spawn_blocking(move || {
-            Self::create_transaction_worker(
-                tx_params,
-                mutator_set_accumulator,
-                privacy,
-            )
+            Self::create_transaction_worker(tx_params, mutator_set_accumulator, privacy)
         })
         .await?;
         Ok(transaction)
@@ -2588,7 +2511,7 @@ mod global_state_tests {
                     )
                     .await?;
 
-                let tx_output_list = tx_params.tx_output_list.clone();
+                let tx_output_list = tx_params.tx_output_list().clone();
 
                 // create tx.
                 let alice_to_bob_tx = alice_state_mut.create_transaction(tx_params).await?;
@@ -2603,7 +2526,7 @@ mod global_state_tests {
                 let (mut block_1, ..) =
                     make_mock_block_with_valid_pow(&genesis_block, None, miner_address, random());
 
-                // add tx to block.  (weird this can happen)
+                // add tx to block.  (weird this is allowed after block mined)
                 block_1
                     .accumulate_transaction(
                         alice_to_bob_tx,
