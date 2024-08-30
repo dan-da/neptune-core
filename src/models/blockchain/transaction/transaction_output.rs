@@ -288,6 +288,15 @@ impl TxOutput {
     pub fn random(utxo: Utxo) -> Self {
         Self::fake_address(utxo, rand::random(), rand::random())
     }
+
+    // only for legacy tests
+    #[cfg(test)]
+    pub fn new_random(amount: NeptuneCoins) -> Self {
+        use super::utxo::LockScript;
+
+        let utxo = Utxo::new_native_coin(LockScript::anyone_can_spend(), amount);
+        Self::fake_address(utxo, rand::random(), rand::random())
+    }
 }
 
 /// Represents a list of [TxOutput]

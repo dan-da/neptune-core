@@ -56,6 +56,9 @@ pub struct TxParams {
 }
 
 // note: this only exists to get deserialized without validation.
+// we also derive Serialize for unit tests (only) in order to simulate
+// invalid input data.
+#[cfg_attr(test, derive(Serialize))]
 #[derive(Deserialize)]
 struct TxParamsShadow {
     tx_input_list: TxInputList,
@@ -83,13 +86,6 @@ impl TxParams {
         tx_output_list: TxOutputList,
         timestamp: Timestamp,
     ) -> Result<Self, TxParamsError> {
-        if tx_input_list.total_native_coins() < tx_output_list.total_native_coins() {
-            return Err(TxParamsError::InsufficientInputs {
-                inputs_sum: tx_input_list.total_native_coins(),
-                outputs_sum: tx_output_list.total_native_coins(),
-            });
-        }
-
         // validate that all input and output amounts are non-negative and non-zero.
         for amount in tx_input_list
             .iter()
@@ -106,6 +102,13 @@ impl TxParams {
             if amount.is_zero() {
                 return Err(TxParamsError::ZeroAmount);
             }
+        }
+
+        if tx_input_list.total_native_coins() < tx_output_list.total_native_coins() {
+            return Err(TxParamsError::InsufficientInputs {
+                inputs_sum: tx_input_list.total_native_coins(),
+                outputs_sum: tx_output_list.total_native_coins(),
+            });
         }
 
         Ok(Self {
@@ -138,4 +141,169 @@ impl TxParams {
     }
 }
 
-// todo: tests for validation, serialization
+#[cfg(test)]
+mod tests {
+    use crate::models::blockchain::transaction::TxInput;
+    use crate::models::blockchain::transaction::TxOutput;
+
+    use super::*;
+
+    #[test]
+    pub fn validate_insufficient_inputs() -> anyhow::Result<()> {
+        let tx_input = TxInput::new_random(NeptuneCoins::new(15));
+        let tx_output = TxOutput::new_random(NeptuneCoins::new(20));
+
+        // test TxParams::new()
+        assert!(matches!(
+            TxParams::new(tx_input.clone().into(), tx_output.clone().into()),
+            Err(TxParamsError::InsufficientInputs { .. })
+        ));
+
+        // test TxParams::new_with_timestamp()
+        assert!(matches!(
+            TxParams::new_with_timestamp(
+                tx_input.clone().into(),
+                tx_output.clone().into(),
+                Timestamp::now()
+            ),
+            Err(TxParamsError::InsufficientInputs { .. })
+        ));
+
+        // test TxParams::deserialize()
+        {
+            let serialized = bincode::serialize(&TxParamsShadow {
+                tx_input_list: tx_input.clone().into(),
+                tx_output_list: tx_output.clone().into(),
+                timestamp: Timestamp::now(),
+            })?;
+
+            let result = bincode::deserialize::<TxParams>(&serialized);
+            assert!(matches!(
+                *result.unwrap_err(),
+                bincode::ErrorKind::Custom(s) if s == TxParams::new(tx_input.into(), tx_output.into()).unwrap_err().to_string()
+            ));
+        }
+
+        Ok(())
+    }
+
+    // validates that a NegativeAmount error occurs if inputs has a negative-amount entry.
+    // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
+    #[test]
+    pub fn validate_negative_input_amount() -> anyhow::Result<()> {
+        worker::validate_negative_amount("-5".parse().unwrap(), NeptuneCoins::new(15))
+    }
+
+    // validates that a NegativeAmount error occurs if outputs has a negative-amount entry.
+    // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
+    #[test]
+    pub fn validate_negative_output_amount() -> anyhow::Result<()> {
+        worker::validate_negative_amount(NeptuneCoins::new(15), "-5".parse().unwrap())
+    }
+
+    // validates that a ZeroAmount error occurs if inputs has a zero-amount entry.
+    // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
+    #[test]
+    pub fn validate_zero_input_amount() -> anyhow::Result<()> {
+        worker::validate_zero_amount(NeptuneCoins::new(0), NeptuneCoins::new(15))
+    }
+
+    // validates that a ZeroAmount error occurs if outputs has a zero-amount entry.
+    // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
+    #[test]
+    pub fn validate_zero_output_amount() -> anyhow::Result<()> {
+        worker::validate_zero_amount(NeptuneCoins::new(15), NeptuneCoins::new(0))
+    }
+
+    mod worker {
+        use super::*;
+
+        // validates that a NegativeAmount error occurs if inputs or outputs has a negative-amount entry.
+        // requires that caller pass a negative value for at least one arg.
+        // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
+        pub fn validate_negative_amount(
+            input_amt: NeptuneCoins,
+            output_amt: NeptuneCoins,
+        ) -> anyhow::Result<()> {
+            let tx_input = TxInput::new_random(input_amt);
+            let tx_output = TxOutput::new_random(output_amt);
+
+            // test TxParams::new()
+            assert!(matches!(
+                TxParams::new(tx_input.clone().into(), tx_output.clone().into()),
+                Err(TxParamsError::NegativeAmount { .. })
+            ));
+
+            // test TxParams::new_with_timestamp()
+            assert!(matches!(
+                TxParams::new_with_timestamp(
+                    tx_input.clone().into(),
+                    tx_output.clone().into(),
+                    Timestamp::now()
+                ),
+                Err(TxParamsError::NegativeAmount)
+            ));
+
+            // test TxParams::deserialize()
+            {
+                let serialized = bincode::serialize(&TxParamsShadow {
+                    tx_input_list: tx_input.clone().into(),
+                    tx_output_list: tx_output.clone().into(),
+                    timestamp: Timestamp::now(),
+                })?;
+
+                let result = bincode::deserialize::<TxParams>(&serialized);
+                assert!(matches!(
+                    *result.unwrap_err(),
+                    bincode::ErrorKind::Custom(s) if s == TxParams::new(tx_input.into(), tx_output.into()).unwrap_err().to_string()
+                ));
+            }
+
+            Ok(())
+        }
+
+        // validates that a ZeroAmount error occurs if inputs or outputs has a zero-amount entry.
+        // requires that caller pass a zero value for at least one arg.
+        // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
+        pub fn validate_zero_amount(
+            input_amt: NeptuneCoins,
+            output_amt: NeptuneCoins,
+        ) -> anyhow::Result<()> {
+            let tx_input = TxInput::new_random(input_amt);
+            let tx_output = TxOutput::new_random(output_amt);
+
+            // test TxParams::new()
+            assert!(matches!(
+                TxParams::new(tx_input.clone().into(), tx_output.clone().into()),
+                Err(TxParamsError::ZeroAmount { .. })
+            ));
+
+            // test TxParams::new_with_timestamp()
+            assert!(matches!(
+                TxParams::new_with_timestamp(
+                    tx_input.clone().into(),
+                    tx_output.clone().into(),
+                    Timestamp::now()
+                ),
+                Err(TxParamsError::ZeroAmount)
+            ));
+
+            // test TxParams::deserialize()
+            {
+                let serialized = bincode::serialize(&TxParamsShadow {
+                    tx_input_list: tx_input.clone().into(),
+                    tx_output_list: tx_output.clone().into(),
+                    timestamp: Timestamp::now(),
+                })?;
+
+                let result = bincode::deserialize::<TxParams>(&serialized);
+                assert!(matches!(
+                    *result.unwrap_err(),
+                    bincode::ErrorKind::Custom(s) if s == TxParams::new(tx_input.into(), tx_output.into()).unwrap_err().to_string()
+                ));
+            }
+
+            Ok(())
+        }
+    }
+}

@@ -24,6 +24,22 @@ pub struct TxInput {
     pub ms_membership_proof: MsMembershipProof,
 }
 
+#[cfg(test)]
+impl TxInput {
+    pub fn new_random(amount: NeptuneCoins) -> Self {
+        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+        use crate::util_types::mutator_set::ms_membership_proof::pseudorandom_mutator_set_membership_proof;
+
+        let lock_script = LockScript::anyone_can_spend();
+        Self {
+            spending_key: GenerationSpendingKey::derive_from_seed(rand::random()).into(),
+            utxo: Utxo::new_native_coin(lock_script.clone(), amount),
+            lock_script,
+            ms_membership_proof: pseudorandom_mutator_set_membership_proof(rand::random()),
+        }
+    }
+}
+
 /// Represents a list of [TxInput]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TxInputList(Vec<TxInput>);
@@ -39,6 +55,12 @@ impl Deref for TxInputList {
 impl DerefMut for TxInputList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl From<TxInput> for TxInputList {
+    fn from(t: TxInput) -> Self {
+        Self(vec![t])
     }
 }
 
