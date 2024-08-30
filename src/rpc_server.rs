@@ -32,9 +32,9 @@ use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::Transaction;
-use crate::models::blockchain::transaction::TransactionParams;
 use crate::models::blockchain::transaction::TxAddressOutput;
 use crate::models::blockchain::transaction::TxOutputList;
+use crate::models::blockchain::transaction::TxParams;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::channel::RPCServerToMain;
@@ -170,7 +170,7 @@ pub trait RPC {
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TransactionParams, Vec<TxAddressOutput>)>;
+    ) -> Option<(TxParams, Vec<TxAddressOutput>)>;
 
     /// Send coins to multiple recipients
     ///
@@ -201,7 +201,7 @@ pub trait RPC {
     ///
     /// future work: add `unowned_utxo_notify_method` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
-    async fn send(tx_params: TransactionParams) -> Option<Digest>;
+    async fn send(tx_params: TxParams) -> Option<Digest>;
 
     async fn claim_utxo(utxo_transfer_encrypted: String) -> bool;
 
@@ -656,11 +656,7 @@ impl RPC for NeptuneRPCServer {
     // TODO: add an endpoint to get recommended fee density.
     //
     // documented in trait. do not add doc-comment.
-    async fn send(
-        mut self,
-        _ctx: context::Context,
-        tx_params: TransactionParams,
-    ) -> Option<Digest> {
+    async fn send(mut self, _ctx: context::Context, tx_params: TxParams) -> Option<Digest> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
 
@@ -754,7 +750,7 @@ impl RPC for NeptuneRPCServer {
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TransactionParams, Vec<TxAddressOutput>)> {
+    ) -> Option<(TxParams, Vec<TxAddressOutput>)> {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;

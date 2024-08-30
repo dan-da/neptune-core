@@ -18,8 +18,8 @@ use super::TxOutputList;
 // see: https://github.com/serde-rs/serde/issues/642#issuecomment-683276351
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(try_from = "TransactionParamsShadow")]
-pub struct TransactionParams {
+#[serde(try_from = "TxParamsShadow")]
+pub struct TxParams {
     tx_input_list: TxInputList,
     tx_output_list: TxOutputList,
     timestamp: Timestamp,
@@ -27,20 +27,20 @@ pub struct TransactionParams {
 
 // note: this only exists to get deserialized without validation.
 #[derive(Deserialize)]
-struct TransactionParamsShadow {
+struct TxParamsShadow {
     tx_input_list: TxInputList,
     tx_output_list: TxOutputList,
     timestamp: Timestamp,
 }
 
-impl std::convert::TryFrom<TransactionParamsShadow> for TransactionParams {
+impl std::convert::TryFrom<TxParamsShadow> for TxParams {
     type Error = anyhow::Error;
-    fn try_from(s: TransactionParamsShadow) -> Result<Self, Self::Error> {
+    fn try_from(s: TxParamsShadow) -> Result<Self, Self::Error> {
         Self::new_with_timestamp(s.tx_input_list, s.tx_output_list, s.timestamp)
     }
 }
 
-impl TransactionParams {
+impl TxParams {
     pub fn new(tx_inputs: TxInputList, tx_outputs: TxOutputList) -> anyhow::Result<Self> {
         Self::new_with_timestamp(tx_inputs, tx_outputs, Timestamp::now())
     }

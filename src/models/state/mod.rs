@@ -51,11 +51,11 @@ use super::blockchain::transaction::primitive_witness::SaltedUtxos;
 use super::blockchain::transaction::transaction_kernel::TransactionKernel;
 use super::blockchain::transaction::validity::TransactionValidationLogic;
 use super::blockchain::transaction::Transaction;
-use super::blockchain::transaction::TransactionParams;
 use super::blockchain::transaction::TxAddressOutput;
 use super::blockchain::transaction::TxInputList;
 use super::blockchain::transaction::TxOutput;
 use super::blockchain::transaction::TxOutputList;
+use super::blockchain::transaction::TxParams;
 use super::blockchain::type_scripts::native_currency::NativeCurrency;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use super::blockchain::type_scripts::time_lock::TimeLock;
@@ -525,7 +525,7 @@ impl GlobalState {
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         timestamp: Timestamp,
-    ) -> Result<(TransactionParams, Vec<TxAddressOutput>)> {
+    ) -> Result<(TxParams, Vec<TxAddressOutput>)> {
         let total_spend = outputs
             .iter()
             .map(|(_, amount)| *amount)
@@ -557,8 +557,7 @@ impl GlobalState {
 
         assert_eq!(tx_output_list.len(), outputs.len());
 
-        let tx_details =
-            TransactionParams::new_with_timestamp(tx_input_list, tx_output_list, timestamp)?;
+        let tx_details = TxParams::new_with_timestamp(tx_input_list, tx_output_list, timestamp)?;
 
         Ok((tx_details, outputs))
     }
@@ -747,7 +746,7 @@ impl GlobalState {
     /// Example:
     ///
     /// See the implementation of [Self::create_transaction()].
-    pub async fn create_transaction(&self, tx_params: TransactionParams) -> Result<Transaction> {
+    pub async fn create_transaction(&self, tx_params: TxParams) -> Result<Transaction> {
         let mutator_set_accumulator = self
             .chain
             .light_state()
@@ -795,11 +794,8 @@ impl GlobalState {
             )
             .await?;
 
-        let tx_params = TransactionParams::new_with_timestamp(
-            tx_input_list,
-            tx_output_list.clone(),
-            timestamp,
-        )?;
+        let tx_params =
+            TxParams::new_with_timestamp(tx_input_list, tx_output_list.clone(), timestamp)?;
 
         let transaction = self.create_transaction(tx_params).await?;
 
@@ -813,7 +809,7 @@ impl GlobalState {
     //
     // fixme: why is _privacy param unused?
     fn create_transaction_worker(
-        tx_params: TransactionParams,
+        tx_params: TxParams,
         mutator_set_accumulator: MutatorSetAccumulator,
         _privacy: bool,
     ) -> Transaction {

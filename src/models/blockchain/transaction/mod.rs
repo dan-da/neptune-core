@@ -22,7 +22,7 @@ pub use transaction_output::TxOutput;
 pub use transaction_output::TxOutputList;
 pub use transaction_output::UnownedUtxoNotifyMethod;
 pub use transaction_output::UtxoNotification;
-pub use transaction_params::TransactionParams;
+pub use transaction_params::TxParams;
 
 use anyhow::bail;
 use anyhow::Result;
