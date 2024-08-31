@@ -3,6 +3,7 @@ use std::io::stdout;
 use std::io::Write;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::bail;
@@ -11,11 +12,12 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::generate;
 use clap_complete::Shell;
-use itertools::Itertools;
+use directories::ProjectDirs;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
+use neptune_core::models::blockchain::transaction::TxOutputList;
 use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use neptune_core::models::blockchain::transaction::UtxoNotification;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -25,6 +27,7 @@ use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPo
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
 use neptune_core::rpc_server::RPCClient;
+use serde::Deserialize;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
@@ -165,27 +168,19 @@ enum Command {
     PruneAbandonedMonitoredUtxos,
 
     /******** WALLET ********/
-    GenerateWallet {
-        #[clap(long, default_value_t=Network::default())]
-        network: Network,
-    },
-    WhichWallet {
-        #[clap(long, default_value_t=Network::default())]
-        network: Network,
-    },
-    ExportSeedPhrase {
-        #[clap(long, default_value_t=Network::default())]
-        network: Network,
-    },
-    ImportSeedPhrase {
-        #[clap(long, default_value_t=Network::default())]
-        network: Network,
-    },
+    GenerateWallet,
+    WhichWallet,
+    ExportSeedPhrase,
+    ImportSeedPhrase,
 }
 
 #[derive(Debug, Parser)]
 #[clap(name = "neptune-cli", about = "An RPC client")]
 struct Config {
+    /// The data directory that contains the wallet and blockchain state
+    #[clap(long)]
+    data_dir: Option<PathBuf>,
+
     /// Sets the server address to connect to.
     #[clap(long, default_value = "127.0.0.1:9799")]
     server_addr: SocketAddr,
@@ -195,6 +190,21 @@ struct Config {
 
     #[structopt(long, short, default_value = "alpha")]
     pub network: Network,
+}
+
+impl Config {
+    fn cli_data_dir(&self) -> anyhow::Result<PathBuf> {
+        self.data_dir
+            .clone()
+            .map(ProjectDirs::from_path)
+            .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune-cli"))
+            .map(|pd| pd.data_dir().join(self.network.to_string()))
+            .ok_or_else(|| anyhow::anyhow!("could not determine cli data dir"))
+    }
+
+    fn core_data_directory(&self) -> anyhow::Result<DataDirectory> {
+        DataDirectory::get(self.data_dir.clone(), self.network)
+    }
 }
 
 #[tokio::main]
@@ -211,9 +221,9 @@ async fn main() -> Result<()> {
                 bail!("Unknown shell.  Shell completions not available.")
             }
         }
-        Command::WhichWallet { network } => {
+        Command::WhichWallet => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+            let data_dir = args.core_data_directory()?;
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
@@ -225,9 +235,9 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Command::GenerateWallet { network } => {
+        Command::GenerateWallet => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+            let data_dir = args.core_data_directory()?;
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
@@ -248,9 +258,9 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ImportSeedPhrase { network } => {
+        Command::ImportSeedPhrase => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+            let data_dir = args.core_data_directory()?;
             let wallet_dir = data_dir.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
 
@@ -314,9 +324,9 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ExportSeedPhrase { network } => {
+        Command::ExportSeedPhrase => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = DataDirectory::get(None, network)?;
+            let data_dir = args.core_data_directory()?;
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
@@ -480,14 +490,14 @@ async fn main() -> Result<()> {
             println!("Cleared standing of {}", ip);
         }
         Command::Send {
-            address,
+            ref address,
             amount,
             fee,
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
         } => {
             // Parse on client
-            let receiving_address = ReceivingAddress::from_bech32m(&address, args.network)?;
+            let receiving_address = ReceivingAddress::from_bech32m(address, args.network)?;
             let parsed_outputs = vec![(receiving_address, amount)];
 
             let (tx_params, outputs_map) = client
@@ -505,41 +515,18 @@ async fn main() -> Result<()> {
 
             client.send(ctx, tx_params).await?;
 
-            let lines = outputs_map
-                .iter()
-                .zip(tx_output_list.iter())
-                .filter_map(
-                    |((address, _), tx_output)| match &tx_output.utxo_notification {
-                        UtxoNotification::OffChainSerialized(x) => Some(format!(
-                            "-- Utxo for {}. amount: {} --\n{}\n-- End Utxo --\n",
-                            address.to_bech32m_abbreviated(args.network).unwrap(),
-                            tx_output.utxo.get_native_currency_amount(),
-                            x.to_bech32m(args.network).unwrap()
-                        )),
-                        _ => None,
-                    },
-                )
-                .collect_vec();
-
-            if !lines.is_empty() {
-                println!("\n===== Offchain Utxo Transfer =====\n");
-                for line in lines {
-                    println!("{}", line);
-                }
-                println!("Important!  You must provide the above Utxo(s) to the corresponding recipient(s) for claiming or else the funds will be lost.\n");
-                println!("===== End Offchain Utxo Transfer =====\n\n");
-            }
+            process_utxo_notifications(&args, tx_output_list, outputs_map)?;
 
             println!("Send completed.");
         }
         Command::SendToMany {
-            outputs,
+            ref outputs,
             fee,
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
         } => {
             let parsed_outputs = outputs
-                .into_iter()
+                .iter()
                 .map(|o| o.to_receiving_address_amount_tuple(args.network))
                 .collect::<Result<Vec<_>>>()?;
 
@@ -558,28 +545,7 @@ async fn main() -> Result<()> {
 
             client.send(ctx, tx_params).await?;
 
-            let lines = outputs_map
-                .iter()
-                .zip(tx_output_list.iter())
-                .filter_map(
-                    |((address, _), tx_output)| match &tx_output.utxo_notification {
-                        UtxoNotification::OffChainSerialized(x) => Some(format!(
-                            "{} --> {}",
-                            address.to_bech32m(args.network).unwrap(),
-                            x.to_bech32m(args.network).unwrap()
-                        )),
-                        _ => None,
-                    },
-                )
-                .collect_vec();
-
-            if !lines.is_empty() {
-                println!("-- Offchain Serialized --\n");
-                for line in lines {
-                    println!("{}", line);
-                }
-                println!("-- END --\n\n");
-            }
+            process_utxo_notifications(&args, tx_output_list, outputs_map)?;
 
             println!("Send completed.");
         }
@@ -604,6 +570,69 @@ async fn main() -> Result<()> {
             let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx).await?;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
+    }
+
+    Ok(())
+}
+
+fn process_utxo_notifications(
+    config: &Config,
+    tx_output_list: TxOutputList,
+    outputs_map: Vec<(ReceivingAddress, NeptuneCoins)>,
+) -> anyhow::Result<()> {
+    assert_eq!(tx_output_list.len(), outputs_map.len());
+
+    #[derive(Debug, Clone, serde::Serialize, Deserialize)]
+    pub struct UtxoTransferEntry {
+        pub address_abbrev: String,
+        pub amount: String,
+        pub utxo_transfer_encrypted: String,
+        pub address: String,
+    }
+
+    let mut entries = outputs_map
+        .iter()
+        .zip(tx_output_list.iter())
+        .filter_map(
+            |((address, _), tx_output)| match &tx_output.utxo_notification {
+                UtxoNotification::OffChainSerialized(x) => {
+                    Some((address, tx_output.utxo.get_native_currency_amount(), x))
+                }
+                _ => None,
+            },
+        )
+        .peekable();
+
+    let data_dir = config.cli_data_dir()?.join("utxo-transfer");
+    if entries.peek().is_some() {
+        std::fs::create_dir_all(&data_dir)?;
+    }
+
+    for (address, amount, utxo_transfer_encrypted) in entries {
+        let entry = UtxoTransferEntry {
+            address_abbrev: address.to_bech32m_abbreviated(config.network)?,
+            amount: amount.to_string(),
+            utxo_transfer_encrypted: utxo_transfer_encrypted.to_bech32m(config.network)?,
+            address: address.to_bech32m(config.network)?,
+        };
+
+        let mut file_name = format!("{}-{}.json", entry.address_abbrev, entry.amount);
+        let file_path = (0..)
+            .filter_map(|i| {
+                let path = data_dir.join(&file_name);
+                file_name = format!("{}-{}-{}.json", entry.address_abbrev, entry.amount, i);
+                match path.exists() {
+                    true => Some(path),
+                    false => None,
+                }
+            })
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("could not determine file path"))?;
+
+        let file = std::fs::File::create_new(file_path)?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, &entry)?;
+        writer.flush()?;
     }
 
     Ok(())

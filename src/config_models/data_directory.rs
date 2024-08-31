@@ -36,7 +36,7 @@ impl DataDirectory {
     pub fn get(root_dir: Option<PathBuf>, network: Network) -> Result<Self> {
         let project_dirs = root_dir
             .map(ProjectDirs::from_path)
-            .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune"))
+            .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune-core"))
             .context("Could not determine data directory")?;
 
         let network_dir = network.to_string();
