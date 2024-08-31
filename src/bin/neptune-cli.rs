@@ -608,6 +608,7 @@ fn process_utxo_notifications(
         std::fs::create_dir_all(&data_dir)?;
     }
 
+    let mut wrote_file_cnt = 0usize;
     for (address, amount, utxo_transfer_encrypted) in entries {
         let entry = UtxoTransferEntry {
             address_abbrev: address.to_bech32m_abbreviated(config.network)?,
@@ -617,7 +618,7 @@ fn process_utxo_notifications(
         };
 
         let mut file_name = format!("{}-{}.json", entry.address_abbrev, entry.amount);
-        let file_path = (0..)
+        let file_path = (1..)
             .filter_map(|i| {
                 let path = data_dir.join(&file_name);
                 file_name = format!("{}-{}-{}.json", entry.address_abbrev, entry.amount, i);
@@ -629,10 +630,30 @@ fn process_utxo_notifications(
             .next()
             .ok_or_else(|| anyhow::anyhow!("could not determine file path"))?;
 
-        let file = std::fs::File::create_new(file_path)?;
+        let file = std::fs::File::create_new(&file_path)?;
         let mut writer = std::io::BufWriter::new(file);
         serde_json::to_writer_pretty(&mut writer, &entry)?;
         writer.flush()?;
+
+        wrote_file_cnt += 1;
+
+        println!("wrote {}", file_path.display());
+    }
+
+    if wrote_file_cnt > 0 {
+        println!("\n*** Important - Read or risk losing funds ***\n");
+        println!(
+            "
+{wrote_file_cnt} transaction outputs were each written to individual files for
+off-chain transfer.
+
+You must transfer each file to the corresponding recipient for claiming or they
+will never be able to claim the funds.
+
+Instruct each recipient to run `neptune-cli claim_utxo <file>` or use
+equivalent claim functionality of their chosen wallet software.
+"
+        );
     }
 
     Ok(())
