@@ -50,54 +50,13 @@ struct TransactionOutput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum AddressEnum {
-    Generation {
-        address_abbrev: String,
-        address: String,
-    },
-    Symmetric {
-        privacy_digest: String,
-        receiver_identifier: String,
-    },
-}
-impl TryFrom<(&ReceivingAddress, Network)> for AddressEnum {
-    type Error = anyhow::Error;
-
-    fn try_from(v: (&ReceivingAddress, Network)) -> Result<Self> {
-        let (addr, network) = v;
-        Ok(match *addr {
-            ReceivingAddress::Generation(_) => Self::Generation {
-                address_abbrev: addr.to_bech32m_abbreviated(network)?,
-                address: addr.to_bech32m(network)?,
-            },
-            ReceivingAddress::Symmetric(_) => Self::Symmetric {
-                privacy_digest: addr.privacy_digest().to_hex(),
-                receiver_identifier: addr.receiver_identifier().to_string(),
-            },
-        })
-    }
-}
-impl AddressEnum {
-    fn short_id(&self) -> &str {
-        match *self {
-            Self::Generation {
-                ref address_abbrev, ..
-            } => address_abbrev,
-            Self::Symmetric {
-                ref receiver_identifier,
-                ..
-            } => receiver_identifier,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UtxoTransferEntry {
     pub data_format: String,
-    pub recipient: String,
+    pub address_abbrev: String,
     pub amount: String,
     pub utxo_transfer_encrypted: String,
-    pub address_info: AddressEnum,
+    pub receiver_identifier: String,
+    pub address: String,
 }
 
 impl UtxoTransferEntry {
@@ -758,7 +717,7 @@ fn process_utxo_notifications(
                     m.receiving_address,
                     o.utxo.get_native_currency_amount(),
                     x,
-                    if m.self_owned { SELF.to_string() } else {recipient},
+                    recipient,
                 ))
             }
             _ => None,
@@ -778,16 +737,17 @@ fn process_utxo_notifications(
     for (address, amount, utxo_transfer_encrypted, recipient) in entries {
         let entry = UtxoTransferEntry {
             data_format: UtxoTransferEntry::data_format(),
-            recipient: recipient.clone(),
+            address_abbrev: address.to_bech32m_abbreviated(network)?,
             amount: amount.to_string(),
             utxo_transfer_encrypted: utxo_transfer_encrypted.to_bech32m(network)?,
-            address_info: (&address, network).try_into()?,
+            receiver_identifier: address.receiver_identifier().to_string(),
+            address: address.to_bech32m(network)?,
         };
 
         let file_dir = data_dir.join(&recipient);
         std::fs::create_dir_all(&file_dir)?;
 
-        let mut file_name = format!("{}-{}.json", entry.address_info.short_id(), entry.amount);
+        let mut file_name = format!("{}-{}.json", entry.address_abbrev, entry.amount);
         let file_path = (1..)
             .filter_map(|i| {
                 let path = file_dir.join(&file_name);
