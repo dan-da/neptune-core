@@ -38,6 +38,9 @@ use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
 
+const SELF: &str = "self";
+const ANONYMOUS: &str = "anonymous";
+
 // for parsing SendToMany <output> arguments.
 #[derive(Debug, Clone)]
 struct TransactionOutput {
@@ -155,7 +158,7 @@ impl FromStr for TransactionOutput {
             recipient: (if parts.len() == 3 {
                 parts[2]
             } else {
-                "anonymous"
+                ANONYMOUS
             })
             .to_string(),
         })
@@ -259,7 +262,7 @@ enum Command {
         fee: NeptuneCoins,
 
         /// recipient name or label, for local usage only
-        #[clap(value_parser = clap::builder::NonEmptyStringValueParser::new(), default_value = "anonymous")]
+        #[clap(value_parser = clap::builder::NonEmptyStringValueParser::new(), default_value = ANONYMOUS)]
         recipient: String,
 
         /// how to notify our wallet of utxos.
@@ -647,7 +650,7 @@ async fn main() -> Result<()> {
                 .zip_longest(recipients)
                 .map(|pair| match pair {
                     EitherOrBoth::Both((o, m), r) => (o.clone(), m, r),
-                    EitherOrBoth::Left((o, m)) => (o.clone(), m, "self".to_string()),
+                    EitherOrBoth::Left((o, m)) => (o.clone(), m, SELF.to_string()),
                     EitherOrBoth::Right(_) => unreachable!(),
                 })
                 .collect_vec();
@@ -691,7 +694,7 @@ async fn main() -> Result<()> {
                 .zip_longest(outputs)
                 .map(|pair| match pair {
                     EitherOrBoth::Both((o, m), r) => (o.clone(), m, r.recipient),
-                    EitherOrBoth::Left((o, m)) => (o.clone(), m, "self".to_string()),
+                    EitherOrBoth::Left((o, m)) => (o.clone(), m, SELF.to_string()),
                     EitherOrBoth::Right(_) => unreachable!(),
                 })
                 .collect_vec();
@@ -751,16 +754,11 @@ fn process_utxo_notifications(
         .into_iter()
         .filter_map(|(o, m, recipient)| match o.utxo_notification {
             UtxoNotification::OffChainSerialized(x) => {
-                let recipient = if m.self_owned && recipient == *"anonymous" {
-                    "self".to_string()
-                } else {
-                    recipient
-                };
                 Some((
                     m.receiving_address,
                     o.utxo.get_native_currency_amount(),
                     x,
-                    recipient,
+                    if m.self_owned { SELF.to_string() } else {recipient},
                 ))
             }
             _ => None,
