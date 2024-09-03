@@ -1,6 +1,6 @@
 //! This module implements TxParams which is used as input to
 //! create_transaction() and the send() rpc.
-use num_traits::Zero;
+use num_traits::CheckedSub;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
@@ -22,14 +22,11 @@ pub enum TxParamsError {
 
     #[error("negative amount is not permitted for inputs or outputs")]
     NegativeAmount,
-
-    #[error("zero amount is not permitted for inputs or outputs")]
-    ZeroAmount,
 }
 
 // About serialization+validation
 //
-// the goal is to impl Deserialize with validation to ensure
+// the goal is to validate inside the impl Deserialize to ensure
 // correct-by-construction using the "parse, don't validate" design philosophy.
 //
 // unfortunately serde does not yet directly support validating when using
@@ -86,7 +83,7 @@ impl TxParams {
         tx_output_list: TxOutputList,
         timestamp: Timestamp,
     ) -> Result<Self, TxParamsError> {
-        // validate that all input and output amounts are non-negative and non-zero.
+        // validate that all input and output amounts are non-negative. (zero is allowed)
         for amount in tx_input_list
             .iter()
             .map(|i| i.utxo.get_native_currency_amount())
@@ -99,9 +96,6 @@ impl TxParams {
             if amount.is_negative() {
                 return Err(TxParamsError::NegativeAmount);
             }
-            if amount.is_zero() {
-                return Err(TxParamsError::ZeroAmount);
-            }
         }
 
         if tx_input_list.total_native_coins() < tx_output_list.total_native_coins() {
@@ -110,6 +104,9 @@ impl TxParams {
                 outputs_sum: tx_output_list.total_native_coins(),
             });
         }
+
+        // todo: consider validating that all inputs are spendable now.
+        // todo: any other validations?
 
         Ok(Self {
             tx_input_list,
@@ -122,7 +119,11 @@ impl TxParams {
     ///
     /// fee will always be >= 0, guaranteed by [Self::new()]
     pub fn fee(&self) -> NeptuneCoins {
-        self.tx_input_list.total_native_coins() - self.tx_output_list.total_native_coins()
+        // note: the unwrap will never fail because fee always >= 0, else a serious bug.
+        self.tx_input_list
+            .total_native_coins()
+            .checked_sub(&self.tx_output_list.total_native_coins())
+            .unwrap()
     }
 
     /// get the transaction inputs
@@ -201,20 +202,6 @@ mod tests {
         worker::validate_negative_amount(NeptuneCoins::new(15), "-5".parse().unwrap())
     }
 
-    // validates that a ZeroAmount error occurs if inputs has a zero-amount entry.
-    // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
-    #[test]
-    pub fn validate_zero_input_amount() -> anyhow::Result<()> {
-        worker::validate_zero_amount(NeptuneCoins::new(0), NeptuneCoins::new(15))
-    }
-
-    // validates that a ZeroAmount error occurs if outputs has a zero-amount entry.
-    // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
-    #[test]
-    pub fn validate_zero_output_amount() -> anyhow::Result<()> {
-        worker::validate_zero_amount(NeptuneCoins::new(15), NeptuneCoins::new(0))
-    }
-
     mod worker {
         use super::*;
 
@@ -242,50 +229,6 @@ mod tests {
                     Timestamp::now()
                 ),
                 Err(TxParamsError::NegativeAmount)
-            ));
-
-            // test TxParams::deserialize()
-            {
-                let serialized = bincode::serialize(&TxParamsShadow {
-                    tx_input_list: tx_input.clone().into(),
-                    tx_output_list: tx_output.clone().into(),
-                    timestamp: Timestamp::now(),
-                })?;
-
-                let result = bincode::deserialize::<TxParams>(&serialized);
-                assert!(matches!(
-                    *result.unwrap_err(),
-                    bincode::ErrorKind::Custom(s) if s == TxParams::new(tx_input.into(), tx_output.into()).unwrap_err().to_string()
-                ));
-            }
-
-            Ok(())
-        }
-
-        // validates that a ZeroAmount error occurs if inputs or outputs has a zero-amount entry.
-        // requires that caller pass a zero value for at least one arg.
-        // checks TxParams::new(), TxParams::new_with_timestamp() and TxParams::deserialize()
-        pub fn validate_zero_amount(
-            input_amt: NeptuneCoins,
-            output_amt: NeptuneCoins,
-        ) -> anyhow::Result<()> {
-            let tx_input = TxInput::new_random(input_amt);
-            let tx_output = TxOutput::new_random(output_amt);
-
-            // test TxParams::new()
-            assert!(matches!(
-                TxParams::new(tx_input.clone().into(), tx_output.clone().into()),
-                Err(TxParamsError::ZeroAmount { .. })
-            ));
-
-            // test TxParams::new_with_timestamp()
-            assert!(matches!(
-                TxParams::new_with_timestamp(
-                    tx_input.clone().into(),
-                    tx_output.clone().into(),
-                    Timestamp::now()
-                ),
-                Err(TxParamsError::ZeroAmount)
             ));
 
             // test TxParams::deserialize()

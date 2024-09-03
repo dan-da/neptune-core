@@ -540,7 +540,7 @@ mod mine_loop_tests {
     #[tokio::test]
     async fn block_template_is_valid_test() -> Result<()> {
         // Verify that a block template made with transaction from the mempool is a valid block
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut premine_receiver_global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut premine_receiver_global_state =
@@ -663,7 +663,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn mined_block_has_proof_of_work() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -714,7 +714,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_timestamp_represents_time_block_found() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 
@@ -786,7 +786,7 @@ mod mine_loop_tests {
     #[traced_test]
     #[tokio::test]
     async fn mine_ten_blocks_in_ten_seconds() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
 

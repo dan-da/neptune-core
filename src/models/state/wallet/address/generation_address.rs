@@ -206,7 +206,7 @@ impl GenerationReceivingAddress {
         let network_byte: char = match network {
             Network::Alpha | Network::Beta | Network::Main => 'm',
             Network::Testnet => 't',
-            Network::RegTest => 'r',
+            Network::Regtest => 'r',
         };
         hrp.push(network_byte);
         hrp

@@ -17,6 +17,8 @@ use itertools::Itertools;
 use mempool::Mempool;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
+use serde::Deserialize;
+use serde::Serialize;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -477,15 +479,15 @@ impl GlobalState {
     ///
     /// This is useful when ReceivingAddress is not available, such as when
     /// creating output Utxo directly from lockscripts.  Otherwise
-    /// [generate_tx_inputs_and_outputs_from_list()] is preferred.
-    pub async fn generate_tx_inputs_and_outputs_from_list(
+    /// [generate_tx_params()] is preferred.
+    pub async fn generate_tx_params_from_list(
         &self,
         mut tx_output_list: TxOutputList,
         change_key: SpendingKey,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
-    ) -> Result<(TxInputList, TxOutputList)> {
+    ) -> Result<TxParams> {
         let total_spend = tx_output_list.total_native_coins() + fee;
         let tip_hash = self.chain.light_state().hash();
 
@@ -514,7 +516,7 @@ impl GlobalState {
             tx_output_list.append(&mut change_output_list);
         }
 
-        Ok((tx_input_list, tx_output_list))
+        Ok(TxParams::new(tx_input_list, tx_output_list)?)
     }
 
     pub async fn generate_tx_params(
@@ -525,7 +527,7 @@ impl GlobalState {
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
         timestamp: Timestamp,
-    ) -> Result<(TxParams, Vec<TxAddressOutput>)> {
+    ) -> Result<(TxParams, Vec<TxOutputMeta>)> {
         let total_spend = outputs
             .iter()
             .map(|(_, amount)| *amount)
@@ -557,9 +559,20 @@ impl GlobalState {
 
         assert_eq!(tx_output_list.len(), outputs.len());
 
-        let tx_details = TxParams::new_with_timestamp(tx_input_list, tx_output_list, timestamp)?;
+        let tx_output_meta_list = outputs
+            .into_iter()
+            .map(|(addr, _)| TxOutputMeta {
+                self_owned: self
+                    .wallet_state
+                    .find_known_spending_key_for_receiving_address(&addr)
+                    .is_some(),
+                receiving_address: addr,
+            })
+            .collect_vec();
 
-        Ok((tx_details, outputs))
+        let tx_params = TxParams::new_with_timestamp(tx_input_list, tx_output_list, timestamp)?;
+
+        Ok((tx_params, tx_output_meta_list))
     }
 
     /// creates a Transaction.
@@ -784,8 +797,8 @@ impl GlobalState {
             .wallet_secret
             .nth_symmetric_key_for_tests(0);
 
-        let (tx_input_list, tx_output_list) = self
-            .generate_tx_inputs_and_outputs_from_list(
+        let tx_params = self
+            .generate_tx_params_from_list(
                 tx_output_vec.into(),
                 change_key.into(),
                 OwnedUtxoNotifyMethod::OffChain,
@@ -794,12 +807,9 @@ impl GlobalState {
             )
             .await?;
 
-        let tx_params =
-            TxParams::new_with_timestamp(tx_input_list, tx_output_list.clone(), timestamp)?;
+        let transaction = self.create_transaction(tx_params.clone()).await?;
 
-        let transaction = self.create_transaction(tx_params).await?;
-
-        Ok((transaction, (&tx_output_list).into()))
+        Ok((transaction, (tx_params.tx_output_list()).into()))
     }
 
     // note: this executes the prover which can take a very
@@ -1420,6 +1430,12 @@ impl GlobalState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxOutputMeta {
+    pub receiving_address: ReceivingAddress,
+    pub self_owned: bool,
+}
+
 #[cfg(test)]
 mod global_state_tests {
     use num_traits::One;
@@ -1475,7 +1491,7 @@ mod global_state_tests {
     #[traced_test]
     #[tokio::test]
     async fn premine_recipient_cannot_spend_premine_before_and_can_after_release_date() {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let other_wallet = WalletSecret::new_random();
         let global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
@@ -1615,7 +1631,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn restore_monitored_utxos_from_recovery_data_test() {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let devnet_wallet = WalletSecret::devnet_wallet();
         let mut global_state_lock = mock_genesis_global_state(network, 2, devnet_wallet).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -1692,7 +1708,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_simple_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -1762,7 +1778,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_fork_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -1848,7 +1864,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn resync_ms_membership_proofs_across_stale_fork() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -2035,7 +2051,7 @@ mod global_state_tests {
             seed
         };
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let network = Network::RegTest;
+        let network = Network::Regtest;
 
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
@@ -2328,7 +2344,7 @@ mod global_state_tests {
     #[tokio::test]
     async fn mock_global_state_is_valid() {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let mut global_state = global_state_lock.lock_guard_mut().await;
@@ -2450,7 +2466,7 @@ mod global_state_tests {
             change_key_type: KeyType,
         ) -> Result<()> {
             // setup initial conditions
-            let network = Network::RegTest;
+            let network = Network::Regtest;
             let genesis_block = Block::genesis_block(network);
             let launch = genesis_block.kernel.header.timestamp;
             let seven_months_post_launch = launch + Timestamp::months(7);

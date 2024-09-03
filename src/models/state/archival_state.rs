@@ -889,7 +889,7 @@ mod archival_state_tests {
         // Ensure that the archival state can be initialized without overflowing the stack
         let seed: [u8; 32] = thread_rng().gen();
         let mut rng: StdRng = SeedableRng::from_seed(seed);
-        let network = Network::RegTest;
+        let network = Network::Regtest;
 
         let mut archival_state0 = make_test_archival_state(network).await;
 
@@ -916,7 +916,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn archival_state_init_test() -> Result<()> {
         // Verify that archival mutator set is populated with outputs from genesis block
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let archival_state = make_test_archival_state(network).await;
 
         assert_eq!(
@@ -1128,7 +1128,7 @@ mod archival_state_tests {
         // blocks.
 
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (mut archival_state, _peer_db_lock, _data_dir) =
             mock_genesis_archival_state(network).await;
         let genesis_wallet_state =
@@ -1138,7 +1138,7 @@ mod archival_state_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
+            mock_genesis_global_state(Network::Regtest, 42, genesis_wallet).await;
         let mut num_utxos = Block::premine_utxos(network).len();
 
         // 1. Create new block 1 with one input and four outputs and store it to disk
@@ -1251,7 +1251,7 @@ mod archival_state_tests {
         // This test is intended to verify that rollbacks work for non-trivial
         // blocks, also when there are many blocks that push the active window of the
         // mutator set forwards.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
@@ -1259,7 +1259,7 @@ mod archival_state_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 42, genesis_wallet).await;
+            mock_genesis_global_state(Network::Regtest, 42, genesis_wallet).await;
 
         let mut global_state = global_state_lock.lock_guard_mut().await;
         let genesis_block: Block = *global_state.chain.archival_state().genesis_block.to_owned();
@@ -1420,7 +1420,7 @@ mod archival_state_tests {
     #[tokio::test]
     async fn allow_consumption_of_genesis_output_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_wallet = genesis_wallet_state.wallet_secret;
@@ -1478,7 +1478,7 @@ mod archival_state_tests {
         // Test various parts of the state update when a block contains multiple inputs and outputs
 
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let genesis_spending_key = genesis_wallet_state
@@ -1887,7 +1887,7 @@ mod archival_state_tests {
             Network::Alpha,
             Network::Beta,
             Network::Main,
-            Network::RegTest,
+            Network::Regtest,
             Network::Testnet,
         ] {
             let mut archival_state: ArchivalState = make_test_archival_state(network).await;

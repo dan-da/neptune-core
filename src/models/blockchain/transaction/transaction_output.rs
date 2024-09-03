@@ -195,7 +195,7 @@ impl TxOutput {
         };
 
         let utxo = Utxo::new_native_coin(address.lock_script(), amount);
-        let utxo_wallet_key = wallet_state.find_spending_key_for_utxo(&utxo);
+        let utxo_wallet_key = wallet_state.find_known_spending_key_for_utxo(&utxo);
 
         let tx_output = match utxo_wallet_key {
             None => match unowned_utxo_notify_method {
@@ -438,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn test_utxoreceiver_auto_not_owned_output() -> Result<()> {
         let global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(Network::Regtest, 2, WalletSecret::devnet_wallet()).await;
 
         let state = global_state_lock.lock_guard().await;
         let block_height = state.chain.light_state().header().height;
@@ -490,7 +490,7 @@ mod tests {
     #[tokio::test]
     async fn test_utxoreceiver_auto_owned_output() -> Result<()> {
         let mut global_state_lock =
-            mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+            mock_genesis_global_state(Network::Regtest, 2, WalletSecret::devnet_wallet()).await;
 
         // obtain next unused receiving address from our wallet.
         let spending_key_gen = global_state_lock

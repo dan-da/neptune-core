@@ -713,10 +713,10 @@ impl Block {
 
 #[cfg(test)]
 mod block_tests {
+    use clap::ValueEnum;
     use rand::random;
     use rand::thread_rng;
     use rand::Rng;
-    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
 
     use crate::config_models::network::Network;
@@ -735,7 +735,7 @@ mod block_tests {
         let mut rng = thread_rng();
         // We need the global state to construct a transaction. This global state
         // has a wallet which receives a premine-UTXO.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, WalletSecret::devnet_wallet()).await;
         let spending_key = global_state_lock
@@ -796,7 +796,7 @@ mod block_tests {
     #[test]
     fn test_difficulty_control_matches() {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
 
         let a_wallet_secret = WalletSecret::new_random();
         let a_recipient_address = a_wallet_secret
@@ -895,7 +895,7 @@ mod block_tests {
     #[test]
     fn block_with_wrong_mmra_is_invalid() {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_block = Block::genesis_block(network);
 
         let a_wallet_secret = WalletSecret::new_random();
@@ -915,7 +915,7 @@ mod block_tests {
     #[test]
     fn block_with_far_future_timestamp_is_invalid() {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_block = Block::genesis_block(network);
         let mut now = genesis_block.kernel.header.timestamp;
 
@@ -952,7 +952,7 @@ mod block_tests {
     #[tokio::test]
     async fn can_prove_block_ancestry() {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let genesis_block = Block::genesis_block(network);
         let mut blocks = vec![];
         blocks.push(genesis_block.clone());
@@ -1013,9 +1013,9 @@ mod block_tests {
         // 831600 = 42000000 * 0.0198
         // where 42000000 is the asymptotical limit of the token supply
         // and 1.98% is the relative size of the premine
-        for network in Network::iter() {
+        for network in Network::value_variants() {
             let premine_max_size = NeptuneCoins::new(831600);
-            let total_premine = Block::premine_distribution(network)
+            let total_premine = Block::premine_distribution(*network)
                 .iter()
                 .map(|(_receiving_address, amount)| *amount)
                 .sum::<NeptuneCoins>();
@@ -1038,7 +1038,7 @@ mod block_tests {
         //       Arc<Mutex<Option<Digest>>> would link the digest in the clone
         #[test]
         fn clone_and_modify() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
             let g_hash = gblock.hash();
 
             let mut g2 = gblock.clone();
@@ -1053,7 +1053,7 @@ mod block_tests {
         // test: verify digest is correct after Block::new().
         #[test]
         fn new() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
             let g2 = gblock.clone();
 
             let block = Block::new(g2.kernel.header, g2.kernel.body, g2.block_type);
@@ -1063,7 +1063,7 @@ mod block_tests {
         // test: verify digest changes after nonce is updated.
         #[test]
         fn set_header_nonce() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
             let mut rng = thread_rng();
 
             let mut new_block = gblock.clone();
@@ -1074,7 +1074,7 @@ mod block_tests {
         // test: verify set_block() copies source digest
         #[test]
         fn set_block() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
             let mut rng = thread_rng();
 
             let mut unique_block = gblock.clone();
@@ -1094,7 +1094,7 @@ mod block_tests {
             // note: we have to generate a block becau            // TransferBlock::into() will panic if it
             // encounters the genesis block.
             let global_state_lock =
-                mock_genesis_global_state(Network::RegTest, 2, WalletSecret::devnet_wallet()).await;
+                mock_genesis_global_state(Network::Regtest, 2, WalletSecret::devnet_wallet()).await;
             let spending_key = global_state_lock
                 .lock_guard()
                 .await
@@ -1104,7 +1104,7 @@ mod block_tests {
             let address = spending_key.to_address();
             let mut rng = thread_rng();
 
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
 
             let (source_block, _, _) = make_mock_block(&gblock, None, address, rng.gen());
 
@@ -1116,7 +1116,7 @@ mod block_tests {
         // test: verify digest is correct after deserializing
         #[test]
         fn deserialize() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
 
             let bytes = bincode::serialize(&gblock).unwrap();
             let block: Block = bincode::deserialize(&bytes).unwrap();
@@ -1138,7 +1138,7 @@ mod block_tests {
         //       round trip.
         #[test]
         fn bfieldcodec_encode_and_decode() {
-            let gblock = Block::genesis_block(Network::RegTest);
+            let gblock = Block::genesis_block(Network::Regtest);
 
             let encoded: Vec<BFieldElement> = gblock.encode();
             let decoded: Block = *Block::decode(&encoded).unwrap();

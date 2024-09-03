@@ -50,6 +50,7 @@ use crate::Hash;
 use super::address::generation_address;
 use super::address::symmetric_key;
 use super::address::KeyType;
+use super::address::ReceivingAddress;
 use super::address::SpendingKey;
 use super::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use super::expected_utxo::ExpectedUtxo;
@@ -330,6 +331,29 @@ impl WalletState {
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
 
+    pub async fn find_expected_utxo(
+        &self,
+        utxo: &Utxo,
+        sender_randomness: Digest,
+    ) -> Option<ExpectedUtxo> {
+        // we iterate in reverse based on expectation that we will most often be working
+        // with recent ExpectedUtxos.
+        let len = self.wallet_db.expected_utxos().len().await;
+        let stream = self
+            .wallet_db
+            .expected_utxos()
+            .stream_many_values((0..len).rev())
+            .await;
+        pin_mut!(stream); // needed for iteration
+
+        while let Some(eu) = stream.next().await {
+            if eu.utxo == *utxo && eu.sender_randomness == sender_randomness {
+                return Some(eu);
+            }
+        }
+        None
+    }
+
     /// Delete all ExpectedUtxo that exceed a certain age
     ///
     /// note: It is questionable if this method should ever be called
@@ -387,15 +411,26 @@ impl WalletState {
     // returns true if the utxo can be unlocked by one of the
     // known wallet keys.
     pub fn can_unlock(&self, utxo: &Utxo) -> bool {
-        self.find_spending_key_for_utxo(utxo).is_some()
+        self.find_known_spending_key_for_utxo(utxo).is_some()
     }
 
     // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
     // wallet keys.
-    pub fn find_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
+    pub fn find_known_spending_key_for_utxo(&self, utxo: &Utxo) -> Option<SpendingKey> {
         self.get_all_known_spending_keys()
             .into_iter()
             .find(|k| k.to_address().lock_script().hash() == utxo.lock_script_hash)
+    }
+
+    // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
+    // wallet keys.
+    pub fn find_known_spending_key_for_receiving_address(
+        &self,
+        addr: &ReceivingAddress,
+    ) -> Option<SpendingKey> {
+        self.get_all_known_spending_keys()
+            .into_iter()
+            .find(|k| k.to_address() == *addr)
     }
 
     // returns Some(SpendingKey) if the utxo can be unlocked by one of the known
@@ -949,16 +984,17 @@ impl WalletState {
                 wallet_status.synced_unspent[ret.len()].clone();
 
             // find spending key for this utxo.
-            let spending_key = match self.find_spending_key_for_utxo(&wallet_status_element.utxo) {
-                Some(k) => k,
-                None => {
-                    warn!(
-                        "spending key not found for utxo: {:?}",
-                        wallet_status_element.utxo
-                    );
-                    continue;
-                }
-            };
+            let spending_key =
+                match self.find_known_spending_key_for_utxo(&wallet_status_element.utxo) {
+                    Some(k) => k,
+                    None => {
+                        warn!(
+                            "spending key not found for utxo: {:?}",
+                            wallet_status_element.utxo
+                        );
+                        continue;
+                    }
+                };
             let lock_script = spending_key.to_address().lock_script();
 
             allocated_amount =
@@ -1046,7 +1082,7 @@ mod tests {
         // Verify that MUTXO *is* marked as abandoned
 
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let own_wallet_secret = WalletSecret::new_random();
         let own_spending_key = own_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut own_global_state_lock =
@@ -1272,7 +1308,7 @@ mod tests {
     #[traced_test]
     #[tokio::test]
     async fn mock_wallet_state_is_synchronized_to_genesis_block() {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let wallet = WalletSecret::devnet_wallet();
         let genesis_block = Block::genesis_block(network);
 
@@ -1321,7 +1357,7 @@ mod tests {
         #[tokio::test]
         async fn insert_and_scan() {
             let mut wallet =
-                mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletSecret::new_random(), Network::Regtest).await;
 
             assert!(wallet.wallet_db.expected_utxos().is_empty().await);
             assert!(wallet.wallet_db.expected_utxos().len().await.is_zero());
@@ -1374,7 +1410,7 @@ mod tests {
         #[tokio::test]
         async fn prune_stale() {
             let mut wallet =
-                mock_genesis_wallet_state(WalletSecret::new_random(), Network::RegTest).await;
+                mock_genesis_wallet_state(WalletSecret::new_random(), Network::Regtest).await;
 
             let mock_utxo =
                 Utxo::new_native_coin(LockScript::anyone_can_spend(), NeptuneCoins::new(14));
@@ -1469,7 +1505,7 @@ mod tests {
             ///    the wallet db is NOT persisted to disk after the ExpectedUtxo
             ///    is added. asserts that the restored wallet has 0 ExpectedUtxo.
             pub(super) async fn restore_wallet(persist: bool) {
-                let network = Network::RegTest;
+                let network = Network::Regtest;
                 let wallet_secret = WalletSecret::new_random();
                 let data_dir = unit_test_data_directory(network).unwrap();
 

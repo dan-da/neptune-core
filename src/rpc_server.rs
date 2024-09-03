@@ -17,7 +17,6 @@ use serde::Serialize;
 use systemstat::Platform;
 use systemstat::System;
 use tarpc::context;
-use tokio::sync::mpsc::error::SendError;
 use tracing::error;
 use tracing::info;
 use twenty_first::math::digest::Digest;
@@ -50,6 +49,7 @@ use crate::models::state::wallet::expected_utxo::UtxoTransfer;
 use crate::models::state::wallet::expected_utxo::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
+use crate::models::state::TxOutputMeta;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::commit;
 
@@ -170,7 +170,7 @@ pub trait RPC {
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxParams, Vec<TxAddressOutput>)>;
+    ) -> Result<(TxParams, Vec<TxOutputMeta>), String>;
 
     /// Send coins to multiple recipients
     ///
@@ -201,9 +201,9 @@ pub trait RPC {
     ///
     /// future work: add `unowned_utxo_notify_method` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
-    async fn send(tx_params: TxParams) -> Option<Digest>;
+    async fn send(tx_params: TxParams) -> Result<Digest, String>;
 
-    async fn claim_utxo(utxo_transfer_encrypted: String) -> bool;
+    async fn claim_utxo(utxo_transfer_encrypted: String) -> Result<(), String>;
 
     /// Stop miner if running
     async fn pause_miner();
@@ -262,7 +262,7 @@ impl NeptuneRPCServer {
         &mut self,
         transaction: Transaction,
         tx_output_list: TxOutputList,
-    ) -> Option<Digest> {
+    ) -> Result<Digest, String> {
         // if the tx created offchain expected_utxos we must inform wallet.
         if tx_output_list.has_offchain() {
             // acquire write-lock
@@ -270,31 +270,20 @@ impl NeptuneRPCServer {
 
             // Inform wallet of any expected incoming utxos.
             // note that this (briefly) mutates self.
-            if let Err(e) = gsm
-                .add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
+            gsm.add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
                 .await
-            {
-                tracing::error!("Could not add expected utxos to wallet: {}", e);
-                return None;
-            }
+                .map_err(|e| e.to_string())?;
 
             // ensure we write new wallet state out to disk.
             gsm.persist_wallet().await.expect("flushed wallet");
         }
 
         // Send transaction message to main
-        let response: Result<(), SendError<RPCServerToMain>> = self
-            .rpc_server_to_main_tx
+        self.rpc_server_to_main_tx
             .send(RPCServerToMain::Send(Box::new(transaction.clone())))
-            .await;
-
-        match response {
-            Ok(_) => Some(Hash::hash(&transaction)),
-            Err(e) => {
-                tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
-                None
-            }
-        }
+            .await
+            .map(|_| Hash::hash(&transaction))
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -656,7 +645,7 @@ impl RPC for NeptuneRPCServer {
     // TODO: add an endpoint to get recommended fee density.
     //
     // documented in trait. do not add doc-comment.
-    async fn send(mut self, _ctx: context::Context, tx_params: TxParams) -> Option<Digest> {
+    async fn send(mut self, _ctx: context::Context, tx_params: TxParams) -> Result<Digest, String> {
         let span = tracing::debug_span!("Constructing transaction");
         let _enter = span.enter();
 
@@ -670,19 +659,13 @@ impl RPC for NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let transaction = match self
+        let transaction = self
             .state
             .lock_guard()
             .await
             .create_transaction(tx_params)
             .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::error!("Could not create transaction: {}", e);
-                return None;
-            }
-        };
+            .map_err(|e| e.to_string())?;
 
         self.finalize_send(transaction, tx_output_list).await
     }
@@ -691,12 +674,12 @@ impl RPC for NeptuneRPCServer {
         mut self,
         _ctx: context::Context,
         utxo_transfer_encrypted_str: String,
-    ) -> bool {
+    ) -> Result<(), String> {
         let utxo_transfer_encrypted = UtxoTransferEncrypted::from_bech32m(
             &utxo_transfer_encrypted_str,
             self.state.cli().network,
         )
-        .unwrap();
+        .map_err(|e| e.to_string())?;
 
         let spending_key = self
             .state
@@ -706,15 +689,36 @@ impl RPC for NeptuneRPCServer {
             .find_known_spending_key_for_receiver_identifier(
                 utxo_transfer_encrypted.receiver_identifier,
             )
-            .ok_or(anyhow::anyhow!("utxo does not match any known wallet key"))
-            .unwrap();
+            .ok_or("utxo does not match any known wallet key".to_string())?;
 
         let UtxoTransfer {
             utxo,
             sender_randomness,
         } = utxo_transfer_encrypted
             .decrypt_with_spending_key(&spending_key)
-            .unwrap();
+            .map_err(|e| e.to_string())?;
+
+        info!(
+            "{:#?}",
+            UtxoTransfer {
+                utxo: utxo.clone(),
+                sender_randomness
+            }
+        );
+
+        // return early if expected_utxo already exists.
+        if self
+            .state
+            .lock_guard()
+            .await
+            .wallet_state
+            .find_expected_utxo(&utxo, sender_randomness)
+            .await
+            .is_some()
+        {
+            return Err("utxo already claimed".to_string());
+        }
+
         let receiver_preimage = spending_key.privacy_preimage();
         let receiver_digest = receiver_preimage.hash::<Hash>();
 
@@ -734,12 +738,12 @@ impl RPC for NeptuneRPCServer {
         // note that this (briefly) mutates self.
         gsm.add_expected_utxos_to_wallet([(announced_utxo, UtxoNotifier::Claim).into()])
             .await
-            .unwrap();
+            .map_err(|e| e.to_string())?;
 
         // ensure we write new wallet state out to disk.
         gsm.persist_wallet().await.expect("flushed wallet");
 
-        true
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
@@ -750,7 +754,7 @@ impl RPC for NeptuneRPCServer {
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Option<(TxParams, Vec<TxAddressOutput>)> {
+    ) -> Result<(TxParams, Vec<TxOutputMeta>), String> {
         // obtain next unused symmetric key for change utxo
         let change_key = {
             let mut s = self.state.lock_guard_mut().await;
@@ -762,7 +766,7 @@ impl RPC for NeptuneRPCServer {
         };
 
         let state = self.state.lock_guard().await;
-        match state
+        state
             .generate_tx_params(
                 outputs,
                 change_key,
@@ -772,13 +776,7 @@ impl RPC for NeptuneRPCServer {
                 Timestamp::now(),
             )
             .await
-        {
-            Ok(u) => Some(u),
-            Err(err) => {
-                tracing::error!("Could not generate tx outputs: {}", err);
-                None
-            }
-        }
+            .map_err(|e| e.to_string())
     }
 
     // documented in trait. do not add doc-comment.
@@ -869,11 +867,11 @@ mod rpc_server_tests {
     use std::net::SocketAddr;
 
     use anyhow::Result;
+    use clap::ValueEnum;
     use itertools::Itertools;
     use num_traits::One;
     use num_traits::Zero;
     use rand::Rng;
-    use strum::IntoEnumIterator;
     use tracing_test::traced_test;
     use ReceivingAddress;
 
@@ -956,9 +954,9 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn network_response_is_consistent() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
-        for network in Network::iter() {
-            let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
-            assert_eq!(network, rpc_server.network(context::current()).await);
+        for network in Network::value_variants() {
+            let (rpc_server, _) = test_rpc_server(*network, WalletSecret::new_random(), 2).await;
+            assert_eq!(*network, rpc_server.network(context::current()).await);
         }
 
         Ok(())
@@ -970,7 +968,7 @@ mod rpc_server_tests {
         // We don't care about the actual response data in this test, just that the
         // requests do not crash the server.
 
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (rpc_server, mut global_state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
@@ -1352,7 +1350,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_info_test() {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (rpc_server, state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let global_state = state_lock.lock_guard().await;
@@ -1431,7 +1429,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn block_digest_test() {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (rpc_server, state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let global_state = state_lock.lock_guard().await;
@@ -1508,7 +1506,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (rpc_server, mut state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
@@ -1574,7 +1572,7 @@ mod rpc_server_tests {
                 UnownedUtxoNotifyMethod::default(),
             )
             .await
-            .unwrap();
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         // --- Store: store num expected utxo before spend ---
         let num_expected_utxo = state_lock
@@ -1590,7 +1588,7 @@ mod rpc_server_tests {
         let result = rpc_server.clone().send(ctx, tx_params).await;
 
         // --- Test: verify op returns a value.
-        assert!(result.is_some());
+        assert!(result.is_ok());
 
         // --- Test: verify expected_utxos.len() has increased by 2.
         //           (one off-chain utxo + one change utxo)
@@ -1611,7 +1609,7 @@ mod rpc_server_tests {
 
     #[tokio::test]
     async fn claim_utxo_owned() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let (rpc_server, mut global_state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
@@ -1643,21 +1641,21 @@ mod rpc_server_tests {
                 UnownedUtxoNotifyMethod::default(),
             )
             .await
-            .unwrap();
+            .map_err(|e| anyhow::anyhow!(e))?;
 
         let tx_output_list = tx_params.tx_output_list().clone();
 
         let _ = rpc_server.clone().send(ctx, tx_params).await;
 
         for utxo_transfer_encrypted in tx_output_list.utxo_transfer_iter() {
-            let result = rpc_server
+            rpc_server
                 .clone()
                 .claim_utxo(
                     context::current(),
                     utxo_transfer_encrypted.to_bech32m(network)?,
                 )
-                .await;
-            assert!(result);
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
         }
 
         assert_eq!(
@@ -1685,7 +1683,7 @@ mod rpc_server_tests {
 
     #[tokio::test]
     async fn claim_utxo_unowned() -> Result<()> {
-        let network = Network::RegTest;
+        let network = Network::Regtest;
 
         // bob's node
         let (pay_to_bob_outputs, bob_rpc_server, mut bob_global_state_lock) = {
@@ -1728,7 +1726,7 @@ mod rpc_server_tests {
                     UnownedUtxoNotifyMethod::OffChainSerialized,
                 )
                 .await
-                .unwrap();
+                .map_err(|e| anyhow::anyhow!(e))?;
 
             let utxo_transfer_list = tx_params
                 .tx_output_list()
@@ -1745,14 +1743,14 @@ mod rpc_server_tests {
             bob_global_state_lock.store_block(block1).await?;
 
             for utxo_transfer_encrypted in alice_utxo_transfer_encrypted_to_bob_list.iter() {
-                let result = bob_rpc_server
+                bob_rpc_server
                     .clone()
                     .claim_utxo(
                         context::current(),
                         utxo_transfer_encrypted.to_bech32m(network)?,
                     )
-                    .await;
-                assert!(result);
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
             }
 
             assert_eq!(

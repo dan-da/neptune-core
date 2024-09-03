@@ -272,21 +272,23 @@ impl WalletSecret {
     /// for the mutator set.
     pub fn generate_sender_randomness(
         &self,
-        block_height: BlockHeight,
-        receiver_digest: Digest,
+        _block_height: BlockHeight,
+        _receiver_digest: Digest,
     ) -> Digest {
-        const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
-        Hash::hash_varlen(
-            &[
-                self.secret_seed.0.encode(),
-                vec![
-                    BFieldElement::new(SENDER_RANDOMNESS_FLAG),
-                    block_height.into(),
-                ],
-                receiver_digest.encode(),
-            ]
-            .concat(),
-        )
+        rand::random()
+
+        // const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
+        // Hash::hash_varlen(
+        //     &[
+        //         self.secret_seed.0.encode(),
+        //         vec![
+        //             BFieldElement::new(SENDER_RANDOMNESS_FLAG),
+        //             block_height.into(),
+        //         ],
+        //         receiver_digest.encode(),
+        //     ]
+        //     .concat(),
+        // )
     }
 
     /// Read Wallet from file as JSON
@@ -444,7 +446,7 @@ mod wallet_tests {
         let mut rng = thread_rng();
         // This test is designed to verify that the genesis block is applied
         // to the wallet state at initialization.
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut wallet_state_premine_recipient =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let monitored_utxos_premine_wallet =
@@ -514,7 +516,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_registration_of_monitored_utxos_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state =
             mock_genesis_wallet_state(own_wallet_secret.clone(), network).await;
@@ -650,7 +652,7 @@ mod wallet_tests {
     async fn allocate_sufficient_input_funds_test() -> Result<()> {
         let mut rng = thread_rng();
         let own_wallet_secret = WalletSecret::new_random();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state
             .wallet_secret
@@ -865,7 +867,7 @@ mod wallet_tests {
     #[tokio::test]
     async fn wallet_state_maintanence_multiple_inputs_outputs_test() -> Result<()> {
         let mut rng = thread_rng();
-        let network = Network::RegTest;
+        let network = Network::Regtest;
         let own_wallet_secret = WalletSecret::new_random();
         let mut own_wallet_state = mock_genesis_wallet_state(own_wallet_secret, network).await;
         let own_spending_key = own_wallet_state

@@ -153,7 +153,7 @@ impl SendScreen {
 
         let send_result = rpc_client.send(send_ctx, tx_params).await.unwrap();
 
-        if send_result.is_none() {
+        if send_result.is_err() {
             *notice_arc.lock().await = "Could not send due to error.".to_string();
             *focus_arc.lock().await = SendScreenWidget::Address;
             return;

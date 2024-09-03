@@ -1,23 +1,27 @@
 use std::io;
 use std::io::stdout;
+use std::io::Read;
 use std::io::Write;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use clap::CommandFactory;
 use clap::Parser;
+use clap::Subcommand;
 use clap_complete::generate;
 use clap_complete::Shell;
-use directories::ProjectDirs;
+use itertools::EitherOrBoth;
+use itertools::Itertools;
 use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
-use neptune_core::models::blockchain::transaction::TxOutputList;
+use neptune_core::models::blockchain::transaction::TxOutput;
 use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use neptune_core::models::blockchain::transaction::UtxoNotification;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -26,8 +30,10 @@ use neptune_core::models::state::wallet::address::ReceivingAddress;
 use neptune_core::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use neptune_core::models::state::wallet::wallet_status::WalletStatus;
 use neptune_core::models::state::wallet::WalletSecret;
+use neptune_core::models::state::TxOutputMeta;
 use neptune_core::rpc_server::RPCClient;
 use serde::Deserialize;
+use serde::Serialize;
 use tarpc::client;
 use tarpc::context;
 use tarpc::tokio_serde::formats::Json;
@@ -37,6 +43,83 @@ use tarpc::tokio_serde::formats::Json;
 struct TransactionOutput {
     address: String,
     amount: NeptuneCoins,
+    recipient: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AddressEnum {
+    Generation {
+        address_abbrev: String,
+        address: String,
+    },
+    Symmetric {
+        privacy_digest: String,
+        receiver_identifier: String,
+    },
+}
+impl TryFrom<(&ReceivingAddress, Network)> for AddressEnum {
+    type Error = anyhow::Error;
+
+    fn try_from(v: (&ReceivingAddress, Network)) -> Result<Self> {
+        let (addr, network) = v;
+        Ok(match *addr {
+            ReceivingAddress::Generation(_) => Self::Generation {
+                address_abbrev: addr.to_bech32m_abbreviated(network)?,
+                address: addr.to_bech32m(network)?,
+            },
+            ReceivingAddress::Symmetric(_) => Self::Symmetric {
+                privacy_digest: addr.privacy_digest().to_hex(),
+                receiver_identifier: addr.receiver_identifier().to_string(),
+            },
+        })
+    }
+}
+impl AddressEnum {
+    fn short_id(&self) -> &str {
+        match *self {
+            Self::Generation {
+                ref address_abbrev, ..
+            } => address_abbrev,
+            Self::Symmetric {
+                ref receiver_identifier,
+                ..
+            } => receiver_identifier,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UtxoTransferEntry {
+    pub data_format: String,
+    pub recipient: String,
+    pub amount: String,
+    pub utxo_transfer_encrypted: String,
+    pub address_info: AddressEnum,
+}
+
+impl UtxoTransferEntry {
+    fn data_format() -> String {
+        "neptune-utxo-transfer-v1.0".to_string()
+    }
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum ClaimFormat {
+    /// reads utxo-transfer-encrypted field of the utxo-transfer json file.
+    Raw {
+        /// will be read from stdin if not present
+        raw: Option<String>,
+    },
+    /// reads contents of a utxo-transfer json file
+    Json {
+        /// will be read from stdin if not present
+        json: Option<String>,
+    },
+    /// reads a utxo-transfer json file
+    File {
+        /// path to the file
+        path: PathBuf,
+    },
 }
 
 /// We impl FromStr deserialization so that clap can parse the --outputs arg of
@@ -47,7 +130,7 @@ struct TransactionOutput {
 impl FromStr for TransactionOutput {
     type Err = anyhow::Error;
 
-    /// parses address:amount into TransactionOutput{address, amount}
+    /// parses address:amount:recipient or address:amount into TransactionOutput{address, amount, recipient}
     ///
     /// This is used by the outputs arg of send-to-many command.
     /// Usage looks like:
@@ -62,13 +145,19 @@ impl FromStr for TransactionOutput {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts = s.split(':').collect::<Vec<_>>();
 
-        if parts.len() != 2 {
+        if parts.len() != 2 && parts.len() != 3 {
             anyhow::bail!("Invalid transaction output.  missing :")
         }
 
         Ok(Self {
             address: parts[0].to_string(),
             amount: NeptuneCoins::from_str(parts[1])?,
+            recipient: (if parts.len() == 3 {
+                parts[2]
+            } else {
+                "anonymous"
+            })
+            .to_string(),
         })
     }
 }
@@ -85,45 +174,80 @@ impl TransactionOutput {
     }
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 enum Command {
     /// Dump shell completions.
     Completions,
 
     /******** READ STATE ********/
+    /// retrieve network that neptune-core is running on
     Network,
+
+    /// retrieve address for peers to contact this neptune-core node
     OwnListenAddressForPeers,
+
+    /// retrieve instance-id of this neptune-core node
     OwnInstanceId,
+
+    /// retrieve current block height
     BlockHeight,
+
+    /// retrieve information about a block
     BlockInfo {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
+
+    /// retrieve confirmations
     Confirmations,
+
+    /// retrieve info about peers
     PeerInfo,
+
+    /// retrieve list of sanctioned peers
     AllSanctionedPeers,
+
+    /// retrieve digest/hash of newest block
     TipDigest,
-    LatestTipDigests {
-        n: usize,
-    },
-    TipHeader,
+
+    /// retrieve digests of newest n blocks
+    LatestTipDigests { n: usize },
+
+    /// retrieve block-header of any block
     Header {
         /// one of: `genesis, tip, height/<n>, digest/<hex>`
         block_selector: BlockSelector,
     },
+
+    /// retrieved confirmed balance
     SyncedBalance,
+
+    /// retrieve wallet status information
     WalletStatus,
+
+    /// retrieve wallet's receiving address
     OwnReceivingAddress,
+
+    /// list known coins
     ListCoins,
+
+    /// retrieve count of transactions in the mempool
     MempoolTxCount,
+
+    /// retrieve size of mempool in bytes (in RAM)
     MempoolSize,
 
     /******** CHANGE STATE ********/
+    /// shutdown neptune-core
     Shutdown,
+
+    /// clear all peer standings
     ClearAllStandings,
-    ClearStandingByIp {
-        ip: IpAddr,
-    },
+
+    /// clear peer standing for a given IP address
+    ClearStandingByIp { ip: IpAddr },
+
+    /// send to a single recipient
     Send {
         /// recipient's address
         address: String,
@@ -134,6 +258,10 @@ enum Command {
         /// transaction fee
         fee: NeptuneCoins,
 
+        /// recipient name or label, for local usage only
+        #[clap(value_parser = clap::builder::NonEmptyStringValueParser::new(), default_value = "anonymous")]
+        recipient: String,
+
         /// how to notify our wallet of utxos.
         #[clap(long, value_enum, default_value_t)]
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
@@ -142,8 +270,12 @@ enum Command {
         #[clap(long, value_enum, default_value_t)]
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
+
+    /// send to multiple recipients
     SendToMany {
-        /// transaction outputs. format: address:amount address:amount ...
+        /// transaction outputs. format: address:amount:recipient address:amount ...
+        ///
+        /// recipient is a local-only label and will be "anonymous" if omitted.
         #[clap(value_parser, num_args = 1.., required=true, value_delimiter = ' ')]
         outputs: Vec<TransactionOutput>,
 
@@ -160,21 +292,43 @@ enum Command {
     },
     /// claim an off-chain utxo-transfer.
     Claim {
-        /// a bech32m encoded utxo transfer as returned from `send`
-        utxo_transfer_encrypted: String,
+        #[clap(subcommand)]
+        format: ClaimFormat,
     },
+
+    /// pause mining
     PauseMiner,
+
+    /// resume mining
     RestartMiner,
+
+    /// prune monitored utxos from abandoned chains
     PruneAbandonedMonitoredUtxos,
 
     /******** WALLET ********/
-    GenerateWallet,
-    WhichWallet,
-    ExportSeedPhrase,
-    ImportSeedPhrase,
+    /// generate a new wallet
+    GenerateWallet {
+        #[clap(default_value_t)]
+        network: Network,
+    },
+    /// displays path to wallet secrets file
+    WhichWallet {
+        #[clap(default_value_t)]
+        network: Network,
+    },
+    /// export mnemonic seed phrase
+    ExportSeedPhrase {
+        #[clap(default_value_t)]
+        network: Network,
+    },
+    /// import mnemonic seed phrase
+    ImportSeedPhrase {
+        #[clap(default_value_t)]
+        network: Network,
+    },
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 #[clap(name = "neptune-cli", about = "An RPC client")]
 struct Config {
     /// The data directory that contains the wallet and blockchain state
@@ -187,23 +341,11 @@ struct Config {
 
     #[clap(subcommand)]
     command: Command,
-
-    #[structopt(long, short, default_value = "alpha")]
-    pub network: Network,
 }
 
 impl Config {
-    fn cli_data_dir(&self) -> anyhow::Result<PathBuf> {
-        self.data_dir
-            .clone()
-            .map(ProjectDirs::from_path)
-            .unwrap_or_else(|| ProjectDirs::from("org", "neptune", "neptune-cli"))
-            .map(|pd| pd.data_dir().join(self.network.to_string()))
-            .ok_or_else(|| anyhow::anyhow!("could not determine cli data dir"))
-    }
-
-    fn core_data_directory(&self) -> anyhow::Result<DataDirectory> {
-        DataDirectory::get(self.data_dir.clone(), self.network)
+    fn core_data_directory(&self, network: Network) -> anyhow::Result<DataDirectory> {
+        DataDirectory::get(self.data_dir.clone(), network)
     }
 }
 
@@ -221,30 +363,29 @@ async fn main() -> Result<()> {
                 bail!("Unknown shell.  Shell completions not available.")
             }
         }
-        Command::WhichWallet => {
+        Command::WhichWallet { network } => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = args.core_data_directory()?;
+            let data_dir = args.core_data_directory(network)?;
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                println!("No wallet file found at {}.", wallet_file.display());
+                bail!("No wallet file found at {}.", wallet_file.display());
             } else {
                 println!("{}", wallet_file.display());
             }
             return Ok(());
         }
-        Command::GenerateWallet => {
+        Command::GenerateWallet { network } => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = args.core_data_directory()?;
+            let data_dir = args.core_data_directory(network)?;
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
 
-            let (_, secret_file_paths) =
-                WalletSecret::read_from_file_or_create(&wallet_dir).unwrap();
+            let (_, secret_file_paths) = WalletSecret::read_from_file_or_create(&wallet_dir)?;
 
             println!(
                 "Wallet stored in: {}\nMake sure you also see this path if you run the neptune-core client",
@@ -258,19 +399,18 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ImportSeedPhrase => {
+        Command::ImportSeedPhrase { network } => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = args.core_data_directory()?;
+            let data_dir = args.core_data_directory(network)?;
             let wallet_dir = data_dir.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
 
             // if the wallet file already exists,
             if wallet_file.exists() {
-                println!(
+                bail!(
                     "Cannot import seed phrase; wallet file {} already exists. Move it to another location (or remove it) to import a seed phrase.",
                     wallet_file.display()
                 );
-                return Ok(());
             }
 
             // read seed phrase from user input
@@ -302,8 +442,7 @@ async fn main() -> Result<()> {
             }
             let wallet_secret = match WalletSecret::from_phrase(&phrase) {
                 Err(_) => {
-                    println!("Invalid seed phrase. Please try again.");
-                    return Ok(());
+                    bail!("Invalid seed phrase.");
                 }
                 Ok(ws) => ws,
             };
@@ -313,9 +452,7 @@ async fn main() -> Result<()> {
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
             match wallet_secret.save_to_disk(&wallet_file) {
                 Err(e) => {
-                    println!("Could not save imported wallet to disk.");
-                    println!("Error:");
-                    println!("{e}");
+                    bail!("Could not save imported wallet to disk. {e}");
                 }
                 Ok(_) => {
                     println!("Success.");
@@ -324,19 +461,18 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ExportSeedPhrase => {
+        Command::ExportSeedPhrase { network } => {
             // The root path is where both the wallet and all databases are stored
-            let data_dir = args.core_data_directory()?;
+            let data_dir = args.core_data_directory(network)?;
 
             // Get wallet object, create various wallet secret files
             let wallet_dir = data_dir.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
             if !wallet_file.exists() {
-                println!(
-                    "Cannot export seed phrase because there is no wallet.dat file to export from."
+                bail!(
+                    concat!("Cannot export seed phrase because there is no wallet.dat file to export from.\n",
+                    "Generate one using `neptune-cli generate-wallet` or `neptune-wallet-gen`, or import a seed phrase using `neptune-cli import-seed-phrase`.")
                 );
-                println!("Generate one using `neptune-cli generate-wallet` or `neptune-wallet-gen`, or import a seed phrase using `neptune-cli import-seed-phrase`.");
-                return Ok(());
             }
             let wallet_secret = match WalletSecret::read_from_file(&wallet_file) {
                 Err(e) => {
@@ -360,7 +496,7 @@ async fn main() -> Result<()> {
     let client = RPCClient::new(client::Config::default(), transport.await?).spawn();
     let ctx = context::current();
 
-    match args.command {
+    match args.clone().command {
         Command::Completions
         | Command::GenerateWallet { .. }
         | Command::WhichWallet { .. }
@@ -437,21 +573,10 @@ async fn main() -> Result<()> {
                 println!("{hash}");
             }
         }
-        Command::TipHeader => {
-            let val = client
-                .header(ctx, BlockSelector::Tip)
-                .await?
-                .expect("Tip header should be found");
-            println!("{val}")
-        }
-        Command::Header { block_selector } => {
-            let res = client.header(ctx, block_selector).await?;
-            if res.is_none() {
-                println!("Block did not exist in database.");
-            } else {
-                println!("{}", res.unwrap());
-            }
-        }
+        Command::Header { block_selector } => match client.header(ctx, block_selector).await? {
+            Some(header) => println!("{}", header),
+            None => println!("Block did not exist in database."),
+        },
         Command::SyncedBalance => {
             let val = client.synced_balance(ctx).await?;
             println!("{val}");
@@ -464,7 +589,7 @@ async fn main() -> Result<()> {
             let rec_addr = client
                 .next_receiving_address(ctx, KeyType::Generation)
                 .await?;
-            println!("{}", rec_addr.to_bech32m(args.network).unwrap())
+            println!("{}", rec_addr.to_bech32m(client.network(ctx).await?)?)
         }
         Command::MempoolTxCount => {
             let count: usize = client.mempool_tx_count(ctx).await?;
@@ -490,17 +615,20 @@ async fn main() -> Result<()> {
             println!("Cleared standing of {}", ip);
         }
         Command::Send {
-            ref address,
+            address,
             amount,
             fee,
+            recipient,
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
         } => {
             // Parse on client
-            let receiving_address = ReceivingAddress::from_bech32m(address, args.network)?;
+            let network = client.network(ctx).await?;
+            let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
             let parsed_outputs = vec![(receiving_address, amount)];
+            let recipients = vec![recipient];
 
-            let (tx_params, outputs_map) = client
+            let (tx_params, tx_output_meta) = client
                 .generate_tx_params(
                     ctx,
                     parsed_outputs.clone(),
@@ -509,28 +637,39 @@ async fn main() -> Result<()> {
                     unowned_utxo_notify_method,
                 )
                 .await?
-                .unwrap();
+                .map_err(|s| anyhow!(s))?;
 
-            let tx_output_list = tx_params.tx_output_list().clone();
+            // add local recipient info to tx_output_meta
+            let outputs_info = tx_params
+                .tx_output_list()
+                .iter()
+                .zip(tx_output_meta)
+                .zip_longest(recipients)
+                .map(|pair| match pair {
+                    EitherOrBoth::Both((o, m), r) => (o.clone(), m, r),
+                    EitherOrBoth::Left((o, m)) => (o.clone(), m, "self".to_string()),
+                    EitherOrBoth::Right(_) => unreachable!(),
+                })
+                .collect_vec();
 
-            client.send(ctx, tx_params).await?;
+            let tx_digest = client.send(ctx, tx_params).await?.map_err(|s| anyhow!(s))?;
 
-            process_utxo_notifications(&args, tx_output_list, outputs_map)?;
-
-            println!("Send completed.");
+            process_utxo_notifications(&args, network, outputs_info)?;
+            println!("Send completed. Tx Digest: {}", tx_digest);
         }
         Command::SendToMany {
-            ref outputs,
+            outputs,
             fee,
             owned_utxo_notify_method,
             unowned_utxo_notify_method,
         } => {
+            let network = client.network(ctx).await?;
             let parsed_outputs = outputs
                 .iter()
-                .map(|o| o.to_receiving_address_amount_tuple(args.network))
+                .map(|o| o.to_receiving_address_amount_tuple(network))
                 .collect::<Result<Vec<_>>>()?;
 
-            let (tx_params, outputs_map) = client
+            let (tx_params, tx_output_meta) = client
                 .generate_tx_params(
                     ctx,
                     parsed_outputs.clone(),
@@ -539,21 +678,49 @@ async fn main() -> Result<()> {
                     unowned_utxo_notify_method,
                 )
                 .await?
-                .unwrap();
+                .map_err(|s| anyhow!(s))?;
 
-            let tx_output_list = tx_params.tx_output_list().clone();
+            assert!(tx_params.tx_output_list().len() == tx_output_meta.len());
+            assert!(tx_output_meta.len() >= outputs.len());
 
-            client.send(ctx, tx_params).await?;
+            // add local recipient info to outputs_map
+            let outputs_info = tx_params
+                .tx_output_list()
+                .iter()
+                .zip(tx_output_meta.into_iter())
+                .zip_longest(outputs)
+                .map(|pair| match pair {
+                    EitherOrBoth::Both((o, m), r) => (o.clone(), m, r.recipient),
+                    EitherOrBoth::Left((o, m)) => (o.clone(), m, "self".to_string()),
+                    EitherOrBoth::Right(_) => unreachable!(),
+                })
+                .collect_vec();
 
-            process_utxo_notifications(&args, tx_output_list, outputs_map)?;
+            let tx_digest = client.send(ctx, tx_params).await?.map_err(|s| anyhow!(s))?;
 
-            println!("Send completed.");
+            process_utxo_notifications(&args, network, outputs_info)?;
+            println!("Send completed. Tx Digest: {}", tx_digest);
         }
-        Command::Claim {
-            utxo_transfer_encrypted,
-        } => {
-            client.claim_utxo(ctx, utxo_transfer_encrypted).await?;
-            println!("Success!");
+        Command::Claim { format } => {
+            let utxo_transfer_encrypted = match format {
+                ClaimFormat::Raw { raw } => val_or_stdin_line(raw)?,
+                ClaimFormat::File { path } => {
+                    let buf = std::fs::read_to_string(path)?;
+                    let utxo_transfer_entry: UtxoTransferEntry = serde_json::from_str(&buf)?;
+                    utxo_transfer_entry.utxo_transfer_encrypted
+                }
+                ClaimFormat::Json { json } => {
+                    let buf = val_or_stdin(json)?;
+                    let utxo_transfer_entry: UtxoTransferEntry = serde_json::from_str(&buf)?;
+                    utxo_transfer_entry.utxo_transfer_encrypted
+                }
+            };
+            client
+                .claim_utxo(ctx, utxo_transfer_encrypted)
+                .await?
+                .map_err(|s| anyhow!(s))?;
+
+            println!("Success.  1 Utxo Transfer was imported.");
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");
@@ -577,58 +744,63 @@ async fn main() -> Result<()> {
 
 fn process_utxo_notifications(
     config: &Config,
-    tx_output_list: TxOutputList,
-    outputs_map: Vec<(ReceivingAddress, NeptuneCoins)>,
+    network: Network,
+    outputs_info: Vec<(TxOutput, TxOutputMeta, String)>,
 ) -> anyhow::Result<()> {
-    assert_eq!(tx_output_list.len(), outputs_map.len());
-
-    #[derive(Debug, Clone, serde::Serialize, Deserialize)]
-    pub struct UtxoTransferEntry {
-        pub address_abbrev: String,
-        pub amount: String,
-        pub utxo_transfer_encrypted: String,
-        pub address: String,
-    }
-
-    let mut entries = outputs_map
-        .iter()
-        .zip(tx_output_list.iter())
-        .filter_map(
-            |((address, _), tx_output)| match &tx_output.utxo_notification {
-                UtxoNotification::OffChainSerialized(x) => {
-                    Some((address, tx_output.utxo.get_native_currency_amount(), x))
-                }
-                _ => None,
-            },
-        )
+    let mut entries = outputs_info
+        .into_iter()
+        .filter_map(|(o, m, recipient)| match o.utxo_notification {
+            UtxoNotification::OffChainSerialized(x) => {
+                let recipient = if m.self_owned && recipient == *"anonymous" {
+                    "self".to_string()
+                } else {
+                    recipient
+                };
+                Some((
+                    m.receiving_address,
+                    o.utxo.get_native_currency_amount(),
+                    x,
+                    recipient,
+                ))
+            }
+            _ => None,
+        })
         .peekable();
 
-    let data_dir = config.cli_data_dir()?.join("utxo-transfer");
+    let data_dir =
+        DataDirectory::get(config.data_dir.clone(), network)?.utxo_transfer_directory_path();
+
     if entries.peek().is_some() {
         std::fs::create_dir_all(&data_dir)?;
+
+        println!("\n*** Utxo Transfer Files ***\n");
     }
 
     let mut wrote_file_cnt = 0usize;
-    for (address, amount, utxo_transfer_encrypted) in entries {
+    for (address, amount, utxo_transfer_encrypted, recipient) in entries {
         let entry = UtxoTransferEntry {
-            address_abbrev: address.to_bech32m_abbreviated(config.network)?,
+            data_format: UtxoTransferEntry::data_format(),
+            recipient: recipient.clone(),
             amount: amount.to_string(),
-            utxo_transfer_encrypted: utxo_transfer_encrypted.to_bech32m(config.network)?,
-            address: address.to_bech32m(config.network)?,
+            utxo_transfer_encrypted: utxo_transfer_encrypted.to_bech32m(network)?,
+            address_info: (&address, network).try_into()?,
         };
 
-        let mut file_name = format!("{}-{}.json", entry.address_abbrev, entry.amount);
+        let file_dir = data_dir.join(&recipient);
+        std::fs::create_dir_all(&file_dir)?;
+
+        let mut file_name = format!("{}-{}.json", entry.address_info.short_id(), entry.amount);
         let file_path = (1..)
             .filter_map(|i| {
-                let path = data_dir.join(&file_name);
-                file_name = format!("{}-{}-{}.json", entry.address_abbrev, entry.amount, i);
+                let path = file_dir.join(&file_name);
+                file_name = format!("{}-{}.{}.json", recipient, entry.amount, i);
                 match path.exists() {
-                    true => Some(path),
-                    false => None,
+                    false => Some(path),
+                    true => None,
                 }
             })
             .next()
-            .ok_or_else(|| anyhow::anyhow!("could not determine file path"))?;
+            .ok_or_else(|| anyhow!("could not determine file path"))?;
 
         let file = std::fs::File::create_new(&file_path)?;
         let mut writer = std::io::BufWriter::new(file);
@@ -644,17 +816,42 @@ fn process_utxo_notifications(
         println!("\n*** Important - Read or risk losing funds ***\n");
         println!(
             "
-{wrote_file_cnt} transaction outputs were each written to individual files for
-off-chain transfer.
+{wrote_file_cnt} transaction outputs were each written to individual files for off-chain transfer.
 
-You must transfer each file to the corresponding recipient for claiming or they
-will never be able to claim the funds.
+-- Sender Instructions --
 
-Instruct each recipient to run `neptune-cli claim_utxo <file>` or use
-equivalent claim functionality of their chosen wallet software.
+You must transfer each file to the corresponding recipient for claiming or they will never be able to claim the funds.
+
+You should also provide them the following recipient instructions.
+
+-- Recipient Instructions --
+
+run `neptune-cli claim file <file>` or use equivalent claim functionality of your chosen wallet software.
 "
         );
     }
 
     Ok(())
+}
+
+fn val_or_stdin_line<T: std::fmt::Display>(val: Option<T>) -> Result<String> {
+    match val {
+        Some(v) => Ok(v.to_string()),
+        None => {
+            let mut buffer = String::new();
+            std::io::stdin().read_line(&mut buffer)?;
+            Ok(buffer.trim().to_string())
+        }
+    }
+}
+
+fn val_or_stdin<T: std::fmt::Display>(val: Option<T>) -> Result<String> {
+    match val {
+        Some(v) => Ok(v.to_string()),
+        None => {
+            let mut buffer = String::new();
+            std::io::stdin().read_to_string(&mut buffer)?;
+            Ok(buffer.trim().to_string())
+        }
+    }
 }
