@@ -291,7 +291,7 @@ enum Command {
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     },
     /// claim an off-chain utxo-transfer.
-    Claim {
+    ClaimUtxo {
         #[clap(subcommand)]
         format: ClaimFormat,
     },
@@ -701,7 +701,7 @@ async fn main() -> Result<()> {
             process_utxo_notifications(&args, network, outputs_info)?;
             println!("Send completed. Tx Digest: {}", tx_digest);
         }
-        Command::Claim { format } => {
+        Command::ClaimUtxo { format } => {
             let utxo_transfer_encrypted = match format {
                 ClaimFormat::Raw { raw } => val_or_stdin_line(raw)?,
                 ClaimFormat::File { path } => {
@@ -826,7 +826,7 @@ You should also provide them the following recipient instructions.
 
 -- Recipient Instructions --
 
-run `neptune-cli claim file <file>` or use equivalent claim functionality of your chosen wallet software.
+run `neptune-cli claim-utxo file <file>` or use equivalent claim functionality of your chosen wallet software.
 "
         );
     }
