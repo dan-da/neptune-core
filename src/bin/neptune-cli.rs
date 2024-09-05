@@ -83,9 +83,10 @@ impl FromStr for TransactionOutput {
             address: parts[0].to_string(),
             amount: NeptuneCoins::from_str(parts[1])?,
             recipient: match parts.len() {
-                3 if parts[2].trim().len() > 0 => parts[2].trim(),
+                3 if !parts[2].trim().is_empty() => parts[2].trim(),
                 _ => ANONYMOUS,
-            }.to_string(),
+            }
+            .to_string(),
         })
     }
 }
@@ -246,7 +247,7 @@ enum Command {
     WalletStatus,
 
     /// retrieve next unused receiving address
-    NextReceivingAddress{
+    NextReceivingAddress {
         #[clap(value_enum, default_value_t = KeyType::Generation)]
         key_type: KeyType,
     },
@@ -609,10 +610,8 @@ async fn main() -> Result<()> {
             let wallet_status: WalletStatus = client.wallet_status(ctx).await?;
             println!("{}", serde_json::to_string_pretty(&wallet_status)?);
         }
-        Command::NextReceivingAddress {key_type} => {
-            let rec_addr = client
-                .next_receiving_address(ctx, key_type)
-                .await?;
+        Command::NextReceivingAddress { key_type } => {
+            let rec_addr = client.next_receiving_address(ctx, key_type).await?;
             println!("{}", rec_addr.to_bech32m(client.network(ctx).await?)?)
         }
         Command::MempoolTxCount => {

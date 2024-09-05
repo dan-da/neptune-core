@@ -2639,9 +2639,11 @@ mod global_state_tests {
 
                 // For onchain notification the balance will be 19979.
                 // For offchain notification, it will be 0.  Funds are lost!!!
+                // For offchain-serialized notification, it will be 0.  funds may still be claimed.
                 let alice_expected_balance_by_method = match owned_utxo_notify_method {
                     OwnedUtxoNotifyMethod::OnChain => NeptuneCoins::new(19979),
                     OwnedUtxoNotifyMethod::OffChain => NeptuneCoins::new(0),
+                    OwnedUtxoNotifyMethod::OffChainSerialized => NeptuneCoins::new(0),
                 };
 
                 // verify that our on/offchain prediction is correct.

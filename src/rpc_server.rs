@@ -1021,8 +1021,8 @@ mod rpc_server_tests {
                     NeptuneCoins::new(1),
                 )],
                 NeptuneCoins::one_nau(),
-                OwnedUtxoNotifyMethod::default(),
-                UnownedUtxoNotifyMethod::OffChainSerialized,
+                OwnedUtxoNotifyMethod::OffChainSerialized,
+                UnownedUtxoNotifyMethod::default(),
             )
             .await
             .unwrap();
@@ -1607,7 +1607,81 @@ mod rpc_server_tests {
     }
 
     #[tokio::test]
-    async fn claim_utxo() -> Result<()> {
+    async fn claim_utxo_owned() -> Result<()> {
+        let network = Network::Regtest;
+        let (rpc_server, mut global_state_lock) =
+            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+        mine_block_to_wallet(&mut global_state_lock).await;
+
+        let ctx = context::current();
+
+        let receiving_address_generation = rpc_server
+            .clone()
+            .next_receiving_address(context::current(), KeyType::Generation)
+            .await;
+        let receiving_address_symmetric = rpc_server
+            .clone()
+            .next_receiving_address(context::current(), KeyType::Symmetric)
+            .await;
+
+        let pay_to_self_outputs = vec![
+            (receiving_address_generation, NeptuneCoins::new(1)),
+            (receiving_address_symmetric, NeptuneCoins::new(2)),
+        ];
+
+        let (tx_params, _) = rpc_server
+            .clone()
+            .generate_tx_params(
+                ctx,
+                pay_to_self_outputs,
+                NeptuneCoins::zero(),
+                OwnedUtxoNotifyMethod::OffChainSerialized,
+                UnownedUtxoNotifyMethod::default(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        let tx_output_list = tx_params.tx_output_list().clone();
+
+        let _ = rpc_server.clone().send(ctx, tx_params).await;
+
+        for utxo_transfer_encrypted in tx_output_list.utxo_transfer_iter() {
+            rpc_server
+                .clone()
+                .claim_utxo(
+                    context::current(),
+                    utxo_transfer_encrypted.to_bech32m(network)?,
+                )
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        assert_eq!(
+            vec![
+                NeptuneCoins::new(100), // from coinbase
+                NeptuneCoins::new(1),   // claimed via generation addr
+                NeptuneCoins::new(2),   // claimed via symmetric addr
+                NeptuneCoins::new(97)   // change (symmetric addr)
+            ],
+            global_state_lock
+                .lock_guard()
+                .await
+                .wallet_state
+                .wallet_db
+                .expected_utxos()
+                .get_all()
+                .await
+                .iter()
+                .map(|eu| eu.utxo.get_native_currency_amount())
+                .collect_vec()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn claim_utxo_unowned() -> Result<()> {
         let network = Network::Regtest;
 
         // bob's node
