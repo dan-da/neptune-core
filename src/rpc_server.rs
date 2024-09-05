@@ -1016,7 +1016,10 @@ mod rpc_server_tests {
             .clone()
             .generate_tx_params(
                 ctx,
-                vec![(GenerationReceivingAddress::derive_from_seed(rand::random()).into(), NeptuneCoins::new(1))],
+                vec![(
+                    GenerationReceivingAddress::derive_from_seed(rand::random()).into(),
+                    NeptuneCoins::new(1),
+                )],
                 NeptuneCoins::one_nau(),
                 OwnedUtxoNotifyMethod::default(),
                 UnownedUtxoNotifyMethod::OffChainSerialized,

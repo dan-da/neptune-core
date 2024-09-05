@@ -21,7 +21,7 @@ use neptune_core::config_models::data_directory::DataDirectory;
 use neptune_core::config_models::network::Network;
 use neptune_core::models::blockchain::block::block_selector::BlockSelector;
 use neptune_core::models::blockchain::transaction::OwnedUtxoNotifyMethod;
-use neptune_core::models::blockchain::transaction::TxOutput;
+use neptune_core::models::blockchain::transaction::TxParams;
 use neptune_core::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use neptune_core::models::blockchain::transaction::UtxoNotification;
 use neptune_core::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -41,7 +41,7 @@ use tarpc::tokio_serde::formats::Json;
 const SELF: &str = "self";
 const ANONYMOUS: &str = "anonymous";
 
-// for parsing SendToMany <output> arguments.
+/// for parsing SendToMany <output> arguments.
 #[derive(Debug, Clone)]
 struct TransactionOutput {
     address: String,
@@ -49,14 +49,122 @@ struct TransactionOutput {
     recipient: String,
 }
 
+/// We impl FromStr deserialization so that clap can parse the --outputs arg of
+/// send-to-many command.
+///
+/// We do not bother with serialization via `impl Display` because that is
+/// not presently needed and would just be unused code.
+impl FromStr for TransactionOutput {
+    type Err = anyhow::Error;
+
+    /// parses address:amount:recipient or address:amount into TransactionOutput{address, amount, recipient}
+    ///
+    /// This is used by the outputs arg of send-to-many command.  Usage looks
+    /// like:
+    ///
+    ///     <OUTPUTS>...  format: address:amount address:amount:recipient ...
+    ///
+    /// So each output is space delimited and the 2 (or 3) fields are colon
+    /// delimited.
+    ///
+    /// if `recipient` is omitted for any output, then it defaults to
+    /// "anonymous".
+    ///
+    /// This format was chosen because it should be simple for humans to
+    /// generate on the command-line.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts = s.split(':').collect::<Vec<_>>();
+
+        if parts.len() != 2 && parts.len() != 3 {
+            anyhow::bail!("Invalid transaction output.  missing :")
+        }
+
+        Ok(Self {
+            address: parts[0].to_string(),
+            amount: NeptuneCoins::from_str(parts[1])?,
+            recipient: match parts.len() {
+                3 if parts[2].trim().len() > 0 => parts[2].trim(),
+                _ => ANONYMOUS,
+            }.to_string(),
+        })
+    }
+}
+
+impl TransactionOutput {
+    pub fn to_receiving_address_amount_tuple(
+        &self,
+        network: Network,
+    ) -> Result<(ReceivingAddress, NeptuneCoins)> {
+        Ok((
+            ReceivingAddress::from_bech32m(&self.address, network)?,
+            self.amount,
+        ))
+    }
+}
+
+/// AddressEnum is used by send and send-to-many when writing utxo-transfer
+/// file(s) for any off-chain-serialized utxos.
+///
+/// the issue is that it is useful to display the address in the file, or even an
+/// abbreviation in the filename. This aids the sender in identifying the utxo
+/// and routing it to the intended recipient.
+///
+/// however this should never be done for symmetric keys as it would expose the
+/// private key, so we only display the receiver_identifier.
+///
+/// normally unowned utxo-transfer would not be using symmetric keys, however
+/// there are some use cases for it such as when a person or org holds multiple
+/// wallets and is transferrng between them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AddressEnum {
+    Generation {
+        address_abbrev: String,
+        address: String,
+        receiver_identifier: String,
+    },
+    Symmetric {
+        receiver_identifier: String,
+    },
+}
+impl TryFrom<(&ReceivingAddress, Network)> for AddressEnum {
+    type Error = anyhow::Error;
+
+    fn try_from(v: (&ReceivingAddress, Network)) -> Result<Self> {
+        let (addr, network) = v;
+        Ok(match *addr {
+            ReceivingAddress::Generation(_) => Self::Generation {
+                address_abbrev: addr.to_bech32m_abbreviated(network)?,
+                address: addr.to_bech32m(network)?,
+                receiver_identifier: addr.receiver_identifier().to_string(),
+            },
+            ReceivingAddress::Symmetric(_) => Self::Symmetric {
+                receiver_identifier: addr.receiver_identifier().to_string(),
+            },
+        })
+    }
+}
+impl AddressEnum {
+    fn short_id(&self) -> &str {
+        match *self {
+            Self::Generation {
+                ref address_abbrev, ..
+            } => address_abbrev,
+            Self::Symmetric {
+                ref receiver_identifier,
+                ..
+            } => receiver_identifier,
+        }
+    }
+}
+
+/// represents a UtxoTransfer entry in a utxo-transfer file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UtxoTransferEntry {
     pub data_format: String,
-    pub address_abbrev: String,
+    pub recipient: String,
     pub amount: String,
     pub utxo_transfer_encrypted: String,
-    pub receiver_identifier: String,
-    pub address: String,
+    pub address_info: AddressEnum,
 }
 
 impl UtxoTransferEntry {
@@ -65,8 +173,9 @@ impl UtxoTransferEntry {
     }
 }
 
+/// represents data format of input to claim-utxo
 #[derive(Debug, Clone, Subcommand)]
-pub enum ClaimFormat {
+pub enum ClaimUtxoFormat {
     /// reads utxo-transfer-encrypted field of the utxo-transfer json file.
     Raw {
         /// will be read from stdin if not present
@@ -84,58 +193,7 @@ pub enum ClaimFormat {
     },
 }
 
-/// We impl FromStr deserialization so that clap can parse the --outputs arg of
-/// send-to-many command.
-///
-/// We do not bother with serialization via `impl Display` because that is
-/// not presently needed and would just be unused code.
-impl FromStr for TransactionOutput {
-    type Err = anyhow::Error;
-
-    /// parses address:amount:recipient or address:amount into TransactionOutput{address, amount, recipient}
-    ///
-    /// This is used by the outputs arg of send-to-many command.
-    /// Usage looks like:
-    ///
-    ///     <OUTPUTS>...  format: address:amount address:amount ...
-    ///
-    /// So each output is space delimited and the two fields are
-    /// colon delimted.
-    ///
-    /// This format was chosen because it should be simple for humans
-    /// to generate on the command-line.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split(':').collect::<Vec<_>>();
-
-        if parts.len() != 2 && parts.len() != 3 {
-            anyhow::bail!("Invalid transaction output.  missing :")
-        }
-
-        Ok(Self {
-            address: parts[0].to_string(),
-            amount: NeptuneCoins::from_str(parts[1])?,
-            recipient: (if parts.len() == 3 {
-                parts[2]
-            } else {
-                ANONYMOUS
-            })
-            .to_string(),
-        })
-    }
-}
-
-impl TransactionOutput {
-    pub fn to_receiving_address_amount_tuple(
-        &self,
-        network: Network,
-    ) -> Result<(ReceivingAddress, NeptuneCoins)> {
-        Ok((
-            ReceivingAddress::from_bech32m(&self.address, network)?,
-            self.amount,
-        ))
-    }
-}
-
+/// represents cli command
 #[derive(Debug, Clone, Parser)]
 enum Command {
     /// Dump shell completions.
@@ -187,8 +245,11 @@ enum Command {
     /// retrieve wallet status information
     WalletStatus,
 
-    /// retrieve wallet's receiving address
-    OwnReceivingAddress,
+    /// retrieve next unused receiving address
+    NextReceivingAddress{
+        #[clap(value_enum, default_value_t = KeyType::Generation)]
+        key_type: KeyType,
+    },
 
     /// list known coins
     ListCoins,
@@ -255,7 +316,7 @@ enum Command {
     /// claim an off-chain utxo-transfer.
     ClaimUtxo {
         #[clap(subcommand)]
-        format: ClaimFormat,
+        format: ClaimUtxoFormat,
     },
 
     /// pause mining
@@ -290,6 +351,7 @@ enum Command {
     },
 }
 
+/// represents top-level cli args
 #[derive(Debug, Clone, Parser)]
 #[clap(name = "neptune-cli", about = "An RPC client")]
 struct Config {
@@ -547,9 +609,9 @@ async fn main() -> Result<()> {
             let wallet_status: WalletStatus = client.wallet_status(ctx).await?;
             println!("{}", serde_json::to_string_pretty(&wallet_status)?);
         }
-        Command::OwnReceivingAddress => {
+        Command::NextReceivingAddress {key_type} => {
             let rec_addr = client
-                .next_receiving_address(ctx, KeyType::Generation)
+                .next_receiving_address(ctx, key_type)
                 .await?;
             println!("{}", rec_addr.to_bech32m(client.network(ctx).await?)?)
         }
@@ -601,22 +663,12 @@ async fn main() -> Result<()> {
                 .await?
                 .map_err(|s| anyhow!(s))?;
 
-            // add local recipient info to tx_output_meta
-            let outputs_info = tx_params
-                .tx_output_list()
-                .iter()
-                .zip(tx_output_meta)
-                .zip_longest(recipients)
-                .map(|pair| match pair {
-                    EitherOrBoth::Both((o, m), r) => (o.clone(), m, r),
-                    EitherOrBoth::Left((o, m)) => (o.clone(), m, SELF.to_string()),
-                    EitherOrBoth::Right(_) => unreachable!(),
-                })
-                .collect_vec();
+            let tx_digest = client
+                .send(ctx, tx_params.clone())
+                .await?
+                .map_err(|s| anyhow!(s))?;
 
-            let tx_digest = client.send(ctx, tx_params).await?.map_err(|s| anyhow!(s))?;
-
-            process_utxo_notifications(&args, network, outputs_info)?;
+            process_utxo_notifications(&args, network, tx_params, tx_output_meta, recipients)?;
             println!("Send completed. Tx Digest: {}", tx_digest);
         }
         Command::SendToMany {
@@ -642,36 +694,24 @@ async fn main() -> Result<()> {
                 .await?
                 .map_err(|s| anyhow!(s))?;
 
-            assert!(tx_params.tx_output_list().len() == tx_output_meta.len());
-            assert!(tx_output_meta.len() >= outputs.len());
+            let tx_digest = client
+                .send(ctx, tx_params.clone())
+                .await?
+                .map_err(|s| anyhow!(s))?;
 
-            // add local recipient info to outputs_map
-            let outputs_info = tx_params
-                .tx_output_list()
-                .iter()
-                .zip(tx_output_meta.into_iter())
-                .zip_longest(outputs)
-                .map(|pair| match pair {
-                    EitherOrBoth::Both((o, m), r) => (o.clone(), m, r.recipient),
-                    EitherOrBoth::Left((o, m)) => (o.clone(), m, SELF.to_string()),
-                    EitherOrBoth::Right(_) => unreachable!(),
-                })
-                .collect_vec();
-
-            let tx_digest = client.send(ctx, tx_params).await?.map_err(|s| anyhow!(s))?;
-
-            process_utxo_notifications(&args, network, outputs_info)?;
+            let recipients = outputs.into_iter().map(|o| o.recipient).collect_vec();
+            process_utxo_notifications(&args, network, tx_params, tx_output_meta, recipients)?;
             println!("Send completed. Tx Digest: {}", tx_digest);
         }
         Command::ClaimUtxo { format } => {
             let utxo_transfer_encrypted = match format {
-                ClaimFormat::Raw { raw } => val_or_stdin_line(raw)?,
-                ClaimFormat::File { path } => {
+                ClaimUtxoFormat::Raw { raw } => val_or_stdin_line(raw)?,
+                ClaimUtxoFormat::File { path } => {
                     let buf = std::fs::read_to_string(path)?;
                     let utxo_transfer_entry: UtxoTransferEntry = serde_json::from_str(&buf)?;
                     utxo_transfer_entry.utxo_transfer_encrypted
                 }
-                ClaimFormat::Json { json } => {
+                ClaimUtxoFormat::Json { json } => {
                     let buf = val_or_stdin(json)?;
                     let utxo_transfer_entry: UtxoTransferEntry = serde_json::from_str(&buf)?;
                     utxo_transfer_entry.utxo_transfer_encrypted
@@ -707,19 +747,35 @@ async fn main() -> Result<()> {
 fn process_utxo_notifications(
     config: &Config,
     network: Network,
-    outputs_info: Vec<(TxOutput, TxOutputMeta, String)>,
+    tx_params: TxParams,
+    tx_output_meta: Vec<TxOutputMeta>,
+    recipients: Vec<String>,
 ) -> anyhow::Result<()> {
-    let mut entries = outputs_info
-        .into_iter()
-        .filter_map(|(o, m, recipient)| match o.utxo_notification {
-            UtxoNotification::OffChainSerialized(x) => {
-                Some((
-                    m.receiving_address,
-                    o.utxo.get_native_currency_amount(),
-                    x,
-                    recipient,
-                ))
-            }
+    assert_eq!(tx_params.tx_output_list().len(), tx_output_meta.len());
+    assert!(tx_output_meta.len() >= recipients.len());
+
+    // add local recipient info to tx_output_meta
+    let mut entries = tx_params
+        .tx_output_list()
+        .iter()
+        .zip(tx_output_meta)
+        .zip_longest(recipients)
+        .map(|pair| match pair {
+            EitherOrBoth::Both((o, m), r) => (o, m, r),
+            EitherOrBoth::Left((o, m)) => (o, m, SELF.to_string()),
+            EitherOrBoth::Right(_) => unreachable!(),
+        })
+        .filter_map(|(o, m, recipient)| match &o.utxo_notification {
+            UtxoNotification::OffChainSerialized(x) => Some((
+                m.receiving_address,
+                o.utxo.get_native_currency_amount(),
+                x,
+                if m.self_owned {
+                    SELF.to_string()
+                } else {
+                    recipient
+                },
+            )),
             _ => None,
         })
         .peekable();
@@ -735,19 +791,18 @@ fn process_utxo_notifications(
 
     let mut wrote_file_cnt = 0usize;
     for (address, amount, utxo_transfer_encrypted, recipient) in entries {
-        let entry = UtxoTransferEntry {
-            data_format: UtxoTransferEntry::data_format(),
-            address_abbrev: address.to_bech32m_abbreviated(network)?,
-            amount: amount.to_string(),
-            utxo_transfer_encrypted: utxo_transfer_encrypted.to_bech32m(network)?,
-            receiver_identifier: address.receiver_identifier().to_string(),
-            address: address.to_bech32m(network)?,
-        };
-
         let file_dir = data_dir.join(&recipient);
         std::fs::create_dir_all(&file_dir)?;
 
-        let mut file_name = format!("{}-{}.json", entry.address_abbrev, entry.amount);
+        let entry = UtxoTransferEntry {
+            data_format: UtxoTransferEntry::data_format(),
+            recipient: recipient.clone(),
+            amount: amount.to_string(),
+            utxo_transfer_encrypted: utxo_transfer_encrypted.to_bech32m(network)?,
+            address_info: (&address, network).try_into()?,
+        };
+
+        let mut file_name = format!("{}-{}.json", entry.address_info.short_id(), entry.amount);
         let file_path = (1..)
             .filter_map(|i| {
                 let path = file_dir.join(&file_name);

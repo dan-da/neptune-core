@@ -31,14 +31,18 @@ use super::symmetric_key;
 // actually stored in PublicAnnouncement.
 
 /// enumerates available cryptographic key implementations for sending and receiving funds.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum)]
 #[repr(u8)]
 pub enum KeyType {
+    /// private/public keypair. (give public key to 3rd parties)
+    ///
     /// [generation_address] built on [twenty_first::math::lattice::kem]
     ///
     /// wraps a symmetric key built on aes-256-gcm
     Generation = generation_address::GENERATION_FLAG_U8,
 
+    /// private key only. (never show to 3rd parties)
+    ///
     /// [symmetric_key] built on aes-256-gcm
     Symmetric = symmetric_key::SYMMETRIC_KEY_FLAG_U8,
 }
