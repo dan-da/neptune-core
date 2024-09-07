@@ -978,10 +978,9 @@ mod rpc_server_tests {
         // requests do not crash the server.
 
         let network = Network::Regtest;
-        let (rpc_server, mut global_state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let (mut rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
-        mine_block_to_wallet(&mut global_state_lock).await?;
+        mine_block_to_wallet(&mut rpc_server.state).await?;
 
         let ctx = context::current();
 
@@ -1074,10 +1073,10 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        let (rpc_server, mut state_lock) =
+        let (mut rpc_server, _) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let rpc_request_context = context::current();
-        let global_state = state_lock.lock_guard().await;
+        let global_state = rpc_server.state.lock_guard().await;
         let peer_address_0 =
             global_state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
         let peer_address_1 =
@@ -1096,7 +1095,7 @@ mod rpc_server_tests {
 
         // sanction both
         let (standing_0, standing_1) = {
-            let mut global_state_mut = state_lock.lock_guard_mut().await;
+            let mut global_state_mut = rpc_server.state.lock_guard_mut().await;
 
             global_state_mut
                 .net
@@ -1129,7 +1128,7 @@ mod rpc_server_tests {
         );
 
         {
-            let mut global_state_mut = state_lock.lock_guard_mut().await;
+            let mut global_state_mut = rpc_server.state.lock_guard_mut().await;
 
             global_state_mut
                 .net
@@ -1154,7 +1153,7 @@ mod rpc_server_tests {
 
         // Verify expected initial conditions
         {
-            let global_state = state_lock.lock_guard().await;
+            let global_state = rpc_server.state.lock_guard().await;
             let peer_standing_0 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_0.ip())
@@ -1178,7 +1177,7 @@ mod rpc_server_tests {
 
         // Verify expected resulting conditions in database
         {
-            let global_state = state_lock.lock_guard().await;
+            let global_state = rpc_server.state.lock_guard().await;
             let peer_standing_0 = global_state
                 .net
                 .get_peer_standing_from_database(peer_address_0.ip())
@@ -1217,9 +1216,9 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (rpc_server, mut state_lock) =
+        let (mut rpc_server, _) =
             test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
-        let mut state = state_lock.lock_guard_mut().await;
+        let mut state = rpc_server.state.lock_guard_mut().await;
         let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
         let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
 
@@ -1249,7 +1248,8 @@ mod rpc_server_tests {
 
         // Verify expected initial conditions
         {
-            let peer_standing_0 = state_lock
+            let peer_standing_0 = rpc_server
+                .state
                 .lock_guard_mut()
                 .await
                 .net
@@ -1260,7 +1260,8 @@ mod rpc_server_tests {
         }
 
         {
-            let peer_standing_1 = state_lock
+            let peer_standing_1 = rpc_server
+                .state
                 .lock_guard_mut()
                 .await
                 .net
@@ -1284,7 +1285,7 @@ mod rpc_server_tests {
             .clear_all_standings(rpc_request_context)
             .await;
 
-        let state = state_lock.lock_guard().await;
+        let state = rpc_server.state.lock_guard().await;
 
         // Verify expected resulting conditions in database
         {
@@ -1329,9 +1330,8 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn utxo_digest_test() {
-        let (rpc_server, state_lock) =
-            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
-        let global_state = state_lock.lock_guard().await;
+        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let global_state = rpc_server.state.lock_guard().await;
         let aocl_leaves = global_state
             .chain
             .archival_state()
@@ -1350,6 +1350,7 @@ mod rpc_server_tests {
             .is_some());
 
         assert!(rpc_server
+            .clone()
             .utxo_digest(context::current(), aocl_leaves)
             .await
             .is_none());
@@ -1359,9 +1360,8 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_info_test() {
         let network = Network::Regtest;
-        let (rpc_server, state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
-        let global_state = state_lock.lock_guard().await;
+        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
         let genesis_hash = global_state.chain.archival_state().genesis_block().hash();
@@ -1438,9 +1438,8 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_digest_test() {
         let network = Network::Regtest;
-        let (rpc_server, state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
-        let global_state = state_lock.lock_guard().await;
+        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
         let genesis_hash = Block::genesis_block(network).hash();
@@ -1653,13 +1652,13 @@ mod rpc_server_tests {
 
             // alice's node
             let (blocks, alice_utxo_transfer_encrypted_to_bob_list, bob_amount) = {
-                let (rpc_server, mut global_state_lock) =
+                let (mut rpc_server, _) =
                     test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
                 let mut blocks = vec![];
 
                 // mine a block to obtain some coinbase coins for spending.
-                blocks.push(mine_block_to_wallet(&mut global_state_lock).await?);
+                blocks.push(mine_block_to_wallet(&mut rpc_server.state).await?);
 
                 let fee = NeptuneCoins::zero();
                 let bob_amount: NeptuneCoins = pay_to_bob_outputs.iter().map(|(_, amt)| *amt).sum();
@@ -1684,8 +1683,8 @@ mod rpc_server_tests {
                 let _ = rpc_server.clone().send(context::current(), tx_params).await;
 
                 // mine two more blocks
-                blocks.push(mine_block_to_wallet(&mut global_state_lock).await?);
-                blocks.push(mine_block_to_wallet(&mut global_state_lock).await?);
+                blocks.push(mine_block_to_wallet(&mut rpc_server.state).await?);
+                blocks.push(mine_block_to_wallet(&mut rpc_server.state).await?);
 
                 (blocks, utxo_transfer_list, bob_amount)
             };
