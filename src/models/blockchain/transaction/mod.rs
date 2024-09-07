@@ -57,6 +57,7 @@ use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::prelude::triton_vm;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
+use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -75,7 +76,6 @@ use super::type_scripts::TypeScript;
 /// See [PublicAnnouncement], [UtxoNotification], [ExpectedUtxo]
 #[derive(Clone, Debug)]
 pub struct AnnouncedUtxo {
-    pub addition_record: AdditionRecord,
     pub utxo: Utxo,
     pub sender_randomness: Digest,
     pub receiver_preimage: Digest,
@@ -84,7 +84,6 @@ pub struct AnnouncedUtxo {
 impl From<&ExpectedUtxo> for AnnouncedUtxo {
     fn from(eu: &ExpectedUtxo) -> Self {
         Self {
-            addition_record: eu.addition_record,
             utxo: eu.utxo.clone(),
             sender_randomness: eu.sender_randomness,
             receiver_preimage: eu.receiver_preimage,
@@ -96,7 +95,7 @@ impl From<(AnnouncedUtxo, UtxoNotifier)> for ExpectedUtxo {
     fn from(inputs: (AnnouncedUtxo, UtxoNotifier)) -> Self {
         let (au, un) = inputs;
         Self {
-            addition_record: au.addition_record,
+            addition_record: au.addition_record(),
             utxo: au.utxo,
             sender_randomness: au.sender_randomness,
             receiver_preimage: au.receiver_preimage,
@@ -104,6 +103,17 @@ impl From<(AnnouncedUtxo, UtxoNotifier)> for ExpectedUtxo {
             notification_received: Timestamp::now(),
             mined_in_block: None,
         }
+    }
+}
+
+impl AnnouncedUtxo {
+    pub fn addition_record(&self) -> AdditionRecord {
+        let receiver_digest = self.receiver_preimage.hash::<Hash>();
+        commit(
+            Hash::hash(&self.utxo),
+            self.sender_randomness,
+            receiver_digest,
+        )
     }
 }
 

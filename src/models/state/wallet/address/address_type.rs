@@ -6,17 +6,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
 use tracing::warn;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 
 use crate::config_models::network::Network;
-use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::utxo::LockScript;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::blockchain::transaction::Transaction;
-use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
 use crate::BFieldElement;
 
 use super::common;
@@ -82,25 +78,6 @@ impl TryFrom<&PublicAnnouncement> for KeyType {
         }
     }
 }
-
-// impl TryFrom<(&str, Network)> for KeyType {
-//     type Error = anyhow::Error;
-
-//     fn try_from(v: (&str, Network)) -> Result<Self> {
-//         let (address, network) = v;
-
-//         let gen_hrp = generation::Generation::get_hrp(network);
-//         let sym_hrp = symmetric::SymmetricKey::get_hrp(network);
-
-//         if address.starts_with(gen_hrp) {
-//             Ok(Self::Generation);
-//         } else if address.starts_with(sym_hrp) {
-//             Ok(Self::Symmetric);
-//         } else {
-//             Err(anyhow::anyhow!("address not recognized"))
-//         }
-//     }
-// }
 
 impl KeyType {
     /// returns all available `KeyType`
@@ -227,6 +204,7 @@ impl ReceivingAddress {
         }
     }
 
+    /// returns human-readable-prefix (hrp) for a given network
     pub fn get_hrp(&self, network: Network) -> String {
         match self {
             Self::Generation(_) => generation_address::GenerationReceivingAddress::get_hrp(network),
@@ -297,7 +275,7 @@ impl ReceivingAddress {
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),
@@ -377,7 +355,6 @@ impl SpendingKey {
         // pre-compute some fields.
         let receiver_identifier = self.receiver_identifier();
         let receiver_preimage = self.privacy_preimage();
-        let receiver_digest = receiver_preimage.hash::<Hash>();
 
         // for all public announcements
         transaction
@@ -404,7 +381,6 @@ impl SpendingKey {
                 // and join those with the receiver digest to get a commitment
                 // Note: the commitment is computed in the same way as in the mutator set.
                 AnnouncedUtxo {
-                    addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
                     utxo,
                     sender_randomness,
                     receiver_preimage,
@@ -500,6 +476,10 @@ mod test {
     }
 
     mod worker {
+        use crate::models::blockchain::shared::Hash;
+        use crate::util_types::mutator_set::commit;
+        use tasm_lib::twenty_first::prelude::AlgebraicHasher;
+
         use super::*;
 
         /// this tests the generate_public_announcement() and
@@ -555,7 +535,7 @@ mod test {
 
             // 11. verify each field of the announced_utxo matches original values.
             assert_eq!(utxo, announced_utxo.utxo);
-            assert_eq!(expected_addition_record, announced_utxo.addition_record);
+            assert_eq!(expected_addition_record, announced_utxo.addition_record());
             assert_eq!(sender_randomness, announced_utxo.sender_randomness);
             assert_eq!(key.privacy_preimage(), announced_utxo.receiver_preimage);
         }

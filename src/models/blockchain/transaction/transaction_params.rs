@@ -36,14 +36,15 @@ pub enum TxParamsError {
 //
 // see: https://github.com/serde-rs/serde/issues/642#issuecomment-683276351
 
-/// In RPC usage TxParams will be constructed first on the client, then
-/// serialized via rpc, and deserialized on the server.
+/// In RPC usage TxParams will typically be created by the generate_tx_params()
+/// RPC and then used as an argument to the send() RPC.  For the send RPC, it
+/// is an untrusted data source.
 ///
 /// Basic validation of input/output amounts occurs when TxParams is constructed
-/// including via deserialization.
+/// including via deserialization (on both client and server).
 ///
-/// This means that some validation occurs on the client as well as on the
-/// server before create_transaction() is ever called.
+/// This means that validation occurs on the client as well as on the server
+/// before create_transaction() is ever called.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "TxParamsShadow")]
 pub struct TxParams {
@@ -52,9 +53,9 @@ pub struct TxParams {
     timestamp: Timestamp,
 }
 
-// note: this only exists to get deserialized without validation.
-// we also derive Serialize for unit tests (only) in order to simulate
-// invalid input data.
+// note: this only exists to get deserialized without validation.  we also
+// derive Serialize for unit tests (only) in order to simulate invalid input
+// data.
 #[cfg_attr(test, derive(Serialize))]
 #[derive(Deserialize)]
 struct TxParamsShadow {

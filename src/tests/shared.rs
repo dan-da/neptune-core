@@ -34,7 +34,6 @@ use tokio_serde::Serializer;
 use tokio_util::codec::Encoder;
 use tokio_util::codec::LengthDelimitedCodec;
 use twenty_first::math::b_field_element::BFieldElement;
-use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
@@ -722,17 +721,11 @@ pub async fn make_mock_transaction_with_generation_key(
 
     let type_scripts = vec![TypeScript::native_currency()];
 
-    let spending_key_unlock_keys = tx_inputs
-        .spending_keys_iter()
-        .into_iter()
-        .map(|k| k.unlock_key().encode())
-        .collect_vec();
-
     let primitive_witness = transaction::primitive_witness::PrimitiveWitness {
         input_utxos: SaltedUtxos::new(tx_inputs.utxos()),
         type_scripts,
         input_lock_scripts: tx_inputs.lock_scripts(),
-        lock_script_witnesses: spending_key_unlock_keys,
+        lock_script_witnesses: tx_inputs.lock_script_witnesses(),
         input_membership_proofs: tx_inputs.ms_membership_proofs(),
         output_utxos: SaltedUtxos::new(tx_outputs.utxos()),
         mutator_set_accumulator: tip_msa,

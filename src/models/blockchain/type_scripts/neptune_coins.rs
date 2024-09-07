@@ -74,10 +74,6 @@ impl NeptuneCoins {
         Self::new(42000000)
     }
 
-    // pub fn zero() -> NeptuneCoins {
-    //     Self::new(0)
-    // }
-
     /// Create an Amount object of the given number of whole coins.
     pub fn new(num_coins: u32) -> NeptuneCoins {
         assert!(

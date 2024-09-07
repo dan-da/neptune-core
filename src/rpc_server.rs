@@ -45,13 +45,11 @@ use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::expected_utxo::UtxoTransfer;
 use crate::models::state::wallet::expected_utxo::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
 use crate::models::state::TxOutputMeta;
 use crate::prelude::twenty_first;
-use crate::util_types::mutator_set::commit;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
@@ -203,6 +201,16 @@ pub trait RPC {
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send(tx_params: TxParams) -> Result<Digest, String>;
 
+    /// claim a utxo
+    ///
+    /// The input string must be a valid bech32m encoded `UtxoTransferEncrypted`
+    /// for the current network and the wallet must have the corresponding
+    /// `SpendingKey` for decryption.
+    ///
+    /// upon success, a new `ExpectedUtxo` will be added to the local wallet
+    /// state.
+    ///
+    /// if the utxo has already been claimed, an error will result.
     async fn claim_utxo(utxo_transfer_encrypted: String) -> Result<(), String>;
 
     /// Stop miner if running
@@ -263,11 +271,16 @@ impl NeptuneRPCServer {
         transaction: Transaction,
         tx_output_list: TxOutputList,
     ) -> Result<Digest, String> {
+        // acquire write-lock
+        let mut gsm = self.state.lock_guard_mut().await;
+
+        // insert transaction into mempool
+        if gsm.mempool.insert(&transaction).is_some() {
+            return Err("the transaction attempts to spend inputs already spent by another transaction in the mempool with a higher fee. try increasing the fee.".to_string());
+        }
+
         // if the tx created offchain expected_utxos we must inform wallet.
         if tx_output_list.has_offchain() {
-            // acquire write-lock
-            let mut gsm = self.state.lock_guard_mut().await;
-
             // Inform wallet of any expected incoming utxos.
             // note that this (briefly) mutates self.
             gsm.add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
@@ -279,10 +292,11 @@ impl NeptuneRPCServer {
         }
 
         // Send transaction message to main
+        let tx_hash = Hash::hash(&transaction);
         self.rpc_server_to_main_tx
-            .send(RPCServerToMain::Send(Box::new(transaction.clone())))
+            .send(RPCServerToMain::Send(Box::new(transaction)))
             .await
-            .map(|_| Hash::hash(&transaction))
+            .map(|_| tx_hash)
             .map_err(|e| e.to_string())
     }
 }
@@ -342,7 +356,7 @@ impl RPC for NeptuneRPCServer {
     ) -> Option<Digest> {
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
-        let digest = block_selector.as_digest(&state).await?;
+        let digest = block_selector.as_digest(archival_state).await?;
         // verify the block actually exists
         archival_state
             .get_block_header(digest)
@@ -357,8 +371,8 @@ impl RPC for NeptuneRPCServer {
         block_selector: BlockSelector,
     ) -> Option<BlockInfo> {
         let state = self.state.lock_guard().await;
-        let digest = block_selector.as_digest(&state).await?;
         let archival_state = state.chain.archival_state();
+        let digest = block_selector.as_digest(archival_state).await?;
 
         let block = archival_state.get_block(digest).await.unwrap()?;
         Some(BlockInfo::from_block_and_digests(
@@ -498,12 +512,9 @@ impl RPC for NeptuneRPCServer {
         block_selector: BlockSelector,
     ) -> Option<BlockHeader> {
         let state = self.state.lock_guard().await;
-        let block_digest = block_selector.as_digest(&state).await?;
-        state
-            .chain
-            .archival_state()
-            .get_block_header(block_digest)
-            .await
+        let archival_state = state.chain.archival_state();
+        let block_digest = block_selector.as_digest(archival_state).await?;
+        archival_state.get_block_header(block_digest).await
     }
 
     // documented in trait. do not add doc-comment.
@@ -675,70 +686,105 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         utxo_transfer_encrypted_str: String,
     ) -> Result<(), String> {
+        // deserialize UtxoTransferEncrypted from bech32m string.
         let utxo_transfer_encrypted = UtxoTransferEncrypted::from_bech32m(
             &utxo_transfer_encrypted_str,
             self.state.cli().network,
         )
         .map_err(|e| e.to_string())?;
 
-        let spending_key = self
-            .state
-            .lock_guard()
-            .await
+        // acquire global state read lock
+        let state = self.state.lock_guard().await;
+
+        // find known spending key by receiver_identifier
+        let spending_key = state
             .wallet_state
             .find_known_spending_key_for_receiver_identifier(
                 utxo_transfer_encrypted.receiver_identifier,
             )
             .ok_or("utxo does not match any known wallet key".to_string())?;
 
-        let UtxoTransfer {
-            utxo,
-            sender_randomness,
-        } = utxo_transfer_encrypted
+        // decrypt utxo_transfer_encrypted into UtxoTransfer
+        let utxo_transfer = utxo_transfer_encrypted
             .decrypt_with_spending_key(&spending_key)
             .map_err(|e| e.to_string())?;
 
-        info!(
-            "{:#?}",
-            UtxoTransfer {
-                utxo: utxo.clone(),
-                sender_randomness
-            }
-        );
+        tracing::debug!("claim-utxo: decrypted {:#?}", utxo_transfer);
 
-        // return early if expected_utxo already exists.
-        if self
-            .state
-            .lock_guard()
-            .await
+        // search for matching monitored utxo and return early if found.
+        if state
             .wallet_state
-            .find_expected_utxo(&utxo, sender_randomness)
+            .find_monitored_utxo(&utxo_transfer.utxo)
             .await
             .is_some()
         {
-            return Err("utxo already claimed".to_string());
+            info!("found monitored utxo.  returning early.");
+            return Ok(());
         }
 
-        let receiver_preimage = spending_key.privacy_preimage();
-        let receiver_digest = receiver_preimage.hash::<Hash>();
-
-        // and join those with the receiver digest to get a commitment
-        // Note: the commitment is computed in the same way as in the mutator set.
+        // construct an AnnouncedUtxo
         let announced_utxo = AnnouncedUtxo {
-            addition_record: commit(Hash::hash(&utxo), sender_randomness, receiver_digest),
-            utxo,
-            sender_randomness,
-            receiver_preimage,
+            utxo: utxo_transfer.utxo,
+            sender_randomness: utxo_transfer.sender_randomness,
+            receiver_preimage: spending_key.privacy_preimage(),
         };
 
-        // acquire write-lock
+        // look for a canonical block that has this utxo as an output
+        let maybe_block_and_digests = match state
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(
+                announced_utxo.addition_record(),
+                BlockSelector::Genesis,
+            )
+            .await {
+            Some(b) => {
+                // perf: potentially lengthy.  so we do it before obtaining write-lock.
+                let digests_and_msa = state.get_block_digests_and_prev_msa(b.hash()).await.map_err(|e| e.to_string())?;
+                assert_eq!(
+                    digests_and_msa.iter().next_back().unwrap().0,
+                    b.hash()
+                );
+                Some((b, digests_and_msa))
+            },
+            None => None,
+        };
+
+        // check if wallet is already expecting this utxo.
+        let wallet_has_expected_utxo = state
+            .wallet_state
+            .find_expected_utxo(&announced_utxo.utxo, announced_utxo.sender_randomness)
+            .await
+            .is_some();
+
+        // release global state read lock
+        drop(state);
+
+        // return early if wallet already has the expected_utxo
+        // and the utxo is not yet confirmed in any block.
+        if wallet_has_expected_utxo && maybe_block_and_digests.is_none() {
+            return Ok(());
+        }
+
+        // acquire global state write-lock
         let mut gsm = self.state.lock_guard_mut().await;
 
-        // Inform wallet of expected incoming utxos.
-        // note that this (briefly) mutates self.
-        gsm.add_expected_utxos_to_wallet([(announced_utxo, UtxoNotifier::Claim).into()])
+        // add expected_utxo to wallet if not found.
+        if !wallet_has_expected_utxo {
+            gsm.add_expected_utxos_to_wallet(
+                [(announced_utxo.clone(), UtxoNotifier::Claim).into()],
+            )
             .await
             .map_err(|e| e.to_string())?;
+        };
+
+        // claim utxo if utxo was already confirmed in a block.
+        if let Some((block, digests_and_msa)) = maybe_block_and_digests {
+            gsm.wallet_state
+                .claim_utxo_in_block(announced_utxo, &block, digests_and_msa.into_iter().rev())
+                .await
+                .map_err(|e| e.to_string())?;
+        }
 
         // ensure we write new wallet state out to disk.
         gsm.persist_wallet().await.expect("flushed wallet");
@@ -865,6 +911,7 @@ mod rpc_server_tests {
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
+    use std::ops::Deref;
 
     use anyhow::Result;
     use clap::ValueEnum;
@@ -877,14 +924,10 @@ mod rpc_server_tests {
 
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
-    use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::peer::PeerSanctionReason;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-    use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
-    use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::rpc_server::NeptuneRPCServer;
-    use crate::tests::shared::make_mock_block_with_valid_pow;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::Block;
     use crate::RPC_CHANNEL_CAPACITY;
@@ -916,39 +959,31 @@ mod rpc_server_tests {
         )
     }
 
-    async fn mine_block_to_wallet(
-        global_state_lock: &mut GlobalStateLock,
-    ) -> (Block, Utxo, Digest) {
-        let mut rng = rand::thread_rng();
-        let genesis_block = Block::genesis_block(global_state_lock.cli().network);
-
-        let wallet_spending_key = global_state_lock
-            .lock_guard_mut()
+    async fn mine_block_to_wallet(global_state_lock: &mut GlobalStateLock) -> Result<Block> {
+        let tip_block = global_state_lock
+            .lock_guard()
             .await
-            .wallet_state
-            .next_unused_spending_key(KeyType::Generation);
+            .chain
+            .archival_state()
+            .get_tip()
+            .await;
 
-        let (block1, utxo, coinbase_randomness) = make_mock_block_with_valid_pow(
-            &genesis_block,
-            None,
-            wallet_spending_key.to_address().try_into().unwrap(),
-            rng.gen(),
+        let timestamp = Timestamp::now();
+        let (transaction, coinbase_expected_utxo) = crate::mine_loop::create_block_transaction(
+            &tip_block,
+            global_state_lock.lock_guard().await.deref(),
+            timestamp,
         );
 
-        global_state_lock
-            .store_coinbase_block(
-                block1.clone(),
-                ExpectedUtxo::new(
-                    utxo.clone(),
-                    coinbase_randomness,
-                    wallet_spending_key.privacy_preimage(),
-                    UtxoNotifier::OwnMiner,
-                ),
-            )
-            .await
-            .unwrap();
+        let (header, body) =
+            crate::mine_loop::make_block_template(&tip_block, transaction, timestamp, None);
+        let block = Block::new(header, body, Block::mk_std_block_type(None));
 
-        (block1, utxo, coinbase_randomness)
+        global_state_lock
+            .store_coinbase_block(block.clone(), coinbase_expected_utxo)
+            .await?;
+
+        Ok(block)
     }
 
     #[tokio::test]
@@ -972,7 +1007,7 @@ mod rpc_server_tests {
         let (rpc_server, mut global_state_lock) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
-        mine_block_to_wallet(&mut global_state_lock).await;
+        mine_block_to_wallet(&mut global_state_lock).await?;
 
         let ctx = context::current();
 
@@ -1506,41 +1541,13 @@ mod rpc_server_tests {
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
         let network = Network::Regtest;
-        let (rpc_server, mut state_lock) =
+        let (mut rpc_server, _) =
             test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
         let mut rng = rand::thread_rng();
 
-        // --- Init.  get wallet spending key ---
-        let genesis_block = Block::genesis_block(network);
-        let wallet_spending_key = state_lock
-            .lock_guard_mut()
-            .await
-            .wallet_state
-            .next_unused_spending_key(KeyType::Generation);
-
         // --- Init.  generate a block, with coinbase going to our wallet ---
-        let (block_1, cb_utxo, cb_output_randomness) = make_mock_block_with_valid_pow(
-            &genesis_block,
-            None,
-            wallet_spending_key.to_address().try_into()?,
-            rng.gen(),
-        );
-
-        // --- Init.  append the block to blockchain ---
-        state_lock
-            .lock_guard_mut()
-            .await
-            .set_new_self_mined_tip(
-                block_1,
-                ExpectedUtxo::new(
-                    cb_utxo,
-                    cb_output_randomness,
-                    wallet_spending_key.privacy_preimage(),
-                    UtxoNotifier::OwnMiner,
-                ),
-            )
-            .await?;
+        mine_block_to_wallet(&mut rpc_server.state).await?;
 
         // --- Setup. generate an output that our wallet cannot claim. ---
         let output1 = (
@@ -1550,12 +1557,9 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet can claim. ---
         let output2 = {
-            let spending_key = state_lock
-                .lock_guard_mut()
-                .await
-                .wallet_state
-                .next_unused_spending_key(KeyType::Generation);
-            (spending_key.to_address(), NeptuneCoins::new(25))
+            let address = rpc_server.clone()
+                .next_receiving_address(ctx, KeyType::Generation).await;
+            (address, NeptuneCoins::new(25))
         };
 
         // --- Setup. assemble outputs and fee ---
@@ -1574,7 +1578,7 @@ mod rpc_server_tests {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         // --- Store: store num expected utxo before spend ---
-        let num_expected_utxo = state_lock
+        let num_expected_utxo = rpc_server.state
             .lock_guard()
             .await
             .wallet_state
@@ -1582,6 +1586,9 @@ mod rpc_server_tests {
             .expected_utxos()
             .len()
             .await;
+
+        // --- Store: store num tx_in_mempool before spend ---
+        let num_tx_in_mempool = rpc_server.state.lock_guard().await.mempool.len();
 
         // --- Operation: perform send
         let result = rpc_server.clone().send(ctx, tx_params).await;
@@ -1592,7 +1599,7 @@ mod rpc_server_tests {
         // --- Test: verify expected_utxos.len() has increased by 2.
         //           (one off-chain utxo + one change utxo)
         assert_eq!(
-            state_lock
+            rpc_server.state
                 .lock_guard()
                 .await
                 .wallet_state
@@ -1603,145 +1610,226 @@ mod rpc_server_tests {
             num_expected_utxo + 2
         );
 
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn claim_utxo_owned() -> Result<()> {
-        let network = Network::Regtest;
-        let (rpc_server, mut global_state_lock) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
-
-        mine_block_to_wallet(&mut global_state_lock).await;
-
-        let ctx = context::current();
-
-        let receiving_address_generation = rpc_server
-            .clone()
-            .next_receiving_address(context::current(), KeyType::Generation)
-            .await;
-        let receiving_address_symmetric = rpc_server
-            .clone()
-            .next_receiving_address(context::current(), KeyType::Symmetric)
-            .await;
-
-        let pay_to_self_outputs = vec![
-            (receiving_address_generation, NeptuneCoins::new(1)),
-            (receiving_address_symmetric, NeptuneCoins::new(2)),
-        ];
-
-        let (tx_params, _) = rpc_server
-            .clone()
-            .generate_tx_params(
-                ctx,
-                pay_to_self_outputs,
-                NeptuneCoins::zero(),
-                OwnedUtxoNotifyMethod::OffChainSerialized,
-                UnownedUtxoNotifyMethod::default(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        let tx_output_list = tx_params.tx_output_list().clone();
-
-        let _ = rpc_server.clone().send(ctx, tx_params).await;
-
-        for utxo_transfer_encrypted in tx_output_list.utxo_transfer_iter() {
-            rpc_server
-                .clone()
-                .claim_utxo(
-                    context::current(),
-                    utxo_transfer_encrypted.to_bech32m(network)?,
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
-
+        // --- Test: verify num_tx_in_mempool has increased by 1.
         assert_eq!(
-            vec![
-                NeptuneCoins::new(100), // from coinbase
-                NeptuneCoins::new(1),   // claimed via generation addr
-                NeptuneCoins::new(2),   // claimed via symmetric addr
-                NeptuneCoins::new(97)   // change (symmetric addr)
-            ],
-            global_state_lock
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_db
-                .expected_utxos()
-                .get_all()
-                .await
-                .iter()
-                .map(|eu| eu.utxo.get_native_currency_amount())
-                .collect_vec()
+            rpc_server.state.lock_guard().await.mempool.len(),
+            num_tx_in_mempool + 1,
         );
 
         Ok(())
     }
 
+    #[traced_test]
+    #[allow(clippy::needless_return)]
     #[tokio::test]
-    async fn claim_utxo_unowned() -> Result<()> {
-        let network = Network::Regtest;
+    async fn claim_utxo_owned_before_confirmed() -> Result<()> {
+        worker::claim_utxo_owned(false).await
+    }
 
-        // bob's node
-        let (pay_to_bob_outputs, bob_rpc_server, mut bob_global_state_lock) = {
-            let (rpc_server, global_state_lock) =
+    #[traced_test]
+    #[allow(clippy::needless_return)]
+    #[tokio::test]
+    async fn claim_utxo_owned_after_confirmed() -> Result<()> {
+        worker::claim_utxo_owned(true).await
+    }
+
+    #[traced_test]
+    #[allow(clippy::needless_return)]
+    #[tokio::test]
+    async fn claim_utxo_unowned_before_confirmed() -> Result<()> {
+        worker::claim_utxo_unowned(false).await
+    }
+
+    #[traced_test]
+    #[allow(clippy::needless_return)]
+    #[tokio::test]
+    async fn claim_utxo_unowned_after_confirmed() -> Result<()> {
+        worker::claim_utxo_unowned(true).await
+    }
+
+    mod worker {
+        use super::*;
+
+        pub async fn claim_utxo_unowned(claim_after_confirmed: bool) -> Result<()> {
+            let network = Network::Regtest;
+
+            // bob's node
+            let (pay_to_bob_outputs, bob_rpc_server) = {
+                let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+                let receiving_address_generation = rpc_server
+                    .clone()
+                    .next_receiving_address(context::current(), KeyType::Generation)
+                    .await;
+                let receiving_address_symmetric = rpc_server
+                    .clone()
+                    .next_receiving_address(context::current(), KeyType::Symmetric)
+                    .await;
+
+                let pay_to_bob_outputs = vec![
+                    (receiving_address_generation, NeptuneCoins::new(1)),
+                    (receiving_address_symmetric, NeptuneCoins::new(2)),
+                ];
+
+                (pay_to_bob_outputs, rpc_server)
+            };
+
+            // alice's node
+            let (blocks, alice_utxo_transfer_encrypted_to_bob_list, bob_amount) = {
+                let (rpc_server, mut global_state_lock) =
+                    test_rpc_server(network, WalletSecret::new_random(), 2).await;
+
+                let mut blocks = vec![];
+
+                // mine a block to obtain some coinbase coins for spending.
+                blocks.push(mine_block_to_wallet(&mut global_state_lock).await?);
+
+                let fee = NeptuneCoins::zero();
+                let bob_amount: NeptuneCoins = pay_to_bob_outputs.iter().map(|(_, amt)| *amt).sum();
+
+                let (tx_params, _) = rpc_server
+                    .clone()
+                    .generate_tx_params(
+                        context::current(),
+                        pay_to_bob_outputs,
+                        fee,
+                        OwnedUtxoNotifyMethod::default(),
+                        UnownedUtxoNotifyMethod::OffChainSerialized,
+                    )
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                let utxo_transfer_list = tx_params
+                    .tx_output_list()
+                    .utxo_transfer_iter()
+                    .collect_vec();
+
+                let _ = rpc_server.clone().send(context::current(), tx_params).await;
+
+                // mine two more blocks
+                blocks.push(mine_block_to_wallet(&mut global_state_lock).await?);
+                blocks.push(mine_block_to_wallet(&mut global_state_lock).await?);
+
+                (blocks, utxo_transfer_list, bob_amount)
+            };
+
+            // bob's node claims each utxo
+            {
+                let mut state = bob_rpc_server.state.clone();
+
+                state.store_block(blocks[0].clone()).await?;
+
+                if claim_after_confirmed {
+                    state.store_block(blocks[1].clone()).await?;
+                    state.store_block(blocks[2].clone()).await?;
+                }
+
+                for utxo_transfer_encrypted in alice_utxo_transfer_encrypted_to_bob_list.iter() {
+                    bob_rpc_server
+                        .clone()
+                        .claim_utxo(
+                            context::current(),
+                            utxo_transfer_encrypted.to_bech32m(network)?,
+                        )
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+
+                assert_eq!(
+                    vec![
+                        NeptuneCoins::new(1), // claimed via generation addr
+                        NeptuneCoins::new(2), // claimed via symmetric addr
+                    ],
+                    state
+                        .lock_guard()
+                        .await
+                        .wallet_state
+                        .wallet_db
+                        .expected_utxos()
+                        .get_all()
+                        .await
+                        .iter()
+                        .map(|eu| eu.utxo.get_native_currency_amount())
+                        .collect_vec()
+                );
+
+                if !claim_after_confirmed {
+                    assert_eq!(
+                        NeptuneCoins::zero(),
+                        bob_rpc_server
+                            .clone()
+                            .synced_balance(context::current())
+                            .await,
+                    );
+                    state.store_block(blocks[1].clone()).await?;
+                    state.store_block(blocks[2].clone()).await?;
+                }
+
+                assert_eq!(
+                    bob_amount,
+                    bob_rpc_server.synced_balance(context::current()).await,
+                );
+            }
+
+            Ok(())
+        }
+
+        pub async fn claim_utxo_owned(claim_after_confirmed: bool) -> Result<()> {
+            let network = Network::Regtest;
+            let (mut alice_rpc_server, _) =
+                test_rpc_server(network, WalletSecret::new_random(), 2).await;
+            let (mut bob_rpc_server, _) =
                 test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
-            let receiving_address_generation = rpc_server
+            let block1 = mine_block_to_wallet(&mut bob_rpc_server.state).await?;
+            alice_rpc_server.state.store_block(block1).await?;
+
+            let ctx = context::current();
+
+            let receiving_address_generation = bob_rpc_server
                 .clone()
                 .next_receiving_address(context::current(), KeyType::Generation)
                 .await;
-            let receiving_address_symmetric = rpc_server
+            let receiving_address_symmetric = bob_rpc_server
                 .clone()
                 .next_receiving_address(context::current(), KeyType::Symmetric)
                 .await;
 
-            let pay_to_bob_outputs = vec![
+            let pay_to_self_outputs = vec![
                 (receiving_address_generation, NeptuneCoins::new(1)),
                 (receiving_address_symmetric, NeptuneCoins::new(2)),
             ];
 
-            (pay_to_bob_outputs, rpc_server, global_state_lock)
-        };
-
-        // alice's node
-        let (block1, alice_utxo_transfer_encrypted_to_bob_list) = {
-            let (rpc_server, mut global_state_lock) =
-                test_rpc_server(network, WalletSecret::new_random(), 2).await;
-
-            let (block1, ..) = mine_block_to_wallet(&mut global_state_lock).await;
-
-            let fee = NeptuneCoins::zero();
-
-            let (tx_params, _) = rpc_server
+            let (tx_params, _) = bob_rpc_server
                 .clone()
                 .generate_tx_params(
-                    context::current(),
-                    pay_to_bob_outputs,
-                    fee,
-                    OwnedUtxoNotifyMethod::default(),
-                    UnownedUtxoNotifyMethod::OffChainSerialized,
+                    ctx,
+                    pay_to_self_outputs,
+                    NeptuneCoins::new(1),
+                    OwnedUtxoNotifyMethod::OffChainSerialized,
+                    UnownedUtxoNotifyMethod::default(),
                 )
                 .await
                 .map_err(|e| anyhow::anyhow!(e))?;
 
-            let utxo_transfer_list = tx_params
-                .tx_output_list()
-                .utxo_transfer_iter()
-                .collect_vec();
+            let tx_output_list = tx_params.tx_output_list().clone();
 
-            let _ = rpc_server.clone().send(context::current(), tx_params).await;
+            let _ = bob_rpc_server.clone().send(ctx, tx_params.clone()).await;
 
-            (block1, utxo_transfer_list)
-        };
+            // simulate that bob sends tx to alice's mempool via p2p network
+            let _ = alice_rpc_server.clone().send(ctx, tx_params).await;
 
-        // bob's node claims each utxo
-        {
-            bob_global_state_lock.store_block(block1).await?;
+            // alice mines 2 more blocks.  block2 confirms the sent tx.
+            let block2 = mine_block_to_wallet(&mut alice_rpc_server.state).await?;
+            let block3 = mine_block_to_wallet(&mut alice_rpc_server.state).await?;
 
-            for utxo_transfer_encrypted in alice_utxo_transfer_encrypted_to_bob_list.iter() {
+            if claim_after_confirmed {
+                // bob applies the blocks before claiming utxos.
+                bob_rpc_server.state.store_block(block2.clone()).await?;
+                bob_rpc_server.state.store_block(block3.clone()).await?;
+            }
+
+            for utxo_transfer_encrypted in tx_output_list.utxo_transfer_iter() {
                 bob_rpc_server
                     .clone()
                     .claim_utxo(
@@ -1754,10 +1842,12 @@ mod rpc_server_tests {
 
             assert_eq!(
                 vec![
-                    NeptuneCoins::new(1), // claimed via generation addr
-                    NeptuneCoins::new(2), // claimed via symmetric addr
+                    NeptuneCoins::new(100), // from block1 coinbase
+                    NeptuneCoins::new(1),   // claimed via generation addr
+                    NeptuneCoins::new(2),   // claimed via symmetric addr
+                    NeptuneCoins::new(96)   // change (symmetric addr)
                 ],
-                bob_global_state_lock
+                bob_rpc_server.state
                     .lock_guard()
                     .await
                     .wallet_state
@@ -1769,8 +1859,33 @@ mod rpc_server_tests {
                     .map(|eu| eu.utxo.get_native_currency_amount())
                     .collect_vec()
             );
-        }
 
-        Ok(())
+            if !claim_after_confirmed {
+                // bob hasn't applied blocks 2,3. balance should be 100
+                assert_eq!(
+                    NeptuneCoins::new(100),
+                    bob_rpc_server
+                        .clone()
+                        .synced_balance(context::current())
+                        .await,
+                );
+                // bob applies the blocks after claiming utxos.
+                bob_rpc_server.state.store_block(block2).await?;
+                bob_rpc_server.state.store_block(block3).await?;
+            }
+
+            // final balance should be 99.
+            // +100  coinbase
+            // -100  coinbase spent
+            // +1 self-send via Generation
+            // +2 self-send via Symmetric
+            // +96   change (less fee == 1)
+            assert_eq!(
+                NeptuneCoins::new(99),
+                bob_rpc_server.synced_balance(context::current()).await,
+            );
+
+            Ok(())
+        }
     }
 }

@@ -294,7 +294,7 @@ impl WalletState {
             //
             // note: this is a nice sanity check, but probably is un-necessary
             //       work that can eventually be removed.
-            .filter(|au| match transaction.kernel.outputs.contains(&au.addition_record) {
+            .filter(|au| match transaction.kernel.outputs.contains(&au.addition_record()) {
                 true => true,
                 false => {
                     warn!("Transaction does not contain announced UTXO encrypted to own receiving address. Announced UTXO was: {:#?}", au.utxo);
@@ -331,13 +331,16 @@ impl WalletState {
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
 
+    /// find the `ExpectedUtxo` that matches `utxo` and `sender_randomness`, if any
+    ///
+    /// perf: this fn is o(n) with the number of ExpectedUtxo stored.  Iteration
+    ///       is performed from newest to oldest based on expectation that we
+    ///       will most often be working with recent ExpectedUtxos.
     pub async fn find_expected_utxo(
         &self,
         utxo: &Utxo,
         sender_randomness: Digest,
     ) -> Option<ExpectedUtxo> {
-        // we iterate in reverse based on expectation that we will most often be working
-        // with recent ExpectedUtxos.
         let len = self.wallet_db.expected_utxos().len().await;
         let stream = self
             .wallet_db
@@ -349,6 +352,28 @@ impl WalletState {
         while let Some(eu) = stream.next().await {
             if eu.utxo == *utxo && eu.sender_randomness == sender_randomness {
                 return Some(eu);
+            }
+        }
+        None
+    }
+
+    /// find the `MonitoredUtxo` that matches `utxo`, if any
+    ///
+    /// perf: this fn is o(n) with the number of MonitoredUtxo stored.  Iteration
+    ///       is performed from newest to oldest based on expectation that we
+    ///       will most often be working with recent MonitoredUtxos.
+    pub async fn find_monitored_utxo(&self, utxo: &Utxo) -> Option<MonitoredUtxo> {
+        let len = self.wallet_db.monitored_utxos().len().await;
+        let stream = self
+            .wallet_db
+            .monitored_utxos()
+            .stream_many_values((0..len).rev())
+            .await;
+        pin_mut!(stream); // needed for iteration
+
+        while let Some(mu) = stream.next().await {
+            if mu.utxo == *utxo {
+                return Some(mu);
             }
         }
         None
@@ -562,7 +587,7 @@ impl WalletState {
             all_received_outputs
                 .map(|au| {
                     (
-                        au.addition_record,
+                        au.addition_record(),
                         (au.utxo, au.sender_randomness, au.receiver_preimage),
                     )
                 })
@@ -874,7 +899,7 @@ impl WalletState {
             .filter(|(_, eu)| {
                 offchain_received_outputs
                     .iter()
-                    .any(|au| au.addition_record == eu.addition_record)
+                    .any(|au| au.addition_record() == eu.addition_record)
             })
             .map(|(idx, mut eu)| {
                 eu.mined_in_block = Some((new_block.hash(), new_block.kernel.header.timestamp));
@@ -884,6 +909,83 @@ impl WalletState {
 
         self.wallet_db.set_sync_label(new_block.hash()).await;
         self.wallet_db.persist().await;
+
+        Ok(())
+    }
+
+    /// Update wallet state with new block. Assume the given block
+    /// is valid and that the wallet state is not up to date yet.
+    pub async fn claim_utxo_in_block(
+        &mut self,
+        announced_utxo: AnnouncedUtxo,
+        block: &Block,
+        block_digests_until_tip: impl ExactSizeIterator<Item = (Digest, MutatorSetAccumulator)>,
+        // parent_block: &Block,
+    ) -> Result<()> {
+        // let mutator_set_accumulator = &parent_block.body().mutator_set_accumulator;
+        // let mutator_set_accumulator = &block.body().mutator_set_accumulator;
+
+        // If output UTXO belongs to us, add it to the list of monitored UTXOs and
+        // add its membership proof to the list of managed membership proofs.
+        let AnnouncedUtxo {
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+            ..
+        } = announced_utxo;
+        info!(
+            "claim_utxo_in_block: Received UTXO in block {}, height {}: value = {}",
+            block.hash(),
+            block.kernel.header.height,
+            utxo.get_native_currency_amount(),
+        );
+        let utxo_digest = Hash::hash(&utxo);
+
+        assert!(block_digests_until_tip.len() > 0);
+
+        let mut mutxo = MonitoredUtxo::new(utxo.clone(), self.number_of_mps_per_utxo);
+
+        for (block_digest, prev_block_mutator_set_accumulator) in block_digests_until_tip {
+            // todo: spawn-blocking around prove()
+            let membership_proof = prev_block_mutator_set_accumulator.prove(
+                utxo_digest,
+                sender_randomness,
+                receiver_preimage,
+            );
+            mutxo.add_membership_proof_for_tip(block_digest, membership_proof);
+        }
+
+        // the 0-index entry corresponds to the input block.
+        assert!(!mutxo.blockhash_to_membership_proof.is_empty());
+        assert_eq!(
+            mutxo.get_oldest_membership_proof_entry().unwrap().0,
+            block.hash()
+        );
+        let aocl_index = mutxo.blockhash_to_membership_proof[0]
+            .1
+            .auth_path_aocl
+            .leaf_index;
+
+        // Add the new UTXO to the list of monitored UTXOs
+        mutxo.confirmed_in_block = Some((
+            block.hash(),
+            block.kernel.header.timestamp,
+            block.kernel.header.height,
+        ));
+
+        self.wallet_db.monitored_utxos_mut().push(mutxo).await;
+
+        // Add the data required to restore the UTXOs membership proof from public
+        // data to the secret's file.
+        let recovery_data = IncomingUtxoRecoveryData {
+            utxo,
+            sender_randomness,
+            receiver_preimage,
+            aocl_index,
+        };
+
+        // write to disk.
+        self.store_utxo_ms_recovery_data(recovery_data).await?;
 
         Ok(())
     }
@@ -1003,7 +1105,7 @@ impl WalletState {
                 utxo: wallet_status_element.utxo,
                 lock_script: lock_script.clone(),
                 ms_membership_proof: membership_proof,
-                spending_key,
+                unlock_key: spending_key.unlock_key(),
             });
         }
 

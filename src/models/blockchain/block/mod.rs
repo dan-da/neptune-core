@@ -401,12 +401,7 @@ impl Block {
                 transaction.kernel.timestamp,
             ),
         );
-        let new_transaction = self
-            .kernel
-            .body
-            .transaction
-            .clone()
-            .merge_with(transaction.clone());
+        let new_transaction = self.kernel.body.transaction.clone().merge_with(transaction);
 
         // accumulate mutator set updates
         // Can't use the current mutator sat accumulator because it is in an in-between state.

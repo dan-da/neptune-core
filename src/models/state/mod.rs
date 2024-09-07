@@ -408,17 +408,11 @@ impl GlobalState {
             .map(TypeScript::new)
             .to_vec();
 
-        let lock_script_witnesses = tx_inputs
-            .spending_keys_iter()
-            .into_iter()
-            .map(|k| k.unlock_key().values().to_vec())
-            .collect_vec();
-
         PrimitiveWitness {
             input_utxos: SaltedUtxos::new(tx_inputs.utxos()),
             input_lock_scripts: tx_inputs.lock_scripts(),
             type_scripts,
-            lock_script_witnesses,
+            lock_script_witnesses: tx_inputs.lock_script_witnesses(),
             input_membership_proofs: tx_inputs.ms_membership_proofs(),
             output_utxos: SaltedUtxos::new(tx_outputs.utxos()),
             mutator_set_accumulator,
@@ -577,166 +571,8 @@ impl GlobalState {
 
     /// creates a Transaction.
     ///
-    /// This API provides a simple-to-use interface for creating a transaction.
-    /// [Utxo] inputs are automatically chosen and a change output is
-    /// automatically created, such that:
-    ///
-    ///   change = sum(inputs) - sum(outputs) - fee.
-    ///
-    /// When finer control is required, [Self::create_raw_transaction()]
-    /// can be used instead.
-    ///
-    /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs()] which determines which outputs should be
-    /// `OnChain` or `OffChain`.
-    ///
-    /// After this call returns it is the caller's responsibility to inform the
-    /// wallet of any returned [ExpectedUtxo], ie `OffChain` secret
-    /// notifications, for utxos that match wallet keys.  Failure to do so can
-    /// result in loss of funds!
-    ///
-    /// This function will modify the `tx_outputs` parameter by
-    /// appending an element representing the change output, if change is
-    /// needed.  Any [ExpectedUtxo], including change can then be retrieved
-    /// with [TxOutputList::expected_utxos()].
-    ///
-    /// The `change_utxo_notify_method` parameter should normally be
-    /// [UtxoNotifyMethod::OnChain] for safest transfer.
-    ///
-    /// The change_key should normally be a [SpendingKey::Symmetric] in
-    /// order to save blockchain space compared to a regular address.
-    ///
-    /// Note that `create_transaction()` does not modify any state and does not
-    /// require acquiring write lock.  This is important becauce internally it
-    /// calls prove() which is a very lengthy operation.
-    ///
-    /// Example:
-    ///
-    /// ```compile_fail
-    ///
-    /// // we obtain a change key first, as it requires modifying wallet state.
-    /// // note that this is a SymmetricKey, not a regular (Generation) address.
-    /// let change_key = global_state_lock
-    ///     .lock_guard_mut()
-    ///     .await
-    ///     .wallet_state
-    ///     .wallet_secret
-    ///     .next_unused_spending_key(KeyType::Symmetric);
-    ///
-    /// // we choose onchain notification for all utxos destined for our wallet.
-    /// let notify_method = UtxoNotifyMethod::OnChain;
-    ///
-    /// // obtain read lock
-    /// let state = self.state.lock_guard().await;
-    ///
-    /// // generate the tx_outputs
-    /// let mut tx_outputs = state.generate_tx_outputs(outputs, notify_method)?;
-    ///
-    /// // Create the transaction
-    /// let transaction = state
-    ///     .create_transaction(
-    ///         &mut tx_outputs,              // all outputs except `change`
-    ///         change_key,                   // send `change` to this key
-    ///         notify_method,                // how to notify about `change` utxo
-    ///         NeptuneCoins::new(2),         // fee
-    ///         Timestamp::now(),
-    ///     )
-    ///     .await?;
-    ///
-    /// // drop read lock.
-    /// drop(state);
-    ///
-    /// // Inform wallet of any expected incoming utxos.
-    /// state
-    ///     .lock_guard_mut()
-    ///     .await
-    ///     .add_expected_utxos_to_wallet(tx_outputs.expected_utxos())
-    ///     .await?;
-    /// ```
-    // pub async fn create_transaction(
-    //     &self,
-    //     tx_outputs: &mut TxOutputList,
-    //     change_key: SpendingKey,
-    //     change_utxo_notify_method: OwnedUtxoNotifyMethod,
-    //     fee: NeptuneCoins,
-    //     timestamp: Timestamp,
-    // ) -> Result<Transaction> {
-
-    //     let (tx_input_list, tx_output_list) = self.generate_tx_inputs_and_outputs(outputs, owned_utxo_notify_method, unowned_utxo_notify_method)
-
-    //     // 1. create/add change output if necessary.
-    //     let total_spend = tx_outputs.total_native_coins() + fee;
-
-    //     let tip_hash = self.chain.light_state().hash();
-
-    //     // collect spendable inputs
-    //     let tx_inputs = self
-    //         .wallet_state
-    //         .allocate_sufficient_input_funds(total_spend, tip_hash, timestamp)
-    //         .await?;
-
-    //     let input_amount = tx_inputs.total_native_coins();
-
-    //     if total_spend < input_amount {
-    //         let block_height = self.chain.light_state().header().height;
-
-    //         let amount = input_amount.checked_sub(&total_spend).ok_or_else(|| {
-    //             anyhow::anyhow!("underflow subtracting total_spend from input_amount")
-    //         })?;
-
-    //         let tx_output = {
-    //             let utxo = Utxo::new_native_coin(change_key.to_address().lock_script(), amount);
-    //             let sender_randomness = self.wallet_state.wallet_secret.generate_sender_randomness(
-    //                 block_height,
-    //                 change_key.to_address().privacy_digest(),
-    //             );
-
-    //             match change_utxo_notify_method {
-    //                 OwnedUtxoNotifyMethod::OnChain => {
-    //                     let public_announcement = change_key
-    //                         .to_address()
-    //                         .generate_public_announcement(&utxo, sender_randomness)?;
-    //                     TxOutput::onchain(
-    //                         utxo,
-    //                         sender_randomness,
-    //                         change_key.to_address().privacy_digest(),
-    //                         public_announcement,
-    //                     )
-    //                 }
-    //                 OwnedUtxoNotifyMethod::OffChain => {
-    //                     TxOutput::offchain(utxo, sender_randomness, change_key.privacy_preimage())
-    //                 }
-    //                 OwnedUtxoNotifyMethod::OffChainSerialized => {
-    //                     let change_address = change_key.to_address();
-    //                     let utxo_transfer_encrypted =
-    //                         UtxoTransfer::new(utxo.clone(), sender_randomness)
-    //                             .encrypt_to_address(&change_address)?;
-    //                     TxOutput::offchain_serialized(
-    //                         utxo,
-    //                         sender_randomness,
-    //                         change_address.privacy_digest(),
-    //                         utxo_transfer_encrypted,
-    //                     )
-    //                 }
-    //             }
-    //         };
-
-    //         tx_outputs.push(tx_output);
-    //     }
-
-    //     // 2. Create the transaction
-    //     let transaction = self
-    //         .create_raw_transaction(tx_inputs, tx_outputs.clone(), fee, timestamp)
-    //         .await?;
-
-    //     Ok(transaction)
-    // }
-
-    /// creates a Transaction.
-    ///
     /// This API provides the caller complete control over selection of inputs
-    /// and outputs.  When fine grained control is not required,
-    /// [Self::create_transaction()] is easier to use and should be preferred.
+    /// and outputs.
     ///
     /// It is the caller's responsibility to provide inputs and outputs such
     /// that sum(inputs) == sum(outputs) + fee.  Else an error will result.
@@ -744,21 +580,67 @@ impl GlobalState {
     /// Note that this means the caller must calculate the `change` amount if any
     /// and provide an output for the change.
     ///
-    /// The `tx_outputs` parameter should normally be generated with
-    /// [Self::generate_tx_outputs()] which determines which outputs should be
-    /// `OnChain` or `OffChain`.
+    /// The `tx_params` parameter should normally be generated with
+    /// [Self::generate_tx_params()] which selects inputs and creates change
+    /// output
     ///
     /// After this call returns it is the caller's responsibility to inform the
     /// wallet of any returned [ExpectedUtxo] for utxos that match wallet keys.
     /// Failure to do so can result in loss of funds!
     ///
-    /// Note that `create_raw_transaction()` does not modify any state and does
+    /// Note that `create_transaction()` does not modify any state and does
     /// not require acquiring write lock.  This is important becauce internally
     /// it calls prove() which is a very lengthy operation.
     ///
     /// Example:
     ///
-    /// See the implementation of [Self::create_transaction()].
+    /// ```compile_fail
+    ///
+    /// let addr = ReceivingAddress::from(GenerationReceivingAddress::derive_from_seed(rand::random()));
+    /// let outputs = vec![(addr, NeptuneCoins::new(1))];
+    ///
+    ///    // obtain next unused symmetric key for change utxo
+    ///    let change_key = {
+    ///        let mut s = global_state_lock.lock_guard_mut().await;
+    ///        let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
+    ///
+    ///        // write state to disk. create_transaction() may be slow.
+    ///        s.persist_wallet().await.expect("flushed");
+    ///        key
+    ///    };
+    ///
+    ///    let state = global_state_lock.lock_guard().await;
+    ///    let (tx_params, _) = state
+    ///        .generate_tx_params(
+    ///            outputs,
+    ///            change_key,
+    ///            NeptuneCoins::zero(),    // fee,
+    ///            Default::default(),      // owned_utxo_notify_method,
+    ///            Default::default(),      // unowned_utxo_notify_method,
+    ///            Timestamp::now(),
+    ///        )
+    ///        .await
+    ///        .map_err(|e| e.to_string())
+    ///
+    ///    let transaction = state
+    ///        .create_transaction(tx_params.clone())
+    ///        .await
+    ///        .map_err(|e| e.to_string())?;
+    ///
+    ///    drop(state);
+    ///
+    ///    // write any off-chain notifications to disk
+    ///    if tx_params.tx_output_list.has_offchain() {
+    ///        // acquire write-lock
+    ///        let mut gsm = state_state_lock.lock_guard_mut().await;
+    ///
+    ///        // Inform wallet of any expected incoming utxos.
+    ///        // note that this (briefly) mutates self.
+    ///        gsm.add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
+    ///            .await
+    ///            .map_err(|e| e.to_string())?;
+    ///    }
+    /// ```
     pub async fn create_transaction(&self, tx_params: TxParams) -> Result<Transaction> {
         let mutator_set_accumulator = self
             .chain
@@ -1320,6 +1202,16 @@ impl GlobalState {
             new_block: Block,
             coinbase_utxo_info: Option<ExpectedUtxo>,
         ) -> Result<()> {
+            // log summary.
+            info!("Storing block:\n  height {}:\n  digest: {}\n  timestamp: {}\n  difficulty: {}\n  inputs: {}\n  outputs: {}\n",
+                new_block.header().height,
+                new_block.hash().to_hex(),
+                new_block.header().timestamp.standard_format(),
+                new_block.header().difficulty,
+                new_block.body().transaction.kernel.inputs.len(),
+                new_block.body().transaction.kernel.outputs.len(),
+            );
+
             // Apply the updates
             myself
                 .chain
@@ -1332,8 +1224,7 @@ impl GlobalState {
                 .chain
                 .archival_state_mut()
                 .update_mutator_set(&new_block)
-                .await
-                .expect("Updating mutator set must succeed");
+                .await?;
 
             if let Some(coinbase_info) = coinbase_utxo_info {
                 // Notify wallet to expect the coinbase UTXO, as we mined this block
@@ -1428,8 +1319,45 @@ impl GlobalState {
     pub fn cli(&self) -> &cli_args::Args {
         &self.cli
     }
+
+    pub(crate) async fn get_block_digests_and_prev_msa(&self, target_digest: Digest) -> Result<Vec<(Digest, MutatorSetAccumulator)>> {
+        let mut block_digests = vec![(
+            self.chain.light_state().hash(),
+            self.chain
+                .light_state()
+                .body()
+                .mutator_set_accumulator
+                .clone(),
+        )];
+        let mut block_digest = self.chain.light_state().hash();
+        let mut prev_block_digest = self.chain.light_state().header().prev_block_digest;
+        while let Some(prev_block) = self
+            .chain
+            .archival_state()
+            .get_block(prev_block_digest)
+            .await?
+        {
+            block_digests.push((
+                block_digest,
+                prev_block.body().mutator_set_accumulator.clone(),
+            ));
+
+            if block_digest == target_digest {
+                break;
+            }
+
+            block_digest = prev_block_digest;
+            prev_block_digest = prev_block.header().prev_block_digest;
+        }
+
+        Ok(block_digests)
+    }
 }
 
+/// This provides some additional metadata about `TxOutput` that are generated
+/// by GlobalState::generate_tx_params()
+///
+/// note that it is possible to have TxOutput with no corresponding ReceivingAddress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxOutputMeta {
     pub receiving_address: ReceivingAddress,

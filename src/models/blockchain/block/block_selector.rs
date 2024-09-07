@@ -20,7 +20,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::models::state::GlobalState;
+use crate::models::state::archival_state::ArchivalState;
 use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::math::digest::Digest;
 
@@ -104,18 +104,26 @@ impl FromStr for BlockSelector {
 
 impl BlockSelector {
     /// returns Digest for this selector, if it exists.
-    pub async fn as_digest(&self, state: &GlobalState) -> Option<Digest> {
+    pub async fn as_digest(&self, state: &ArchivalState) -> Option<Digest> {
         match self {
             BlockSelector::Digest(d) => Some(*d),
             BlockSelector::Height(h) => {
                 state
-                    .chain
-                    .archival_state()
-                    .block_height_to_canonical_block_digest(*h, state.chain.light_state().hash())
+                    .block_height_to_canonical_block_digest(*h, state.get_tip().await.hash())
                     .await
             }
-            BlockSelector::Tip => Some(state.chain.light_state().hash()),
-            BlockSelector::Genesis => Some(state.chain.archival_state().genesis_block().hash()),
+            BlockSelector::Tip => Some(state.get_tip().await.hash()),
+            BlockSelector::Genesis => Some(state.genesis_block().hash()),
+        }
+    }
+
+    /// returns Digest for this selector, if it exists.
+    pub async fn as_height(&self, state: &ArchivalState) -> Option<BlockHeight> {
+        match self {
+            BlockSelector::Digest(d) => state.get_block_header(*d).await.map(|h| h.height),
+            BlockSelector::Height(h) => Some(*h),
+            BlockSelector::Tip => Some(state.get_tip().await.header().height),
+            BlockSelector::Genesis => Some(BlockHeight::genesis()),
         }
     }
 }

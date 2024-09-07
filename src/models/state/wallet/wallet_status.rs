@@ -40,6 +40,7 @@ pub struct WalletStatus {
 }
 
 impl WalletStatus {
+    /// returns native currency sum of unspent utxo that have been confirmed in a block
     pub fn synced_unspent_amount(&self) -> NeptuneCoins {
         self.synced_unspent
             .iter()
@@ -47,6 +48,7 @@ impl WalletStatus {
             .sum::<NeptuneCoins>()
     }
 
+    /// returns native currency sum of unspent utxo that have been confirmed in a block and are available to spend at timestamp
     pub fn synced_unspent_available_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
         self.synced_unspent
             .iter()
@@ -56,6 +58,7 @@ impl WalletStatus {
             .sum::<NeptuneCoins>()
     }
 
+    /// returns native currency sum of unspent utxo that have been confirmed in a block and are timelocked but otherwise available to spend at timestamp
     pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NeptuneCoins {
         self.synced_unspent
             .iter()
@@ -64,6 +67,8 @@ impl WalletStatus {
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NeptuneCoins>()
     }
+
+    /// returns native currency sum of unspent utxo that have not been confirmed in a block
     pub fn unsynced_unspent_amount(&self) -> NeptuneCoins {
         self.unsynced_unspent
             .iter()
@@ -71,6 +76,7 @@ impl WalletStatus {
             .sum::<NeptuneCoins>()
     }
 
+    /// returns native currency sum of spent utxo that have been confirmed in a block
     pub fn synced_spent_amount(&self) -> NeptuneCoins {
         self.synced_spent
             .iter()
@@ -78,6 +84,7 @@ impl WalletStatus {
             .sum::<NeptuneCoins>()
     }
 
+    /// returns native currency sum of spent utxo that have not been confirmed in a block
     pub fn unsynced_spent_amount(&self) -> NeptuneCoins {
         self.unsynced_spent
             .iter()

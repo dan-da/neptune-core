@@ -19,6 +19,7 @@ use crate::database::NeptuneLevelDb;
 use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::block::Block;
 use crate::models::database::BlockFileLocation;
 use crate::models::database::BlockIndexKey;
@@ -377,6 +378,37 @@ impl ArchivalState {
             Ok(block)
         })
         .await?
+    }
+
+    pub async fn find_canonical_block_with_output(
+        &self,
+        output: AdditionRecord,
+        oldest: BlockSelector,
+    ) -> Option<Block> {
+        let oldest_digest = oldest.as_digest(self).await?;
+        let mut block = self.get_tip().await;
+
+        loop {
+            if block
+                .body()
+                .transaction
+                .kernel
+                .outputs
+                .iter()
+                .any(|ar| *ar == output)
+            {
+                break Some(block);
+            }
+
+            if block.hash() == oldest_digest {
+                break None;
+            }
+
+            block = self
+                .get_block(block.header().prev_block_digest)
+                .await
+                .ok()??;
+        }
     }
 
     /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.

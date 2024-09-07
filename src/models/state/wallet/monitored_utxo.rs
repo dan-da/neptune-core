@@ -77,6 +77,12 @@ impl MonitoredUtxo {
         self.blockhash_to_membership_proof.iter().next().cloned()
     }
 
+    /// Get the most recent (block hash, membership proof) entry in the database,
+    /// if any.
+    pub fn get_oldest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof)> {
+        self.blockhash_to_membership_proof.back().cloned()
+    }
+
     /// Returns true if the MUTXO was abandoned
     pub async fn was_abandoned(&self, tip_digest: Digest, archival_state: &ArchivalState) -> bool {
         match self.confirmed_in_block {

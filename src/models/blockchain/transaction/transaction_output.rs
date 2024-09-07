@@ -23,9 +23,9 @@ use std::ops::DerefMut;
 
 pub type TxAddressOutput = (ReceivingAddress, NeptuneCoins);
 
-/// enumerates how utxos should be transferred.
+/// enumerates how self-owned utxos should be transferred (back) to our own wallet.
 ///
-/// see also: [UtxoNotification]
+/// see also: [UnownedUtxoNotifyMethod], [UtxoNotification]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, clap::ValueEnum)]
 pub enum OwnedUtxoNotifyMethod {
     #[default]
@@ -39,6 +39,9 @@ pub enum OwnedUtxoNotifyMethod {
     OffChainSerialized,
 }
 
+/// enumerates how utxos should be transferred to third parties.
+///
+/// see also: [UnownedUtxoNotifyMethod], [UtxoNotification]
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, clap::ValueEnum)]
 pub enum UnownedUtxoNotifyMethod {
     #[default]
@@ -58,25 +61,20 @@ pub enum UnownedUtxoNotifyMethod {
 ///
 /// future work:
 ///
-/// we should consider adding this variant that would facilitate passing
-/// utxo from sender to receiver off-chain for lower-fee transfers between
-/// trusted parties or eg wallets owned by the same person/org.
-///
-/// OffChainSerialized(PublicAnnouncement)
-///
-/// also, perhaps PublicAnnouncement should be used for `OffChain`
-/// and replace ExpectedUtxo.  to consolidate code/logic.
+/// perhaps PublicAnnouncement should be used for `OffChain`
+/// and `OffChainSerialized`.  to consolidate code/logic.
 ///
 /// see comment for: [TxOutput::auto()]
 ///
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum UtxoNotification {
-    /// the utxo notification should be transferred to recipient on the blockchain as a [PublicAnnouncement]
+    /// the utxo notification should be transferred to recipient on-chain as a [PublicAnnouncement]
     OnChain(PublicAnnouncement),
 
-    /// the utxo notification should be transferred to recipient off the blockchain as an [ExpectedUtxo]
+    /// the utxo notification should be transferred to recipient off-chain by neptune-core as an [ExpectedUtxo]
     OffChain(Box<ExpectedUtxo>),
 
+    /// the utxo notification should be transferred to recipient off-chain external to neptune-core
     OffChainSerialized(UtxoTransferEncrypted),
 }
 

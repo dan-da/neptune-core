@@ -189,16 +189,18 @@ impl SymmetricKey {
         common::lock_script(self.spending_lock())
     }
 
+    /// encodes the key as bech32m with network-specific prefix
     pub fn to_bech32m(&self, network: Network) -> anyhow::Result<String> {
         let hrp = Self::get_hrp(network);
         let payload = bincode::serialize(self)?;
         let variant = bech32::Variant::Bech32m;
-        match bech32::encode(hrp, payload.to_base32(), variant) {
+        match bech32::encode(&hrp, payload.to_base32(), variant) {
             Ok(enc) => Ok(enc),
-            Err(e) => bail!("Could not encode UtxoTransferEncrypted as bech32m because error: {e}"),
+            Err(e) => bail!("Could not encode SymmetricKey as bech32m because error: {e}"),
         }
     }
 
+    /// decodes a key from bech32m with network-specific prefix
     pub fn from_bech32m(encoded: &str, network: Network) -> anyhow::Result<Self> {
         let (hrp, data, variant) = bech32::decode(encoded)?;
 
@@ -218,9 +220,9 @@ impl SymmetricKey {
         }
     }
 
-    // nsk: Neptune symmetric key
-    // todo: make it vary by network.
-    pub fn get_hrp(_network: Network) -> &'static str {
-        "nsk"
+    /// returns human readable prefix (hrp) of a key, specific to `network`
+    pub fn get_hrp(network: Network) -> String {
+        // nsk: neptune-symmetric-key
+        format!("nsk{}", common::network_hrp_char(network))
     }
 }

@@ -40,7 +40,7 @@ use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
 pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8 as u64);
 
-#[derive(Clone, Debug, Copy, Serialize, Deserialize)]
+#[derive(Clone, Debug, Copy)]
 pub struct GenerationSpendingKey {
     pub receiver_identifier: BFieldElement,
     pub decryption_key: lattice::kem::SecretKey,
@@ -199,17 +199,10 @@ impl GenerationReceivingAddress {
         .concat())
     }
 
-    /// returns human readable prefix (hrp) of an address.
+    /// returns human readable prefix (hrp) of an address, specific to `network`.
     pub fn get_hrp(network: Network) -> String {
-        // NOLGA: Neptune lattice-based generation address
-        let mut hrp = "nolga".to_string();
-        let network_byte: char = match network {
-            Network::Alpha | Network::Beta | Network::Main => 'm',
-            Network::Testnet => 't',
-            Network::Regtest => 'r',
-        };
-        hrp.push(network_byte);
-        hrp
+        // nolga: Neptune lattice-based generation address
+        format!("nolga{}", common::network_hrp_char(network))
     }
 
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
