@@ -939,7 +939,7 @@ mod rpc_server_tests {
         network: Network,
         wallet_secret: WalletSecret,
         peer_count: u8,
-    ) -> (NeptuneRPCServer, GlobalStateLock) {
+    ) -> NeptuneRPCServer {
         let global_state_lock = mock_genesis_global_state(network, peer_count, wallet_secret).await;
         let (dummy_tx, mut dummy_rx) =
             tokio::sync::mpsc::channel::<RPCServerToMain>(RPC_CHANNEL_CAPACITY);
@@ -950,21 +950,18 @@ mod rpc_server_tests {
             }
         });
 
-        (
-            NeptuneRPCServer {
-                socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
-                state: global_state_lock.clone(),
-                rpc_server_to_main_tx: dummy_tx,
-            },
-            global_state_lock,
-        )
+        NeptuneRPCServer {
+            socket_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+            state: global_state_lock,
+            rpc_server_to_main_tx: dummy_tx,
+        }
     }
 
     #[tokio::test]
     async fn network_response_is_consistent() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
         for network in Network::value_variants() {
-            let (rpc_server, _) = test_rpc_server(*network, WalletSecret::new_random(), 2).await;
+            let rpc_server = test_rpc_server(*network, WalletSecret::new_random(), 2).await;
             assert_eq!(*network, rpc_server.network(context::current()).await);
         }
 
@@ -978,7 +975,7 @@ mod rpc_server_tests {
         // requests do not crash the server.
 
         let network = Network::Regtest;
-        let (mut rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let mut rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
         mine_block_to_wallet(&mut rpc_server.state).await?;
 
@@ -1062,7 +1059,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn balance_is_zero_at_init() -> Result<()> {
         // Verify that a wallet not receiving a premine is empty at startup
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let rpc_server = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let balance = rpc_server.synced_balance(context::current()).await;
         assert!(balance.is_zero());
 
@@ -1073,8 +1070,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn clear_ip_standing_test() -> Result<()> {
-        let (mut rpc_server, _) =
-            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let mut rpc_server = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let rpc_request_context = context::current();
         let global_state = rpc_server.state.lock_guard().await;
         let peer_address_0 =
@@ -1216,8 +1212,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn clear_all_standings_test() -> Result<()> {
         // Create initial conditions
-        let (mut rpc_server, _) =
-            test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let mut rpc_server = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let mut state = rpc_server.state.lock_guard_mut().await;
         let peer_address_0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address;
         let peer_address_1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address;
@@ -1330,7 +1325,7 @@ mod rpc_server_tests {
     #[traced_test]
     #[tokio::test]
     async fn utxo_digest_test() {
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let rpc_server = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let global_state = rpc_server.state.lock_guard().await;
         let aocl_leaves = global_state
             .chain
@@ -1360,7 +1355,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_info_test() {
         let network = Network::Regtest;
-        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
@@ -1438,7 +1433,7 @@ mod rpc_server_tests {
     #[tokio::test]
     async fn block_digest_test() {
         let network = Network::Regtest;
-        let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
@@ -1505,7 +1500,7 @@ mod rpc_server_tests {
         // On your local machine, this should return a temperature but in CI,
         // the RPC call returns `None`, so we only verify that the call doesn't
         // crash the host machine, we don't verify that any value is returned.
-        let (rpc_server, _) = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
+        let rpc_server = test_rpc_server(Network::Alpha, WalletSecret::new_random(), 2).await;
         let _current_server_temperature = rpc_server.cpu_temp(context::current()).await;
     }
 
@@ -1514,7 +1509,7 @@ mod rpc_server_tests {
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
         let network = Network::Regtest;
-        let (mut rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let mut rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
         let mut rng = rand::thread_rng();
 
@@ -1631,7 +1626,7 @@ mod rpc_server_tests {
 
             // bob's node
             let (pay_to_bob_outputs, bob_rpc_server) = {
-                let (rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
+                let rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
                 let receiving_address_generation = rpc_server
                     .clone()
@@ -1652,8 +1647,7 @@ mod rpc_server_tests {
 
             // alice's node
             let (blocks, alice_utxo_transfer_encrypted_to_bob_list, bob_amount) = {
-                let (mut rpc_server, _) =
-                    test_rpc_server(network, WalletSecret::new_random(), 2).await;
+                let mut rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
                 let mut blocks = vec![];
 
@@ -1752,10 +1746,9 @@ mod rpc_server_tests {
 
         pub async fn claim_utxo_owned(claim_after_confirmed: bool) -> Result<()> {
             let network = Network::Regtest;
-            let (mut alice_rpc_server, _) =
+            let mut alice_rpc_server =
                 test_rpc_server(network, WalletSecret::new_random(), 2).await;
-            let (mut bob_rpc_server, _) =
-                test_rpc_server(network, WalletSecret::new_random(), 2).await;
+            let mut bob_rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2).await;
 
             let block1 = mine_block_to_wallet(&mut bob_rpc_server.state).await?;
             alice_rpc_server.state.store_block(block1).await?;
