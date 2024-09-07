@@ -737,16 +737,17 @@ impl RPC for NeptuneRPCServer {
                 announced_utxo.addition_record(),
                 BlockSelector::Genesis,
             )
-            .await {
+            .await
+        {
             Some(b) => {
                 // perf: potentially lengthy.  so we do it before obtaining write-lock.
-                let digests_and_msa = state.get_block_digests_and_prev_msa(b.hash()).await.map_err(|e| e.to_string())?;
-                assert_eq!(
-                    digests_and_msa.iter().next_back().unwrap().0,
-                    b.hash()
-                );
+                let digests_and_msa = state
+                    .get_block_digests_and_prev_msa(b.hash())
+                    .await
+                    .map_err(|e| e.to_string())?;
+                assert_eq!(digests_and_msa.iter().next_back().unwrap().0, b.hash());
                 Some((b, digests_and_msa))
-            },
+            }
             None => None,
         };
 
@@ -911,7 +912,6 @@ mod rpc_server_tests {
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::SocketAddr;
-    use std::ops::Deref;
 
     use anyhow::Result;
     use clap::ValueEnum;
@@ -928,6 +928,7 @@ mod rpc_server_tests {
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::WalletSecret;
     use crate::rpc_server::NeptuneRPCServer;
+    use crate::tests::shared::mine_block_to_wallet;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::Block;
     use crate::RPC_CHANNEL_CAPACITY;
@@ -957,33 +958,6 @@ mod rpc_server_tests {
             },
             global_state_lock,
         )
-    }
-
-    async fn mine_block_to_wallet(global_state_lock: &mut GlobalStateLock) -> Result<Block> {
-        let tip_block = global_state_lock
-            .lock_guard()
-            .await
-            .chain
-            .archival_state()
-            .get_tip()
-            .await;
-
-        let timestamp = Timestamp::now();
-        let (transaction, coinbase_expected_utxo) = crate::mine_loop::create_block_transaction(
-            &tip_block,
-            global_state_lock.lock_guard().await.deref(),
-            timestamp,
-        );
-
-        let (header, body) =
-            crate::mine_loop::make_block_template(&tip_block, transaction, timestamp, None);
-        let block = Block::new(header, body, Block::mk_std_block_type(None));
-
-        global_state_lock
-            .store_coinbase_block(block.clone(), coinbase_expected_utxo)
-            .await?;
-
-        Ok(block)
     }
 
     #[tokio::test]
@@ -1541,8 +1515,7 @@ mod rpc_server_tests {
     async fn send_to_many_test() -> Result<()> {
         // --- Init.  Basics ---
         let network = Network::Regtest;
-        let (mut rpc_server, _) =
-            test_rpc_server(network, WalletSecret::new_random(), 2).await;
+        let (mut rpc_server, _) = test_rpc_server(network, WalletSecret::new_random(), 2).await;
         let ctx = context::current();
         let mut rng = rand::thread_rng();
 
@@ -1557,8 +1530,10 @@ mod rpc_server_tests {
 
         // --- Setup. generate an output that our wallet can claim. ---
         let output2 = {
-            let address = rpc_server.clone()
-                .next_receiving_address(ctx, KeyType::Generation).await;
+            let address = rpc_server
+                .clone()
+                .next_receiving_address(ctx, KeyType::Generation)
+                .await;
             (address, NeptuneCoins::new(25))
         };
 
@@ -1578,7 +1553,8 @@ mod rpc_server_tests {
             .map_err(|e| anyhow::anyhow!(e))?;
 
         // --- Store: store num expected utxo before spend ---
-        let num_expected_utxo = rpc_server.state
+        let num_expected_utxo = rpc_server
+            .state
             .lock_guard()
             .await
             .wallet_state
@@ -1599,7 +1575,8 @@ mod rpc_server_tests {
         // --- Test: verify expected_utxos.len() has increased by 2.
         //           (one off-chain utxo + one change utxo)
         assert_eq!(
-            rpc_server.state
+            rpc_server
+                .state
                 .lock_guard()
                 .await
                 .wallet_state
@@ -1847,7 +1824,8 @@ mod rpc_server_tests {
                     NeptuneCoins::new(2),   // claimed via symmetric addr
                     NeptuneCoins::new(96)   // change (symmetric addr)
                 ],
-                bob_rpc_server.state
+                bob_rpc_server
+                    .state
                     .lock_guard()
                     .await
                     .wallet_state

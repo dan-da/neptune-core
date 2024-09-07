@@ -1320,7 +1320,10 @@ impl GlobalState {
         &self.cli
     }
 
-    pub(crate) async fn get_block_digests_and_prev_msa(&self, target_digest: Digest) -> Result<Vec<(Digest, MutatorSetAccumulator)>> {
+    pub(crate) async fn get_block_digests_and_prev_msa(
+        &self,
+        target_digest: Digest,
+    ) -> Result<Vec<(Digest, MutatorSetAccumulator)>> {
         let mut block_digests = vec![(
             self.chain.light_state().hash(),
             self.chain
