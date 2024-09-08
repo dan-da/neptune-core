@@ -239,8 +239,16 @@ impl WalletState {
         wallet_state
     }
 
-    // note: does not verify we do not have any dups.
+    /// panics if an [ExpectedUtxo] already exists with the same [Utxo].
+    ///
+    /// perf: the dup check is presently o(n).  It can be made o(1).
+    ///       see find_expected_utxo()
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
+
+        if self.find_expected_utxo(&expected_utxo.utxo).await.is_some() {
+            panic!("ExpectedUtxo already exists in wallet");
+        }
+
         self.wallet_db
             .expected_utxos_mut()
             .push(expected_utxo)
@@ -331,30 +339,33 @@ impl WalletState {
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
 
-    /// find the `ExpectedUtxo` that matches `utxo` and `sender_randomness`, if any
+    /// find the `ExpectedUtxo` that matches `utxo`, if any
+    ///
+    /// note that [WalletState::add_expected_utxo()] prevents duplicate
+    /// [ExpectedUtxo] for a given [Utxo].
     ///
     /// perf: this fn is o(n) with the number of ExpectedUtxo stored.  Iteration
     ///       is performed from newest to oldest based on expectation that we
     ///       will most often be working with recent ExpectedUtxos.
+    ///
+    ///       This fn could be made o(1) if we were to store ExpectedUtxo
+    ///       keyed by hash(Utxo).  This would require a separate levelDb
+    ///       file for ExpectedUtxo or using a DB such as redb that supports
+    ///       transactional namespaces.
     pub async fn find_expected_utxo(
         &self,
         utxo: &Utxo,
-        sender_randomness: Digest,
     ) -> Option<ExpectedUtxo> {
         let len = self.wallet_db.expected_utxos().len().await;
         let stream = self
             .wallet_db
             .expected_utxos()
-            .stream_many_values((0..len).rev())
-            .await;
+            .stream_many_values((0..len).rev()).await
+            .filter(|eu| futures::future::ready(eu.utxo == *utxo));
+
         pin_mut!(stream); // needed for iteration
 
-        while let Some(eu) = stream.next().await {
-            if eu.utxo == *utxo && eu.sender_randomness == sender_randomness {
-                return Some(eu);
-            }
-        }
-        None
+        stream.next().await
     }
 
     /// find the `MonitoredUtxo` that matches `utxo`, if any

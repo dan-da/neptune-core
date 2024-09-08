@@ -751,27 +751,48 @@ impl RPC for NeptuneRPCServer {
             None => None,
         };
 
+        enum ExpectedUtxoMatch {
+            Match,
+            BadMatch,  // utxo matches, but not sender_randomness
+            NoMatch,
+        }
+
         // check if wallet is already expecting this utxo.
-        let wallet_has_expected_utxo = state
+        let expected_utxo_match = match state
             .wallet_state
-            .find_expected_utxo(&announced_utxo.utxo, announced_utxo.sender_randomness)
-            .await
-            .is_some();
+            .find_expected_utxo(&announced_utxo.utxo)
+            .await {
+                Some(eu) if eu.sender_randomness == announced_utxo.sender_randomness => ExpectedUtxoMatch::Match,
+                Some(_) => ExpectedUtxoMatch::BadMatch,
+                None => ExpectedUtxoMatch::NoMatch,
+            };
 
         // release global state read lock
         drop(state);
 
-        // return early if wallet already has the expected_utxo
-        // and the utxo is not yet confirmed in any block.
-        if wallet_has_expected_utxo && maybe_block_and_digests.is_none() {
-            return Ok(());
+        // return early if the utxo is not yet confirmed in any block and:
+        //   a) wallet already has the expected_utxo.  - or -
+        //   b) wallet has an expected utxo but with different sender_randomness. (unexpected error)
+        if maybe_block_and_digests.is_none() {
+            match expected_utxo_match {
+                ExpectedUtxoMatch::Match => return Ok(()),
+                ExpectedUtxoMatch::BadMatch => {
+                    tracing::warn!("Unexpected condition.  wallet already has a matching ExpectedUtxo with different sender_randomness for utxo: {:?}", announced_utxo.utxo);
+                    return Err("wallet already has a matching ExpectedUtxo with different sender_randomness. Try to claim again after the transaction is confirmed in a block.".to_string());
+                },
+                _ => {},
+            }
         }
 
         // acquire global state write-lock
         let mut gsm = self.state.lock_guard_mut().await;
 
-        // add expected_utxo to wallet if not found.
-        if !wallet_has_expected_utxo {
+        // add expected_utxo to wallet if not existing.
+        //   + we do NOT add it for the BadMatch case because it would fail.
+        //   + we do add it even if block is already confirmed, although not
+        //     required for claiming. This is just so that we have it in the
+        //     wallet for consistency and backup.
+        if matches!(expected_utxo_match, ExpectedUtxoMatch::NoMatch) {
             gsm.add_expected_utxos_to_wallet(
                 [(announced_utxo.clone(), UtxoNotifier::Claim).into()],
             )
