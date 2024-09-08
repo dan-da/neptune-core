@@ -45,7 +45,7 @@ use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::expected_utxo::UtxoTransferEncrypted;
+use crate::models::state::wallet::utxo_transfer::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
 use crate::models::state::TxOutputMeta;

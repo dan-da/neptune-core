@@ -5,6 +5,7 @@ pub mod monitored_utxo;
 pub mod rusty_wallet_database;
 pub mod wallet_state;
 pub mod wallet_status;
+pub mod utxo_transfer;
 
 use std::fs;
 use std::path::Path;
