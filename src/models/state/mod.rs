@@ -1320,41 +1320,41 @@ impl GlobalState {
         &self.cli
     }
 
-    pub(crate) async fn get_block_digests_and_prev_msa(
-        &self,
-        target_digest: Digest,
-    ) -> Result<Vec<(Digest, MutatorSetAccumulator)>> {
-        let mut block_digests = vec![(
-            self.chain.light_state().hash(),
-            self.chain
-                .light_state()
-                .body()
-                .mutator_set_accumulator
-                .clone(),
-        )];
-        let mut block_digest = self.chain.light_state().hash();
-        let mut prev_block_digest = self.chain.light_state().header().prev_block_digest;
-        while let Some(prev_block) = self
-            .chain
-            .archival_state()
-            .get_block(prev_block_digest)
-            .await?
-        {
-            block_digests.push((
-                block_digest,
-                prev_block.body().mutator_set_accumulator.clone(),
-            ));
+    //     pub(crate) async fn get_block_digests_and_prev_msa(
+    //         &self,
+    //         target_digest: Digest,
+    //     ) -> Result<Vec<(Digest, MutatorSetAccumulator)>> {
+    //         let mut block_digests = vec![(
+    //             self.chain.light_state().hash(),
+    //             self.chain
+    //                 .light_state()
+    //                 .body()
+    //                 .mutator_set_accumulator
+    //                 .clone(),
+    //         )];
+    //         let mut block_digest = self.chain.light_state().hash();
+    //         let mut prev_block_digest = self.chain.light_state().header().prev_block_digest;
+    //         while let Some(prev_block) = self
+    //             .chain
+    //             .archival_state()
+    //             .get_block(prev_block_digest)
+    //             .await?
+    //         {
+    //             block_digests.push((
+    //                 block_digest,
+    //                 prev_block.body().mutator_set_accumulator.clone(),
+    //             ));
 
-            if block_digest == target_digest {
-                break;
-            }
+    //             if block_digest == target_digest {
+    //                 break;
+    //             }
 
-            block_digest = prev_block_digest;
-            prev_block_digest = prev_block.header().prev_block_digest;
-        }
+    //             block_digest = prev_block_digest;
+    //             prev_block_digest = prev_block.header().prev_block_digest;
+    //         }
 
-        Ok(block_digests)
-    }
+    //         Ok(block_digests)
+    //     }
 }
 
 /// This provides some additional metadata about `TxOutput` that are generated

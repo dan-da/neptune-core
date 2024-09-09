@@ -8,7 +8,6 @@ use get_size::GetSize;
 use serde::{Deserialize, Serialize};
 use twenty_first::{math::tip5::Digest, util_types::algebraic_hasher::AlgebraicHasher};
 
-
 /// represents utxo and secrets necessary for recipient to claim it.
 ///
 /// [ExpectedUtxo] is intended for offchain temporary storage of utxos that a

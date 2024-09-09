@@ -2,6 +2,7 @@ use std::ops::DerefMut;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use futures::Stream;
 use memmap2::MmapOptions;
 use num_traits::Zero;
 use tokio::io::AsyncSeekExt;
@@ -378,6 +379,40 @@ impl ArchivalState {
             Ok(block)
         })
         .await?
+    }
+
+    pub async fn canonical_block_stream_asc(
+        &self,
+        oldest: BlockSelector,
+        newest: BlockSelector,
+    ) -> impl Stream<Item = Box<Block>> + '_ {
+        let mut iter_height = oldest.as_height(self).await.unwrap();
+        let newest_height = newest.as_height(self).await.unwrap();
+
+        async_stream::stream! {
+            while iter_height <= newest_height {
+                let block = self.get_block(BlockSelector::Height(iter_height).as_digest(self).await.unwrap()).await.unwrap().unwrap();
+                iter_height += 1.into();
+                yield Box::new(block);
+            }
+        }
+    }
+
+    pub async fn canonical_block_stream_desc(
+        &self,
+        oldest: BlockSelector,
+        newest: BlockSelector,
+    ) -> impl Stream<Item = Box<Block>> + '_ {
+        let oldest_digest = oldest.as_digest(self).await.unwrap();
+        let mut iter_digest = newest.as_digest(self).await.unwrap();
+
+        async_stream::stream! {
+            while iter_digest != oldest_digest && iter_digest != Block::genesis_prev_block_digest() {
+                let block = self.get_block(iter_digest).await.unwrap().unwrap();
+                iter_digest = block.header().prev_block_digest;
+                yield Box::new(block);
+            }
+        }
     }
 
     pub async fn find_canonical_block_with_output(

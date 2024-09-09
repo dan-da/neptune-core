@@ -729,8 +729,15 @@ impl RPC for NeptuneRPCServer {
             receiver_preimage: spending_key.privacy_preimage(),
         };
 
+        // check if wallet is already expecting this utxo.
+        let has_expected_utxo = state
+            .wallet_state
+            .find_expected_utxo(&announced_utxo.utxo, announced_utxo.sender_randomness)
+            .await
+            .is_some();
+
         // look for a canonical block that has this utxo as an output
-        let maybe_block_and_digests = match state
+        let maybe_prepared_claim = match state
             .chain
             .archival_state()
             .find_canonical_block_with_output(
@@ -740,76 +747,64 @@ impl RPC for NeptuneRPCServer {
             .await
         {
             Some(b) => {
-                // perf: potentially lengthy.  so we do it before obtaining write-lock.
-                let digests_and_msa = state
-                    .get_block_digests_and_prev_msa(b.hash())
+                // get a stream for retrieving blocks from parent(b) .. tip.
+                // perf: fast. this only returns the stream, it doesn't iterate it.
+                let block_stream = state
+                    .chain
+                    .archival_state()
+                    .canonical_block_stream_asc(
+                        BlockSelector::Digest(b.header().prev_block_digest),
+                        BlockSelector::Tip,
+                    )
+                    .await;
+
+                // prepare a claim.
+                // perf: this is potentially lengthy as it iterates over all blocks
+                //       in the stream and also generates utxo membership proofs for each.
+                let prepared_claim = state
+                    .wallet_state
+                    .prepare_claim_utxo_in_block(announced_utxo.clone(), block_stream)
                     .await
                     .map_err(|e| e.to_string())?;
-                assert_eq!(digests_and_msa.iter().next_back().unwrap().0, b.hash());
-                Some((b, digests_and_msa))
+
+                Some(prepared_claim)
             }
             None => None,
         };
 
-        enum ExpectedUtxoMatch {
-            Match,
-            BadMatch,  // utxo matches, but not sender_randomness
-            NoMatch,
-        }
-
-        // check if wallet is already expecting this utxo.
-        let expected_utxo_match = match state
-            .wallet_state
-            .find_expected_utxo(&announced_utxo.utxo)
-            .await {
-                Some(eu) if eu.sender_randomness == announced_utxo.sender_randomness => ExpectedUtxoMatch::Match,
-                Some(_) => ExpectedUtxoMatch::BadMatch,
-                None => ExpectedUtxoMatch::NoMatch,
-            };
-
         // release global state read lock
         drop(state);
 
-        // return early if the utxo is not yet confirmed in any block and:
-        //   a) wallet already has the expected_utxo.  - or -
-        //   b) wallet has an expected utxo but with different sender_randomness. (unexpected error)
-        if maybe_block_and_digests.is_none() {
-            match expected_utxo_match {
-                ExpectedUtxoMatch::Match => return Ok(()),
-                ExpectedUtxoMatch::BadMatch => {
-                    tracing::warn!("Unexpected condition.  wallet already has a matching ExpectedUtxo with different sender_randomness for utxo: {:?}", announced_utxo.utxo);
-                    return Err("wallet already has a matching ExpectedUtxo with different sender_randomness. Try to claim again after the transaction is confirmed in a block.".to_string());
-                },
-                _ => {},
-            }
-        }
+        // we only acquire write-lock if the utxo is already confirmed
+        // in a block or the wallet does not have the expected_utxo
+        if maybe_prepared_claim.is_some() || !has_expected_utxo {
+            // acquire global state write-lock
+            let mut gsm = self.state.lock_guard_mut().await;
 
-        // acquire global state write-lock
-        let mut gsm = self.state.lock_guard_mut().await;
-
-        // add expected_utxo to wallet if not existing.
-        //   + we do NOT add it for the BadMatch case because it would fail.
-        //   + we do add it even if block is already confirmed, although not
-        //     required for claiming. This is just so that we have it in the
-        //     wallet for consistency and backup.
-        if matches!(expected_utxo_match, ExpectedUtxoMatch::NoMatch) {
-            gsm.add_expected_utxos_to_wallet(
-                [(announced_utxo.clone(), UtxoNotifier::Claim).into()],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        };
-
-        // claim utxo if utxo was already confirmed in a block.
-        if let Some((block, digests_and_msa)) = maybe_block_and_digests {
-            gsm.wallet_state
-                .claim_utxo_in_block(announced_utxo, &block, digests_and_msa.into_iter().rev())
+            // add expected_utxo to wallet if not existing.
+            //
+            // note: we add it even if block is already confirmed, although not
+            //       required for claiming. This is just so that we have it in the
+            //       wallet for consistency and backup.
+            if !has_expected_utxo {
+                gsm.add_expected_utxos_to_wallet([
+                    (announced_utxo.clone(), UtxoNotifier::Claim).into()
+                ])
                 .await
                 .map_err(|e| e.to_string())?;
-        }
+            };
 
-        // ensure we write new wallet state out to disk.
-        gsm.persist_wallet().await.expect("flushed wallet");
+            // write prepared claim if utxo was already confirmed in a block.
+            if let Some(prepared_claim) = maybe_prepared_claim {
+                gsm.wallet_state
+                    .finalize_claim_utxo_in_block(prepared_claim)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
 
         Ok(())
     }
@@ -1876,6 +1871,18 @@ mod rpc_server_tests {
                 bob_rpc_server.synced_balance(context::current()).await,
             );
 
+            // todo: test that claim_utxo() correctly handles case when the
+            //       claimed utxo has already been spent.
+            //
+            //       in normal wallet usage this would not happen.  However it
+            //       is possible if bob were to claim a utxo with wallet A,
+            //       spend the utxo and then restore wallet B from A's seed.
+            //       When bob performs claim_utxo() in wallet B the balance
+            //       should reflect that the utxo was already spent.
+            //
+            //       this is a bit tricky to test, as it requires using a
+            //       different data directory for wallet B and test infrastructure
+            //       isn't setup for that.
             Ok(())
         }
     }

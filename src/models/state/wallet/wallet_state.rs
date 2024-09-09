@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::sync::Arc;
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
+use futures::Stream;
 use itertools::Itertools;
 use num_traits::Zero;
 use serde_derive::Deserialize;
@@ -244,8 +247,11 @@ impl WalletState {
     /// perf: the dup check is presently o(n).  It can be made o(1).
     ///       see find_expected_utxo()
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
-
-        if self.find_expected_utxo(&expected_utxo.utxo).await.is_some() {
+        if self
+            .find_expected_utxo(&expected_utxo.utxo, expected_utxo.sender_randomness)
+            .await
+            .is_some()
+        {
             panic!("ExpectedUtxo already exists in wallet");
         }
 
@@ -342,7 +348,10 @@ impl WalletState {
     /// find the `ExpectedUtxo` that matches `utxo`, if any
     ///
     /// note that [WalletState::add_expected_utxo()] prevents duplicate
-    /// [ExpectedUtxo] for a given [Utxo].
+    /// [ExpectedUtxo] for a given [(Utxo, sender_randomness)].
+    ///
+    /// note that Utxo alone is not a unique identifier, as payments of
+    /// same amount to same key will create dup Utxos. (Eg coinbase)
     ///
     /// perf: this fn is o(n) with the number of ExpectedUtxo stored.  Iteration
     ///       is performed from newest to oldest based on expectation that we
@@ -355,13 +364,19 @@ impl WalletState {
     pub async fn find_expected_utxo(
         &self,
         utxo: &Utxo,
+        sender_randomness: Digest,
     ) -> Option<ExpectedUtxo> {
         let len = self.wallet_db.expected_utxos().len().await;
         let stream = self
             .wallet_db
             .expected_utxos()
-            .stream_many_values((0..len).rev()).await
-            .filter(|eu| futures::future::ready(eu.utxo == *utxo));
+            .stream_many_values((0..len).rev())
+            .await
+            .filter(|eu| {
+                futures::future::ready(
+                    eu.utxo == *utxo && eu.sender_randomness == sender_randomness,
+                )
+            });
 
         pin_mut!(stream); // needed for iteration
 
@@ -495,16 +510,6 @@ impl WalletState {
             KeyType::Symmetric => self.get_known_symmetric_keys(),
         }
     }
-
-    /// finds spending key that corresponds to a given address, if any
-    // pub fn find_known_spending_key_for_address(
-    //     &self,
-    //     receiving_address: ReceivingAddress,
-    // ) -> Option<SpendingKey> {
-    //     self.get_known_spending_keys(KeyType::from(&receiving_address))
-    //         .iter()
-    //         .find(|k| k.recipient_identifier() == receiving_address.recipient_identifier())
-    // }
 
     // TODO: These spending keys should probably be derived dynamically from some
     // state in the wallet. And we should allow for other types than just generation
@@ -924,17 +929,67 @@ impl WalletState {
         Ok(())
     }
 
-    /// Update wallet state with new block. Assume the given block
-    /// is valid and that the wallet state is not up to date yet.
-    pub async fn claim_utxo_in_block(
-        &mut self,
+    /// prepares utxo claim data but does not modify state.
+    ///
+    /// enables claiming Utxo *after* parent Tx is confirmed in a block
+    ///
+    /// For claiming *before* the Tx is confirmed, call add_expected_utxo()
+    /// instead.
+    ///
+    /// Claiming can take place at any blockheight after the Tx is confirmed
+    /// including the confirmation block itself.
+    ///
+    /// important: The caller must call finalize_claim_utxo_in_block() with
+    ///            the output of this method in order to modify wallet state.
+    ///
+    /// Params:
+    ///  + announced_utxo: details of utxo we are claiming.
+    ///  + `blocks_until_tip` contains a list of canonical blocks where
+    ///       a) the first block is the block before the Tx was confirmed.
+    ///       b) the last block is the tip.
+    ///
+    /// perf:
+    ///
+    /// `blocks_until_tip` is an async Stream which makes it compatible with
+    /// ArchivalState::canonical_block_stream_asc() without need to
+    /// collect/store blocks in RAM (eg a Vec).
+    ///
+    /// claim_utxo_for_block has been split into a prepare method (&self) and a
+    /// finalize (&mut self) method.
+    ///
+    /// This prepare method is potentially quite lengthy as it must load and
+    /// iterate over an unknown number of blocks and it generates a utxo
+    /// membership proof for each block.
+    ///
+    /// As such it must not take &mut self, which would require a global
+    /// write-lock.
+    pub(crate) async fn prepare_claim_utxo_in_block(
+        &self,
         announced_utxo: AnnouncedUtxo,
-        block: &Block,
-        block_digests_until_tip: impl ExactSizeIterator<Item = (Digest, MutatorSetAccumulator)>,
-        // parent_block: &Block,
-    ) -> Result<()> {
-        // let mutator_set_accumulator = &parent_block.body().mutator_set_accumulator;
-        // let mutator_set_accumulator = &block.body().mutator_set_accumulator;
+        blocks_until_tip: impl Stream<Item = Box<Block>>,
+    ) -> Result<(MonitoredUtxo, IncomingUtxoRecoveryData)> {
+        pin_mut!(blocks_until_tip);
+
+        // The utxo membership proof is always generated with the MutatorSetAccumulator
+        // from the *previous* block.  So we must have both prev_block and block
+        // when iterating.
+        //
+        // note: we use Arc on the block to avoid cloning the msa (or worse, the
+        //       block) when calling spawn_blocking.  also here and in the loop.
+        let mut loop_prev_block = blocks_until_tip
+            .next()
+            .await
+            .map(Arc::new)
+            .ok_or_else(|| anyhow!("missing parent of confirmation block"))?;
+
+        // This is the confirmation block.  We keep a reference to it for use
+        // outside the proving loop.
+        let confirmation_block = Arc::new(
+            blocks_until_tip
+                .next()
+                .await
+                .ok_or_else(|| anyhow!("missing confirmation block"))?,
+        );
 
         // If output UTXO belongs to us, add it to the list of monitored UTXOs and
         // add its membership proof to the list of managed membership proofs.
@@ -946,31 +1001,71 @@ impl WalletState {
         } = announced_utxo;
         info!(
             "claim_utxo_in_block: Received UTXO in block {}, height {}: value = {}",
-            block.hash(),
-            block.kernel.header.height,
+            confirmation_block.hash(),
+            confirmation_block.kernel.header.height,
             utxo.get_native_currency_amount(),
         );
         let utxo_digest = Hash::hash(&utxo);
 
-        assert!(block_digests_until_tip.len() > 0);
-
         let mut mutxo = MonitoredUtxo::new(utxo.clone(), self.number_of_mps_per_utxo);
 
-        for (block_digest, prev_block_mutator_set_accumulator) in block_digests_until_tip {
-            // todo: spawn-blocking around prove()
-            let membership_proof = prev_block_mutator_set_accumulator.prove(
-                utxo_digest,
-                sender_randomness,
-                receiver_preimage,
-            );
-            mutxo.add_membership_proof_for_tip(block_digest, membership_proof);
+        // we use chain() to create a stream where the first element is the
+        // confirmation block.  This is needed because we already advanced the
+        // iterator above.
+        //
+        // note: block.clone() just bumps rc refcount.
+        let mut block_stream = futures::stream::iter([confirmation_block.clone()].into_iter())
+            .chain(blocks_until_tip.map(Arc::new));
+
+        // loop through blocks from confirmation block until tip and
+        //  1. generate membership proofs
+        //  2. mark mutxo as spent if that has somehow happened.
+        while let Some(loop_block) = block_stream.next().await {
+            let loop_block_ref = loop_prev_block.clone(); // clone bumps arc refcount.
+
+            // 1. generate membership proof
+            // we use spawn-blocking around prove so it does not block this task
+            let membership_proof = tokio::task::spawn_blocking(move || {
+                loop_block_ref.body().mutator_set_accumulator.prove(
+                    utxo_digest,
+                    sender_randomness,
+                    receiver_preimage,
+                )
+            })
+            .await?;
+
+            // 2. check if mutxo has been spent (if not already spent)
+            if mutxo.spent_in_block.is_none() {
+                let abs_i = membership_proof.compute_indices(Hash::hash(&mutxo.utxo));
+
+                // if any input absolute-index matches ours, then this utxo has been spent.
+                if loop_block
+                    .body()
+                    .transaction
+                    .kernel
+                    .inputs
+                    .iter()
+                    .any(|rr| rr.absolute_indices == abs_i)
+                {
+                    mutxo.spent_in_block = Some((
+                        loop_block.hash(),
+                        loop_block.kernel.header.timestamp,
+                        loop_block.kernel.header.height,
+                    ));
+                }
+            }
+
+            // 3. add membership proof
+            mutxo.add_membership_proof_for_tip(loop_block.hash(), membership_proof);
+
+            loop_prev_block = loop_block;
         }
 
         // the 0-index entry corresponds to the input block.
         assert!(!mutxo.blockhash_to_membership_proof.is_empty());
         assert_eq!(
             mutxo.get_oldest_membership_proof_entry().unwrap().0,
-            block.hash()
+            confirmation_block.hash()
         );
         let aocl_index = mutxo.blockhash_to_membership_proof[0]
             .1
@@ -979,12 +1074,10 @@ impl WalletState {
 
         // Add the new UTXO to the list of monitored UTXOs
         mutxo.confirmed_in_block = Some((
-            block.hash(),
-            block.kernel.header.timestamp,
-            block.kernel.header.height,
+            confirmation_block.hash(),
+            confirmation_block.kernel.header.timestamp,
+            confirmation_block.kernel.header.height,
         ));
-
-        self.wallet_db.monitored_utxos_mut().push(mutxo).await;
 
         // Add the data required to restore the UTXOs membership proof from public
         // data to the secret's file.
@@ -995,10 +1088,30 @@ impl WalletState {
             aocl_index,
         };
 
-        // write to disk.
-        self.store_utxo_ms_recovery_data(recovery_data).await?;
+        Ok((mutxo, recovery_data))
+    }
 
-        Ok(())
+    /// writes prepared utxo claim data to disk
+    ///
+    /// Informs wallet of a Utxo *after* parent Tx is confirmed in a block
+    ///
+    /// The `claim_data` must first be generated with
+    /// [prepare_claim_utxo_in_block()].
+    ///
+    /// no validation. assumes input data is valid/correct.
+    ///
+    /// The caller should persist wallet DB to disk after this returns.
+    pub(crate) async fn finalize_claim_utxo_in_block(
+        &mut self,
+        claim_data: (MonitoredUtxo, IncomingUtxoRecoveryData),
+    ) -> Result<()> {
+        let (mutxo, recovery_data) = claim_data;
+
+        // add monitored_utxo
+        self.wallet_db.monitored_utxos_mut().push(mutxo).await;
+
+        // write to disk.
+        self.store_utxo_ms_recovery_data(recovery_data).await
     }
 
     pub async fn is_synced_to(&self, tip_hash: Digest) -> bool {

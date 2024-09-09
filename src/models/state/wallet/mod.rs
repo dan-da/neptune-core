@@ -3,9 +3,9 @@ pub mod coin_with_possible_timelock;
 pub mod expected_utxo;
 pub mod monitored_utxo;
 pub mod rusty_wallet_database;
+pub mod utxo_transfer;
 pub mod wallet_state;
 pub mod wallet_status;
-pub mod utxo_transfer;
 
 use std::fs;
 use std::path::Path;

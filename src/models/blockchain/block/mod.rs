@@ -314,7 +314,7 @@ impl Block {
         let header: BlockHeader = BlockHeader {
             version: BFieldElement::zero(),
             height: BFieldElement::zero().into(),
-            prev_block_digest: Default::default(),
+            prev_block_digest: Self::genesis_prev_block_digest(),
             timestamp: network.launch_date(),
             // to be set to something difficult to predict ahead of time
             nonce: [
@@ -703,6 +703,10 @@ impl Block {
         } else {
             old_block.kernel.header.difficulty - adjustment_u32s
         }
+    }
+
+    pub fn genesis_prev_block_digest() -> Digest {
+        Default::default()
     }
 }
 
