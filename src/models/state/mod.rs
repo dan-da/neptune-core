@@ -10,6 +10,7 @@ use std::cmp::max;
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use blockchain_state::BlockchainState;
@@ -24,9 +25,11 @@ use tracing::info;
 use tracing::warn;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
+use wallet::address::KeyType;
 use wallet::address::ReceivingAddress;
 use wallet::address::SpendingKey;
 use wallet::expected_utxo::UtxoNotifier;
+use wallet::utxo_transfer::UtxoTransferEncrypted;
 use wallet::wallet_state::WalletState;
 use wallet::wallet_status::WalletStatus;
 
@@ -35,6 +38,8 @@ use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
 use crate::locks::tokio as sync_tokio;
+use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::peer::HandshakeData;
@@ -215,6 +220,217 @@ impl GlobalStateLock {
     pub async fn set_cli(&mut self, cli: cli_args::Args) {
         self.lock_guard_mut().await.cli = cli.clone();
         self.cli = cli;
+    }
+
+    /// Generate tx outputs, for use by send()
+    ///
+    /// todo: doc params and return.
+    pub async fn generate_tx_params(
+        &mut self,
+        outputs: Vec<TxAddressOutput>,
+        fee: NeptuneCoins,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
+    ) -> Result<(TxParams, Vec<TxOutputMeta>)> {
+        // obtain next unused symmetric key for change utxo
+        let change_key = {
+            let mut s = self.lock_guard_mut().await;
+            let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
+
+            // write state to disk. create_transaction() may be slow.
+            s.persist_wallet().await.expect("flushed");
+            key
+        };
+
+        self.lock_guard()
+            .await
+            .generate_tx_params(
+                outputs,
+                change_key,
+                fee,
+                owned_utxo_notify_method,
+                unowned_utxo_notify_method,
+                Timestamp::now(),
+            )
+            .await
+    }
+
+    /// Send coins to 1 or more recipients
+    ///
+    /// `tx_params` contains inputs and outputs, typically created
+    /// by [Self::generate_tx_params].
+    ///
+    /// returns: a [Transaction] upon success, else [None].
+    pub async fn send(&mut self, tx_params: TxParams) -> Result<Transaction> {
+        let tx_output_list = tx_params.tx_output_list().clone();
+
+        // Create the transaction
+        //
+        // Note that create_transaction() does not modify any state and only
+        // requires acquiring a read-lock which does not block other tasks.
+        // This is important because internally it calls prove() which is a very
+        // lengthy operation.
+        //
+        // note: A change output will be added to tx_outputs if needed.
+        let transaction = self
+            .lock_guard()
+            .await
+            .create_transaction(tx_params)
+            .await?;
+
+        // acquire write-lock
+        let mut gsm = self.lock_guard_mut().await;
+
+        // insert transaction into mempool
+        if gsm.mempool.insert(&transaction).is_some() {
+            bail!("the transaction attempts to spend inputs already spent by another transaction in the mempool with a higher fee. try increasing the fee.");
+        }
+
+        // if the tx created offchain expected_utxos we must inform wallet.
+        if tx_output_list.has_offchain() {
+            // Inform wallet of any expected incoming utxos.
+            // note that this (briefly) mutates self.
+            gsm.add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
+                .await?;
+
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
+
+        Ok(transaction)
+    }
+
+    /// claim a utxo
+    ///
+    /// The input string must be a valid bech32m encoded `UtxoTransferEncrypted`
+    /// for the current network and the wallet must have the corresponding
+    /// `SpendingKey` for decryption.
+    ///
+    /// upon success, a new `ExpectedUtxo` will be added to the local wallet
+    /// state.
+    ///
+    /// if the utxo has already been claimed, an error will result.
+    pub async fn claim_utxo(&mut self, utxo_transfer_encrypted_str: String) -> Result<()> {
+        // deserialize UtxoTransferEncrypted from bech32m string.
+        let utxo_transfer_encrypted =
+            UtxoTransferEncrypted::from_bech32m(&utxo_transfer_encrypted_str, self.cli().network)?;
+
+        // acquire global state read lock
+        let state = self.lock_guard().await;
+
+        // find known spending key by receiver_identifier
+        let spending_key = state
+            .wallet_state
+            .find_known_spending_key_for_receiver_identifier(
+                utxo_transfer_encrypted.receiver_identifier,
+            )
+            .ok_or(anyhow!("utxo does not match any known wallet key"))?;
+
+        // decrypt utxo_transfer_encrypted into UtxoTransfer
+        let utxo_transfer = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
+
+        tracing::debug!("claim-utxo: decrypted {:#?}", utxo_transfer);
+
+        // search for matching monitored utxo and return early if found.
+        if state
+            .wallet_state
+            .find_monitored_utxo(&utxo_transfer.utxo)
+            .await
+            .is_some()
+        {
+            info!("found monitored utxo.  returning early.");
+            return Ok(());
+        }
+
+        // construct an AnnouncedUtxo
+        let announced_utxo = AnnouncedUtxo {
+            utxo: utxo_transfer.utxo,
+            sender_randomness: utxo_transfer.sender_randomness,
+            receiver_preimage: spending_key.privacy_preimage(),
+        };
+
+        // check if wallet is already expecting this utxo.
+        let has_expected_utxo = state
+            .wallet_state
+            .find_expected_utxo(&announced_utxo.utxo, announced_utxo.sender_randomness)
+            .await
+            .is_some();
+
+        // look for a canonical block that has this utxo as an output
+        let maybe_prepared_claim = match state
+            .chain
+            .archival_state()
+            .find_canonical_block_with_output(
+                announced_utxo.addition_record(),
+                BlockSelector::Genesis,
+            )
+            .await
+        {
+            Some(b) => {
+                // get a stream for retrieving blocks from parent(b) .. tip.
+                // perf: fast. this only returns the stream, it doesn't iterate it.
+                let block_stream = state
+                    .chain
+                    .archival_state()
+                    .canonical_block_stream_asc(
+                        BlockSelector::Digest(b.header().prev_block_digest),
+                        BlockSelector::Tip,
+                    )
+                    .await;
+
+                // prepare a claim.
+                // perf: this is potentially lengthy as it iterates over all blocks
+                //       in the stream and also generates utxo membership proofs for each.
+                let prepared_claim = state
+                    .wallet_state
+                    .prepare_claim_utxo_in_block(announced_utxo.clone(), block_stream)
+                    .await?;
+
+                Some(prepared_claim)
+            }
+            None => None,
+        };
+
+        // release global state read lock
+        drop(state);
+
+        // we only acquire write-lock if the utxo is already confirmed
+        // in a block or the wallet does not have the expected_utxo
+        if maybe_prepared_claim.is_some() || !has_expected_utxo {
+            // acquire global state write-lock
+            let mut gsm = self.lock_guard_mut().await;
+
+            // add expected_utxo to wallet if not existing.
+            //
+            // note: we add it even if block is already confirmed, although not
+            //       required for claiming. This is just so that we have it in the
+            //       wallet for consistency and backup.
+            if !has_expected_utxo {
+                gsm.add_expected_utxos_to_wallet([
+                    (announced_utxo.clone(), UtxoNotifier::Claim).into()
+                ])
+                .await?;
+            };
+
+            // write prepared claim if utxo was already confirmed in a block.
+            if let Some(prepared_claim) = maybe_prepared_claim {
+                gsm.wallet_state
+                    .finalize_claim_utxo_in_block(prepared_claim)
+                    .await?;
+            }
+
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
+
+        Ok(())
+    }
+
+    pub async fn next_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
+        self.lock_guard_mut()
+            .await
+            .next_spending_key(key_type)
+            .await
     }
 }
 
@@ -1320,41 +1536,14 @@ impl GlobalState {
         &self.cli
     }
 
-    //     pub(crate) async fn get_block_digests_and_prev_msa(
-    //         &self,
-    //         target_digest: Digest,
-    //     ) -> Result<Vec<(Digest, MutatorSetAccumulator)>> {
-    //         let mut block_digests = vec![(
-    //             self.chain.light_state().hash(),
-    //             self.chain
-    //                 .light_state()
-    //                 .body()
-    //                 .mutator_set_accumulator
-    //                 .clone(),
-    //         )];
-    //         let mut block_digest = self.chain.light_state().hash();
-    //         let mut prev_block_digest = self.chain.light_state().header().prev_block_digest;
-    //         while let Some(prev_block) = self
-    //             .chain
-    //             .archival_state()
-    //             .get_block(prev_block_digest)
-    //             .await?
-    //         {
-    //             block_digests.push((
-    //                 block_digest,
-    //                 prev_block.body().mutator_set_accumulator.clone(),
-    //             ));
+    pub async fn next_spending_key(&mut self, key_type: KeyType) -> SpendingKey {
+        let key = self.wallet_state.next_unused_spending_key(key_type);
 
-    //             if block_digest == target_digest {
-    //                 break;
-    //             }
+        // persist wallet state to disk
+        self.persist_wallet().await.expect("flushed");
 
-    //             block_digest = prev_block_digest;
-    //             prev_block_digest = prev_block.header().prev_block_digest;
-    //         }
-
-    //         Ok(block_digests)
-    //     }
+        key
+    }
 }
 
 /// This provides some additional metadata about `TxOutput` that are generated

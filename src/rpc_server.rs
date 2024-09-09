@@ -28,11 +28,8 @@ use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
 use crate::models::blockchain::shared::Hash;
-use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
-use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TxAddressOutput;
-use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::TxParams;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -44,8 +41,6 @@ use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
-use crate::models::state::wallet::expected_utxo::UtxoNotifier;
-use crate::models::state::wallet::utxo_transfer::UtxoTransferEncrypted;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
 use crate::models::state::TxOutputMeta;
@@ -153,6 +148,15 @@ pub trait RPC {
     /// Generate a report of all owned and unspent coins, whether time-locked or not.
     async fn list_own_coins() -> Vec<CoinWithPossibleTimeLock>;
 
+    /// Generate tx outputs, for use by send()
+    async fn generate_tx_params(
+        outputs: Vec<TxAddressOutput>,
+        fee: NeptuneCoins,
+        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
+    ) -> Result<(TxParams, Vec<TxOutputMeta>), String>;
+
+
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
@@ -162,55 +166,16 @@ pub trait RPC {
     /// Clears standing for ip, whether connected or not
     async fn clear_standing_by_ip(ip: IpAddr);
 
-    /// Generate tx outputs, for use by send(), send-to-many()
-    async fn generate_tx_params(
-        outputs: Vec<TxAddressOutput>,
-        fee: NeptuneCoins,
-        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
-        unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
-    ) -> Result<(TxParams, Vec<TxOutputMeta>), String>;
-
     /// Send coins to multiple recipients
     ///
-    /// `outputs` is a list of transaction outputs in the format
-    /// `[(address:amount)]`.  The address may be any type supported by
-    /// [ReceivingAddress].
-    ///
-    /// `owned_utxo_notify_method` specifies how our wallet will be notified of
-    /// any outputs destined for it. This includes the change output if one is
-    /// necessary. [UtxoNotifyMethod] defines `OnChain` and `OffChain` delivery
-    /// of notifications.
-    ///
-    /// `OffChain` delivery requires less blockchain space and may result in a
-    /// lower fee than `OnChain` delivery however there is more potential of
-    /// losing funds should the wallet files become corrupted or lost.
-    ///
-    /// tip: if using `OnChain` notification use a
-    /// [ReceivingAddress::Symmetric] as the receiving address for any
-    /// outputs destined for your own wallet.  This happens automatically for
-    /// the Change output only.
-    ///
-    /// `fee` represents the fee in native coins to pay the miner who mines
-    /// the block that initially confirms the resulting transaction.
-    ///
-    /// a [Digest] of the resulting [Transaction](crate::models::blockchain::transaction::Transaction) is returned on success, else [None].
+    /// See [GlobalStateLock::send()]
     ///
     /// todo: shouldn't we return `Transaction` instead?
-    ///
-    /// future work: add `unowned_utxo_notify_method` param.
-    ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send(tx_params: TxParams) -> Result<Digest, String>;
 
     /// claim a utxo
     ///
-    /// The input string must be a valid bech32m encoded `UtxoTransferEncrypted`
-    /// for the current network and the wallet must have the corresponding
-    /// `SpendingKey` for decryption.
-    ///
-    /// upon success, a new `ExpectedUtxo` will be added to the local wallet
-    /// state.
-    ///
-    /// if the utxo has already been claimed, an error will result.
+    /// See [GlobalStateLock::claim_utxo()]
     async fn claim_utxo(utxo_transfer_encrypted: String) -> Result<(), String>;
 
     /// Stop miner if running
@@ -238,6 +203,9 @@ pub struct NeptuneRPCServer {
 
 impl NeptuneRPCServer {
     async fn confirmations_internal(&self) -> Option<BlockHeight> {
+        let span = tracing::debug_span!("rpc::confirmations_internal");
+        let _enter = span.enter();
+
         let state = self.state.lock_guard().await;
 
         match state.get_latest_balance_height().await {
@@ -259,56 +227,31 @@ impl NeptuneRPCServer {
 
     /// Return temperature of CPU, if available.
     fn cpu_temp_inner() -> Option<f32> {
+        let span = tracing::debug_span!("rpc::cpu_temp_inner");
+        let _enter = span.enter();
+
         let current_system = System::new();
         match current_system.cpu_temp() {
             Ok(temp) => Some(temp),
             Err(_) => None,
         }
     }
-
-    async fn finalize_send(
-        &mut self,
-        transaction: Transaction,
-        tx_output_list: TxOutputList,
-    ) -> Result<Digest, String> {
-        // acquire write-lock
-        let mut gsm = self.state.lock_guard_mut().await;
-
-        // insert transaction into mempool
-        if gsm.mempool.insert(&transaction).is_some() {
-            return Err("the transaction attempts to spend inputs already spent by another transaction in the mempool with a higher fee. try increasing the fee.".to_string());
-        }
-
-        // if the tx created offchain expected_utxos we must inform wallet.
-        if tx_output_list.has_offchain() {
-            // Inform wallet of any expected incoming utxos.
-            // note that this (briefly) mutates self.
-            gsm.add_expected_utxos_to_wallet(tx_output_list.expected_utxos_iter())
-                .await
-                .map_err(|e| e.to_string())?;
-
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
-        }
-
-        // Send transaction message to main
-        let tx_hash = Hash::hash(&transaction);
-        self.rpc_server_to_main_tx
-            .send(RPCServerToMain::Send(Box::new(transaction)))
-            .await
-            .map(|_| tx_hash)
-            .map_err(|e| e.to_string())
-    }
 }
 
 impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
     async fn network(self, _: context::Context) -> Network {
+        let span = tracing::debug_span!("rpc::network");
+        let _enter = span.enter();
+
         self.state.cli().network
     }
 
     // documented in trait. do not add doc-comment.
     async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
+        let span = tracing::debug_span!("rpc::own_listen_address_for_peers");
+        let _enter = span.enter();
+
         let listen_for_peers_ip = self.state.cli().listen_addr;
         let listen_for_peers_socket = self.state.cli().peer_port;
         let socket_address = SocketAddr::new(listen_for_peers_ip, listen_for_peers_socket);
@@ -317,11 +260,17 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn own_instance_id(self, _context: context::Context) -> InstanceId {
+        let span = tracing::debug_span!("rpc::own_instance_id");
+        let _enter = span.enter();
+
         self.state.lock_guard().await.net.instance_id
     }
 
     // documented in trait. do not add doc-comment.
     async fn block_height(self, _: context::Context) -> BlockHeight {
+        let span = tracing::debug_span!("rpc::block_height");
+        let _enter = span.enter();
+
         self.state
             .lock_guard()
             .await
@@ -334,11 +283,17 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
+        let span = tracing::debug_span!("rpc::confirmations");
+        let _enter = span.enter();
+
         self.confirmations_internal().await
     }
 
     // documented in trait. do not add doc-comment.
     async fn utxo_digest(self, _: context::Context, leaf_index: u64) -> Option<Digest> {
+        let span = tracing::debug_span!("rpc::utxo_digest");
+        let _enter = span.enter();
+
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
@@ -354,6 +309,9 @@ impl RPC for NeptuneRPCServer {
         _: context::Context,
         block_selector: BlockSelector,
     ) -> Option<Digest> {
+        let span = tracing::debug_span!("rpc::block_digest");
+        let _enter = span.enter();
+
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
         let digest = block_selector.as_digest(archival_state).await?;
@@ -370,6 +328,9 @@ impl RPC for NeptuneRPCServer {
         _: context::Context,
         block_selector: BlockSelector,
     ) -> Option<BlockInfo> {
+        let span = tracing::debug_span!("rpc::block_info");
+        let _enter = span.enter();
+
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
         let digest = block_selector.as_digest(archival_state).await?;
@@ -384,6 +345,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
+        let span = tracing::debug_span!("rpc::latest_tip_digests");
+        let _enter = span.enter();
+
         let state = self.state.lock_guard().await;
 
         let latest_block_digest = state.chain.light_state().hash();
@@ -397,6 +361,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn peer_info(self, _: context::Context) -> Vec<PeerInfo> {
+        let span = tracing::debug_span!("rpc::peer_info");
+        let _enter = span.enter();
+
         self.state
             .lock_guard()
             .await
@@ -412,6 +379,9 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> HashMap<IpAddr, PeerStanding> {
+        let span = tracing::debug_span!("rpc::all_sanctioned_peers");
+        let _enter = span.enter();
+
         let mut sanctions_in_memory = HashMap::default();
 
         let global_state = self.state.lock_guard().await;
@@ -442,6 +412,9 @@ impl RPC for NeptuneRPCServer {
         address_string: String,
         network: Network,
     ) -> Option<ReceivingAddress> {
+        let span = tracing::debug_span!("rpc::validate_address");
+        let _enter = span.enter();
+
         let ret = if let Ok(address) = ReceivingAddress::from_bech32m(&address_string, network) {
             Some(address)
         } else {
@@ -460,6 +433,9 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         amount_string: String,
     ) -> Option<NeptuneCoins> {
+        let span = tracing::debug_span!("rpc::validate_amount");
+        let _enter = span.enter();
+
         // parse string
         let amount = if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
             amt
@@ -473,6 +449,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
+        let span = tracing::debug_span!("rpc::amount_leq_synced_balance");
+        let _enter = span.enter();
+
         let now = Timestamp::now();
         // test inequality
         let wallet_status = self
@@ -486,6 +465,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
+        let span = tracing::debug_span!("rpc::synced_balance");
+        let _enter = span.enter();
+
         let now = Timestamp::now();
         let wallet_status = self
             .state
@@ -498,6 +480,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
+        let span = tracing::debug_span!("rpc::wallet_status");
+        let _enter = span.enter();
+
         self.state
             .lock_guard()
             .await
@@ -511,6 +496,9 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         block_selector: BlockSelector,
     ) -> Option<BlockHeader> {
+        let span = tracing::debug_span!("rpc::header");
+        let _enter = span.enter();
+
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
         let block_digest = block_selector.as_digest(archival_state).await?;
@@ -523,26 +511,25 @@ impl RPC for NeptuneRPCServer {
         _context: tarpc::context::Context,
         key_type: KeyType,
     ) -> ReceivingAddress {
-        let mut global_state_mut = self.state.lock_guard_mut().await;
+        let span = tracing::debug_span!("rpc::next_receiving_address");
+        let _enter = span.enter();
 
-        let address = global_state_mut
-            .wallet_state
-            .next_unused_spending_key(key_type)
-            .to_address();
-
-        // persist wallet state to disk
-        global_state_mut.persist_wallet().await.expect("flushed");
-
-        address
+        self.state.next_spending_key(key_type).await.to_address()
     }
 
     // documented in trait. do not add doc-comment.
     async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
+        let span = tracing::debug_span!("rpc::mempool_tx_count");
+        let _enter = span.enter();
+
         self.state.lock_guard().await.mempool.len()
     }
 
     // documented in trait. do not add doc-comment.
     async fn mempool_size(self, _context: tarpc::context::Context) -> usize {
+        let span = tracing::debug_span!("rpc::mempool_size");
+        let _enter = span.enter();
+
         self.state.lock_guard().await.mempool.get_size()
     }
 
@@ -551,6 +538,9 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)> {
+        let span = tracing::debug_span!("rpc::history");
+        let _enter = span.enter();
+
         let history = self.state.lock_guard().await.get_balance_history().await;
 
         // sort
@@ -569,6 +559,9 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
     ) -> DashBoardOverviewDataFromClient {
+        let span = tracing::debug_span!("rpc::dashboard_overview_data");
+        let _enter = span.enter();
+
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
         let tip_digest = state.chain.light_state().hash();
@@ -607,6 +600,9 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn clear_all_standings(mut self, _: context::Context) {
+        let span = tracing::debug_span!("rpc::clear_all_standings");
+        let _enter = span.enter();
+
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
             .net
@@ -630,6 +626,9 @@ impl RPC for NeptuneRPCServer {
     //
     // documented in trait. do not add doc-comment.
     async fn clear_standing_by_ip(mut self, _: context::Context, ip: IpAddr) {
+        let span = tracing::debug_span!("rpc::clear_standing_by_ip");
+        let _enter = span.enter();
+
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
             .net
@@ -650,35 +649,28 @@ impl RPC for NeptuneRPCServer {
             .expect("flushed DBs");
     }
 
-    // Locking:
-    //   * acquires `global_state_lock` for write
-    //
     // TODO: add an endpoint to get recommended fee density.
     //
     // documented in trait. do not add doc-comment.
     async fn send(mut self, _ctx: context::Context, tx_params: TxParams) -> Result<Digest, String> {
-        let span = tracing::debug_span!("Constructing transaction");
+        let span = tracing::debug_span!("rpc::send");
         let _enter = span.enter();
 
-        let tx_output_list = tx_params.tx_output_list().clone();
-
-        // Create the transaction
-        //
-        // Note that create_transaction() does not modify any state and only
-        // requires acquiring a read-lock which does not block other tasks.
-        // This is important because internally it calls prove() which is a very
-        // lengthy operation.
-        //
-        // note: A change output will be added to tx_outputs if needed.
         let transaction = self
             .state
-            .lock_guard()
-            .await
-            .create_transaction(tx_params)
+            .send(tx_params)
             .await
             .map_err(|e| e.to_string())?;
 
-        self.finalize_send(transaction, tx_output_list).await
+        // Send transaction message to main
+        let tx_hash = Hash::hash(&transaction);
+        self.rpc_server_to_main_tx
+            .send(RPCServerToMain::Send(Box::new(transaction)))
+            .await
+            .map(|_| tx_hash)
+            .map_err(|e| e.to_string())?;
+
+        Ok(tx_hash)
     }
 
     async fn claim_utxo(
@@ -686,127 +678,13 @@ impl RPC for NeptuneRPCServer {
         _ctx: context::Context,
         utxo_transfer_encrypted_str: String,
     ) -> Result<(), String> {
-        // deserialize UtxoTransferEncrypted from bech32m string.
-        let utxo_transfer_encrypted = UtxoTransferEncrypted::from_bech32m(
-            &utxo_transfer_encrypted_str,
-            self.state.cli().network,
-        )
-        .map_err(|e| e.to_string())?;
+        let span = tracing::debug_span!("rpc::claim_utxo");
+        let _enter = span.enter();
 
-        // acquire global state read lock
-        let state = self.state.lock_guard().await;
-
-        // find known spending key by receiver_identifier
-        let spending_key = state
-            .wallet_state
-            .find_known_spending_key_for_receiver_identifier(
-                utxo_transfer_encrypted.receiver_identifier,
-            )
-            .ok_or("utxo does not match any known wallet key".to_string())?;
-
-        // decrypt utxo_transfer_encrypted into UtxoTransfer
-        let utxo_transfer = utxo_transfer_encrypted
-            .decrypt_with_spending_key(&spending_key)
-            .map_err(|e| e.to_string())?;
-
-        tracing::debug!("claim-utxo: decrypted {:#?}", utxo_transfer);
-
-        // search for matching monitored utxo and return early if found.
-        if state
-            .wallet_state
-            .find_monitored_utxo(&utxo_transfer.utxo)
+        self.state
+            .claim_utxo(utxo_transfer_encrypted_str)
             .await
-            .is_some()
-        {
-            info!("found monitored utxo.  returning early.");
-            return Ok(());
-        }
-
-        // construct an AnnouncedUtxo
-        let announced_utxo = AnnouncedUtxo {
-            utxo: utxo_transfer.utxo,
-            sender_randomness: utxo_transfer.sender_randomness,
-            receiver_preimage: spending_key.privacy_preimage(),
-        };
-
-        // check if wallet is already expecting this utxo.
-        let has_expected_utxo = state
-            .wallet_state
-            .find_expected_utxo(&announced_utxo.utxo, announced_utxo.sender_randomness)
-            .await
-            .is_some();
-
-        // look for a canonical block that has this utxo as an output
-        let maybe_prepared_claim = match state
-            .chain
-            .archival_state()
-            .find_canonical_block_with_output(
-                announced_utxo.addition_record(),
-                BlockSelector::Genesis,
-            )
-            .await
-        {
-            Some(b) => {
-                // get a stream for retrieving blocks from parent(b) .. tip.
-                // perf: fast. this only returns the stream, it doesn't iterate it.
-                let block_stream = state
-                    .chain
-                    .archival_state()
-                    .canonical_block_stream_asc(
-                        BlockSelector::Digest(b.header().prev_block_digest),
-                        BlockSelector::Tip,
-                    )
-                    .await;
-
-                // prepare a claim.
-                // perf: this is potentially lengthy as it iterates over all blocks
-                //       in the stream and also generates utxo membership proofs for each.
-                let prepared_claim = state
-                    .wallet_state
-                    .prepare_claim_utxo_in_block(announced_utxo.clone(), block_stream)
-                    .await
-                    .map_err(|e| e.to_string())?;
-
-                Some(prepared_claim)
-            }
-            None => None,
-        };
-
-        // release global state read lock
-        drop(state);
-
-        // we only acquire write-lock if the utxo is already confirmed
-        // in a block or the wallet does not have the expected_utxo
-        if maybe_prepared_claim.is_some() || !has_expected_utxo {
-            // acquire global state write-lock
-            let mut gsm = self.state.lock_guard_mut().await;
-
-            // add expected_utxo to wallet if not existing.
-            //
-            // note: we add it even if block is already confirmed, although not
-            //       required for claiming. This is just so that we have it in the
-            //       wallet for consistency and backup.
-            if !has_expected_utxo {
-                gsm.add_expected_utxos_to_wallet([
-                    (announced_utxo.clone(), UtxoNotifier::Claim).into()
-                ])
-                .await
-                .map_err(|e| e.to_string())?;
-            };
-
-            // write prepared claim if utxo was already confirmed in a block.
-            if let Some(prepared_claim) = maybe_prepared_claim {
-                gsm.wallet_state
-                    .finalize_claim_utxo_in_block(prepared_claim)
-                    .await
-                    .map_err(|e| e.to_string())?;
-            }
-
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
-        }
-
-        Ok(())
+            .map_err(|e| e.to_string())
     }
 
     // documented in trait. do not add doc-comment.
@@ -818,25 +696,15 @@ impl RPC for NeptuneRPCServer {
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     ) -> Result<(TxParams, Vec<TxOutputMeta>), String> {
-        // obtain next unused symmetric key for change utxo
-        let change_key = {
-            let mut s = self.state.lock_guard_mut().await;
-            let key = s.wallet_state.next_unused_spending_key(KeyType::Symmetric);
+        let span = tracing::debug_span!("rpc::generate_tx_params");
+        let _enter = span.enter();
 
-            // write state to disk. create_transaction() may be slow.
-            s.persist_wallet().await.expect("flushed");
-            key
-        };
-
-        let state = self.state.lock_guard().await;
-        state
+        self.state
             .generate_tx_params(
                 outputs,
-                change_key,
                 fee,
                 owned_utxo_notify_method,
                 unowned_utxo_notify_method,
-                Timestamp::now(),
             )
             .await
             .map_err(|e| e.to_string())
@@ -844,6 +712,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn shutdown(self, _: context::Context) -> bool {
+        let span = tracing::debug_span!("rpc::shutdown");
+        let _enter = span.enter();
+
         // 1. Send shutdown message to main
         let response = self
             .rpc_server_to_main_tx
@@ -856,6 +727,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn pause_miner(self, _context: tarpc::context::Context) {
+        let span = tracing::debug_span!("rpc::pause_miner");
+        let _enter = span.enter();
+
         if self.state.cli().mine {
             let _ = self
                 .rpc_server_to_main_tx
@@ -868,6 +742,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn restart_miner(self, _context: tarpc::context::Context) {
+        let span = tracing::debug_span!("rpc::pause_miner");
+        let _enter = span.enter();
+
         if self.state.cli().mine {
             let _ = self
                 .rpc_server_to_main_tx
@@ -880,6 +757,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn prune_abandoned_monitored_utxos(mut self, _context: tarpc::context::Context) -> usize {
+        let span = tracing::debug_span!("rpc::prune_abandoned_monitored_utxos");
+        let _enter = span.enter();
+
         let mut global_state_mut = self.state.lock_guard_mut().await;
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
 
@@ -909,6 +789,9 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: ::tarpc::context::Context,
     ) -> Vec<CoinWithPossibleTimeLock> {
+        let span = tracing::debug_span!("rpc::list_own_coins");
+        let _enter = span.enter();
+
         self.state
             .lock_guard()
             .await
@@ -919,6 +802,9 @@ impl RPC for NeptuneRPCServer {
 
     // documented in trait. do not add doc-comment.
     async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f32> {
+        let span = tracing::debug_span!("rpc::cpu_temp");
+        let _enter = span.enter();
+
         Self::cpu_temp_inner()
     }
 }

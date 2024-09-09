@@ -600,34 +600,34 @@ mod amount_tests {
         assert!(NeptuneCoins::one_nau() >= NeptuneCoins::zero());
         Ok(())
     }
-/*
-    #[test]
-    fn display_one_nau() {
-        assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
-    }
-
-    #[test]
-    fn display_decimal_without_trailing_zero() {
-        assert_eq!(NeptuneCoins::from_str("0.1").unwrap().to_string(), "0.1");
-    }
-
-    #[test]
-    fn display_amounts() -> anyhow::Result<()> {
-        assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
-
-        for i in 0..30 {
-            let decimal = format!("0.{:0width$}", 1, width = i);
-            assert_eq!(NeptuneCoins::from_str(&decimal)?.to_string(), decimal);
+    /*
+        #[test]
+        fn display_one_nau() {
+            assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
         }
 
-        assert_eq!(NeptuneCoins::from_str("0.1")?.to_string(), "0.1");
-        assert_eq!(
-            NeptuneCoins::from_str("0.00000001")?.to_string(),
-            "0.00000001"
-        );
-        assert_ne!(NeptuneCoins::one_nau().to_string(), "0.0000000001");
+        #[test]
+        fn display_decimal_without_trailing_zero() {
+            assert_eq!(NeptuneCoins::from_str("0.1").unwrap().to_string(), "0.1");
+        }
 
-        Ok(())
-    }
-*/
+        #[test]
+        fn display_amounts() -> anyhow::Result<()> {
+            assert_ne!(NeptuneCoins::one_nau().to_string(), "0");
+
+            for i in 0..30 {
+                let decimal = format!("0.{:0width$}", 1, width = i);
+                assert_eq!(NeptuneCoins::from_str(&decimal)?.to_string(), decimal);
+            }
+
+            assert_eq!(NeptuneCoins::from_str("0.1")?.to_string(), "0.1");
+            assert_eq!(
+                NeptuneCoins::from_str("0.00000001")?.to_string(),
+                "0.00000001"
+            );
+            assert_ne!(NeptuneCoins::one_nau().to_string(), "0.0000000001");
+
+            Ok(())
+        }
+    */
 }
