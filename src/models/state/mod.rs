@@ -1875,19 +1875,19 @@ mod global_state_tests {
         let seven_months = Timestamp::months(7);
         let (mock_block_1a, _, _) =
             make_mock_block(&genesis_block, None, other_receiver_address, rng.gen());
-        {
-            global_state
-                .chain
-                .archival_state_mut()
-                .write_block_as_tip(&mock_block_1a)
-                .await?;
-        }
 
         // Verify that wallet has a monitored UTXO (from genesis)
         let wallet_status = global_state.get_wallet_status_for_tip().await;
+
         assert!(!wallet_status
             .synced_unspent_available_amount(launch + seven_months)
             .is_zero());
+
+        global_state
+            .chain
+            .archival_state_mut()
+            .write_block_as_tip(&mock_block_1a)
+            .await?;
 
         // Verify that this is unsynced with mock_block_1a
         assert!(

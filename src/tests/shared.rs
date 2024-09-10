@@ -262,6 +262,8 @@ pub async fn add_block_to_light_state(
     let previous_pow_family = light_state.kernel.header.proof_of_work_family;
     if previous_pow_family < new_block.kernel.header.proof_of_work_family {
         light_state.set_block(new_block);
+    } else if new_block == *light_state {
+        // no-op. light-state already has the block.
     } else {
         panic!("Attempted to add to light state an older block than the current light state block");
     }
