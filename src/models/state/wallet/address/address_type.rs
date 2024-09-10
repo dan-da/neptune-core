@@ -220,16 +220,24 @@ impl ReceivingAddress {
     ///
     /// The idea is that this suitable for human recognition purposes
     ///
+    /// ```text
     /// format:  <hrp><start>...<end>
     ///
-    ///     4 human readable part.
-    ///     8 start of address.
-    ///     8 end of address.
+    ///   [4 or 6] human readable prefix. 4 for symmetric-key, 6 for generation.
+    ///   8 start of address.
+    ///   8 end of address.
+    /// ```
     ///
     /// security: note that if this is used on a symmetric key it will display 16 chars
     /// of the bech32m encoded key.  This seriously reduces the key's strength and it
     /// may be possible to brute-force it.  In general it is best practice to avoid
     /// display of any part of a symmetric key.
+    ///
+    /// todo:
+    ///
+    /// it would be nice to standardize on a single prefix-len.  6 chars seems a
+    /// bit much.  maybe we could shorten generation prefix to 4 somehow, eg:
+    /// ngkm --> neptune-generation-key-mainnet
     pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
         let bech32 = self.to_bech32m(network)?;
         let first_len = self.get_hrp(network).len() + 8usize;

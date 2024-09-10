@@ -367,14 +367,16 @@ impl WalletState {
     /// note that Utxo alone is not a unique identifier, as payments of
     /// same amount to same key will create dup Utxos. (Eg coinbase)
     ///
-    /// perf: this fn is o(n) with the number of ExpectedUtxo stored.
-    ///       Iteration is performed from newest to oldest based on expectation
-    ///       that we will most often be working with recent ExpectedUtxos.
+    /// perf:
     ///
-    ///       This fn could be made o(1) if we were to store ExpectedUtxo
-    ///       keyed by hash(Utxo, sender_randomness).  This would require a
-    ///       separate levelDb file for ExpectedUtxo or using a DB such as redb
-    ///       that supports transactional namespaces.
+    /// this fn is o(n) with the number of ExpectedUtxo stored.  Iteration is
+    /// performed from newest to oldest based on expectation that we will most
+    /// often be working with recent ExpectedUtxos.
+    ///
+    /// This fn could be made o(1) if we were to store ExpectedUtxo keyed by
+    /// hash(Utxo, sender_randomness).  This would require a separate levelDb
+    /// file for ExpectedUtxo or using a DB such as redb that supports
+    /// transactional namespaces.
     pub async fn find_expected_utxo(
         &self,
         utxo: &Utxo,

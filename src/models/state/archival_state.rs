@@ -425,15 +425,17 @@ impl ArchivalState {
     /// if `oldest` or `newest` does not refer to a canonical block then
     /// the returned stream will not yield any blocks.
     ///
-    /// perf: this method returns right away.  no blocks are retrieved
-    ///       until the caller iterates over the stream.
+    /// perf:
     ///
-    ///       the stream returned from [Self::canonical_block_stream_desc()]
-    ///       should be faster because it can walk the chain backward
-    ///       using the prev_block_digest in each block's header.
+    /// this method returns right away.  no blocks are retrieved until the
+    /// caller iterates over the stream.
     ///
-    ///       In contrast this stream must query the Db for each iteration
-    ///       to map a height to the canonical block.
+    /// the stream returned from [Self::canonical_block_stream_desc()] should be
+    /// faster because it can walk the chain backward using the
+    /// prev_block_digest in each block's header.
+    ///
+    /// In contrast this stream must query the Db for each iteration to map a
+    /// height to the canonical block.
     pub async fn canonical_block_stream_asc(
         &self,
         oldest: BlockSelector,
@@ -461,15 +463,17 @@ impl ArchivalState {
     /// if `oldest` or `newest` does not refer to a canonical block then
     /// the returned stream will not yield any blocks.
     ///
-    /// perf: this method returns right away.  no blocks are retrieved
-    ///       until the caller iterates over the stream.
+    /// perf:
     ///
-    ///       the returned stream walks the chain backward using the
-    ///       prev_block_digest in each block's header.
+    /// this method returns right away.  no blocks are retrieved until the
+    /// caller iterates over the stream.
     ///
-    ///       In contrast the stream returned from [Self::canonical_block_stream_asc]
-    ///       must query the Db for each iteration to map a height to the
-    ///       canonical block.
+    /// the returned stream walks the chain backward using the prev_block_digest
+    /// in each block's header.
+    ///
+    /// In contrast the stream returned from [Self::canonical_block_stream_asc]
+    /// must query the Db for each iteration to map a height to the canonical
+    /// block.
     pub async fn canonical_block_stream_desc(
         &self,
         oldest: BlockSelector,
