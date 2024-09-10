@@ -1,4 +1,23 @@
-//! todo: module doc
+//! This module contains types for transferring [Utxo] notifications between parties
+//! outside of neptune-core.  (out-of-band)
+//!
+//! Such transfers look like:
+//!
+//! 1. sender creates tx params with `rpc.generate_tx_params()` and specifies
+//!    UnownedUtxoNotifyMethod::OffchainSerialized for at least 1 output utxo.
+//! 2. sender sends tx with `rpc.send(tx_params)`
+//! 3. sender reads tx_params.tx_output_list().utxo_transfer_iter() to obtain
+//!    list of `UtxoTransferEncrypted` that must be transferred out-of-band
+//!    as well as a list of `TxOutputMeta` that has a `ReceivingAddress` for each
+//!    `UtxoTransferEncrypted`
+//! 4. sender serializes the `UtxoTransferEncrypted` into bech32m, possibly
+//!    along with some metadata.  (see neptune-cli source-code for a standard
+//!    file-format)
+//! 5. sender transmits the bech32m encoded `UtxoTransferEncrypted` to the owner
+//!    of the `ReceivingAddress`.
+//! 6. recipient calls rpc.claim_utxo() passing it the received bech32m string.
+//! 7. the recipients wallet is now notified of the utxo and applies it towards
+//!    wallet balance, etc.
 
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::utxo::Utxo;

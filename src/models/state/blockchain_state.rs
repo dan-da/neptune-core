@@ -18,7 +18,6 @@ use crate::models::blockchain::block::traits::BlockchainBlockSelector;
 ///
 // silence possible clippy bug / false positive.
 // see: https://github.com/rust-lang/rust-clippy/issues/9798
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum BlockchainState {
     /// represents a Archival blockchain state
@@ -76,19 +75,21 @@ impl BlockchainState {
 }
 
 impl BlockchainBlockSelector for BlockchainState {
-    /// returns the tip digest
+    // doc'ed in trait
     fn tip_digest(&self) -> Digest {
         self.light_state().hash()
     }
 
-    /// returns the tip height
+    // doc'ed in trait
     fn tip_height(&self) -> BlockHeight {
         self.light_state().header().height
     }
 
-    /// panics for light-state
-    /// Probably LightState should be modified to hold the genesis block
-    /// the way that ArchivalState does.
+    // doc'ed in trait
+    //
+    // panics for light-state
+    // Probably LightState should be modified to hold the genesis block
+    // the way that ArchivalState does.
     fn genesis_digest(&self) -> Digest {
         match self {
             Self::Archival(a) => a.genesis_digest(),
@@ -96,9 +97,11 @@ impl BlockchainBlockSelector for BlockchainState {
         }
     }
 
-    /// panics for light-state as it does not have any history
-    /// the only way it could impl this would be to query peer(s)
-    /// or some decentralized data-storage layer.
+    // doc'ed in trait
+    //
+    // panics for light-state as it does not have any history
+    // the only way it could impl this would be to query peer(s)
+    // or some decentralized data-storage layer.
     async fn height_to_canonical_digest(&self, h: BlockHeight) -> Option<Digest> {
         match self {
             Self::Archival(a) => a.height_to_canonical_digest(h).await,
@@ -106,9 +109,11 @@ impl BlockchainBlockSelector for BlockchainState {
         }
     }
 
-    /// panics for light-state as it does not have any history
-    /// the only way it could impl this would be to query peer(s)
-    /// or some decentralized data-storage layer.
+    // doc'ed in trait
+    //
+    // panics for light-state as it does not have any history
+    // the only way it could impl this would be to query peer(s)
+    // or some decentralized data-storage layer.
     async fn digest_to_canonical_height(&self, d: Digest) -> Option<BlockHeight> {
         match self {
             Self::Archival(a) => a.digest_to_canonical_height(d).await,

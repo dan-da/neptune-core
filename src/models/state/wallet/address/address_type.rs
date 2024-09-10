@@ -197,6 +197,10 @@ impl ReceivingAddress {
     /// note: this will return an error for symmetric keys as they do not impl
     ///       bech32m at present.  There is no need to give them out to 3rd
     ///       parties in a serialized form.
+    ///
+    /// security: note that if this is used on a symmetric key anyone that can view
+    /// it will be able to spend the funds. In general it is best practice to avoid
+    /// display of any part of a symmetric key.
     pub fn to_bech32m(&self, network: Network) -> Result<String> {
         match self {
             Self::Generation(k) => k.to_bech32m(network),
@@ -221,6 +225,11 @@ impl ReceivingAddress {
     ///     4 human readable part.
     ///     8 start of address.
     ///     8 end of address.
+    ///
+    /// security: note that if this is used on a symmetric key it will display 16 chars
+    /// of the bech32m encoded key.  This seriously reduces the key's strength and it
+    /// may be possible to brute-force it.  In general it is best practice to avoid
+    /// display of any part of a symmetric key.
     pub fn to_bech32m_abbreviated(&self, network: Network) -> Result<String> {
         let bech32 = self.to_bech32m(network)?;
         let first_len = self.get_hrp(network).len() + 8usize;
@@ -275,7 +284,7 @@ impl ReceivingAddress {
 /// This enum provides an abstraction API for spending key types, so that a
 /// method or struct may simply accept a `SpendingKey` and be
 /// forward-compatible with new types of spending key as they are implemented.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum SpendingKey {
     /// a key from [generation_address]
     Generation(generation_address::GenerationSpendingKey),

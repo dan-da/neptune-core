@@ -5,8 +5,8 @@ pub mod block_info;
 pub mod block_kernel;
 pub mod block_selector;
 pub mod mutator_set_update;
-pub mod transfer_block;
 pub mod traits;
+pub mod transfer_block;
 pub mod validity;
 
 use std::cmp::max;

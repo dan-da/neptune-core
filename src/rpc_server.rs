@@ -31,6 +31,7 @@ use crate::models::blockchain::block::traits::BlockchainBlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::TxAddressOutput;
+use crate::models::blockchain::transaction::TxOutputList;
 use crate::models::blockchain::transaction::TxParams;
 use crate::models::blockchain::transaction::UnownedUtxoNotifyMethod;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
@@ -41,6 +42,7 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerStanding;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalStateLock;
@@ -149,13 +151,26 @@ pub trait RPC {
     /// Generate a report of all owned and unspent coins, whether time-locked or not.
     async fn list_own_coins() -> Vec<CoinWithPossibleTimeLock>;
 
-    /// Generate tx outputs, for use by send()
+    /// Generate tx params, for use by send().
+    ///
+    /// for standard payments involving native neptune coins
     async fn generate_tx_params(
         outputs: Vec<TxAddressOutput>,
         fee: NeptuneCoins,
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     ) -> Result<(TxParams, Vec<TxOutputMeta>), String>;
+
+    /// Generate tx params for use by send.
+    ///
+    /// for non-standard payments such as those involving
+    /// tokens or custom lockscripts.
+    async fn generate_tx_params_from_tx_outputs(
+        tx_output_list: TxOutputList,
+        change_key: SpendingKey,
+        change_utxo_notify_method: OwnedUtxoNotifyMethod,
+        fee: NeptuneCoins,
+    ) -> Result<TxParams, String>;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -714,6 +729,31 @@ impl RPC for NeptuneRPCServer {
             .map_err(|e| e.to_string())
     }
 
+    async fn generate_tx_params_from_tx_outputs(
+        self,
+        _: context::Context,
+        tx_output_list: TxOutputList,
+        change_key: SpendingKey,
+        change_utxo_notify_method: OwnedUtxoNotifyMethod,
+        fee: NeptuneCoins,
+    ) -> Result<TxParams, String> {
+        let span = tracing::debug_span!("rpc::generate_tx_params");
+        let _enter = span.enter();
+
+        self.state
+            .lock_guard()
+            .await
+            .generate_tx_params_from_tx_outputs(
+                tx_output_list,
+                change_key,
+                change_utxo_notify_method,
+                fee,
+                Timestamp::now(),
+            )
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     // documented in trait. do not add doc-comment.
     async fn shutdown(self, _: context::Context) -> bool {
         let span = tracing::debug_span!("rpc::shutdown");
@@ -830,8 +870,10 @@ mod rpc_server_tests {
 
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::models::blockchain::transaction::TxOutput;
     use crate::models::peer::PeerSanctionReason;
     use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
+    use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
     use crate::models::state::wallet::WalletSecret;
     use crate::rpc_server::NeptuneRPCServer;
     use crate::tests::shared::mine_block_to_wallet;
@@ -934,6 +976,18 @@ mod rpc_server_tests {
                 NeptuneCoins::one_nau(),
                 OwnedUtxoNotifyMethod::OffChainSerialized,
                 UnownedUtxoNotifyMethod::default(),
+            )
+            .await
+            .unwrap();
+
+        let _ = rpc_server
+            .clone()
+            .generate_tx_params_from_tx_outputs(
+                ctx,
+                TxOutput::new_random(5u32.into()).into(),
+                SymmetricKey::from_seed(rand::random()).into(),
+                OwnedUtxoNotifyMethod::OffChain,
+                NeptuneCoins::one_nau(),
             )
             .await
             .unwrap();

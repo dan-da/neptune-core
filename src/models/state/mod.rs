@@ -196,6 +196,7 @@ impl GlobalStateLock {
         self.lock_guard_mut().await.resync_membership_proofs().await
     }
 
+    /// retrieve wallet status data for tip block
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         self.lock_guard().await.get_wallet_status_for_tip().await
     }
@@ -222,9 +223,34 @@ impl GlobalStateLock {
         self.cli = cli;
     }
 
-    /// Generate tx outputs, for use by send()
+    /// Generate tx params for use by `create_transaction()` and `send()`
     ///
-    /// todo: doc params and return.
+    /// This method simplifies building [TxParam].  It should be used
+    /// when the following are true:
+    ///  * each output is sent to a `ReceivingAddress`
+    ///  * each output sends a non-zero amount of native coins.
+    ///  * all unowned outputs can have the same notification policy
+    ///  * all owned outputs can have the same notification policy
+    ///  * a change output should be created
+    ///  * the change spending key can be a `SymmetricKey`
+    ///  * no non-native coins or custom lockscripts are used.
+    ///
+    /// Otherwise, the [TxParam] must be generated some other way.
+    ///
+    /// params:
+    ///  + outputs: a list of (ReceivingAddress,amount) where amount is > 0.
+    ///  + fee: mining fee.  (must be >= 0)
+    ///  + owned_utxo_notify_method: notification mechanism for self-owned outputs, including change.
+    ///  + unowned_utxo_notify_method: notification mechanism for 3rd party outputs
+    ///
+    /// returns:
+    ///  + [TxParams]: transaction parameters for send() and create_transaction()
+    ///  + Vec<[TxOutputMeta]>: list of output metadata, one per output in TxParams::tx_output_list().
+    ///
+    /// The output metadata is provided to enable the caller to match [TxOutput] in tx_output_list
+    /// with the [ReceivingAddress] that were provided as input, as well as an automatically generated
+    /// change address.  It is guaranteed that the length and order of the output metadata is the
+    /// same as TxOutput::tx_output_list(), so the two can be zip'ed together.
     pub async fn generate_tx_params(
         &mut self,
         outputs: Vec<TxAddressOutput>,
@@ -683,18 +709,18 @@ impl GlobalState {
         Ok(tx_outputs.into())
     }
 
-    /// Generates TxInputList and TxOutputList (including change output) from an
+    /// Generates TxParams (including change output) from an
     /// existing TxOutputList that represents all outputs except for the change
     /// output.
     ///
     /// This is useful when ReceivingAddress is not available, such as when
-    /// creating output Utxo directly from lockscripts.  Otherwise
-    /// [generate_tx_params()] is preferred.
-    pub async fn generate_tx_params_from_list(
+    /// creating output Utxo directly from lockscripts or using non-native
+    /// coins/tokens.  Otherwise [generate_tx_params()] is preferred.
+    pub async fn generate_tx_params_from_tx_outputs(
         &self,
         mut tx_output_list: TxOutputList,
         change_key: SpendingKey,
-        owned_utxo_notify_method: OwnedUtxoNotifyMethod,
+        change_utxo_notify_method: OwnedUtxoNotifyMethod,
         fee: NeptuneCoins,
         timestamp: Timestamp,
     ) -> Result<TxParams> {
@@ -717,7 +743,7 @@ impl GlobalState {
             let change_outputs = [(change_key.to_address(), change_amount)];
             let mut change_output_list = self.generate_tx_outputs(
                 change_outputs.iter(),
-                owned_utxo_notify_method,
+                change_utxo_notify_method,
                 UnownedUtxoNotifyMethod::OnChain,
             )?;
 
@@ -729,6 +755,9 @@ impl GlobalState {
         Ok(TxParams::new(tx_input_list, tx_output_list)?)
     }
 
+    /// see [GlobalStateLock::generate_tx_params()]
+    ///
+    /// the difference here is that caller must/may supply a change_key.
     pub async fn generate_tx_params(
         &self,
         mut outputs: Vec<TxAddressOutput>,
@@ -896,7 +925,7 @@ impl GlobalState {
             .nth_symmetric_key_for_tests(0);
 
         let tx_params = self
-            .generate_tx_params_from_list(
+            .generate_tx_params_from_tx_outputs(
                 tx_output_vec.into(),
                 change_key.into(),
                 OwnedUtxoNotifyMethod::OffChain,

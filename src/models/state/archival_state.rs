@@ -243,7 +243,7 @@ impl ArchivalState {
             {
                 let block_record = bv.as_block_record();
                 return Self::get_block_from_block_record(
-                    Self::block_file_path(&data_dir, &block_record),
+                    Self::block_file_path(data_dir, &block_record),
                     block_record,
                 )
                 .await
@@ -418,6 +418,22 @@ impl ArchivalState {
         .await?
     }
 
+    /// returns a [Stream] of blocks from `oldest` to `newest` in ascending order
+    ///
+    /// This method provides an async "iterator" for canonical blocks.
+    ///
+    /// if `oldest` or `newest` does not refer to a canonical block then
+    /// the returned stream will not yield any blocks.
+    ///
+    /// perf: this method returns right away.  no blocks are retrieved
+    ///       until the caller iterates over the stream.
+    ///
+    ///       the stream returned from [Self::canonical_block_stream_desc()]
+    ///       should be faster because it can walk the chain backward
+    ///       using the prev_block_digest in each block's header.
+    ///
+    ///       In contrast this stream must query the Db for each iteration
+    ///       to map a height to the canonical block.
     pub async fn canonical_block_stream_asc(
         &self,
         oldest: BlockSelector,
@@ -438,6 +454,22 @@ impl ArchivalState {
         }
     }
 
+    /// returns a [Stream] of blocks from `oldest` to `newest` in descending order
+    ///
+    /// This method provides an async "iterator" for canonical blocks.
+    ///
+    /// if `oldest` or `newest` does not refer to a canonical block then
+    /// the returned stream will not yield any blocks.
+    ///
+    /// perf: this method returns right away.  no blocks are retrieved
+    ///       until the caller iterates over the stream.
+    ///
+    ///       the returned stream walks the chain backward using the
+    ///       prev_block_digest in each block's header.
+    ///
+    ///       In contrast the stream returned from [Self::canonical_block_stream_asc]
+    ///       must query the Db for each iteration to map a height to the
+    ///       canonical block.
     pub async fn canonical_block_stream_desc(
         &self,
         oldest: BlockSelector,
@@ -448,8 +480,8 @@ impl ArchivalState {
                 (Some(o), Some(n)) => (o, n),
                 _ => (
                     // so loop will exit immediately on failure.
-                    Block::genesis_prev_block_digest().into(),
-                    Block::genesis_prev_block_digest().into(),
+                    Block::genesis_prev_block_digest(),
+                    Block::genesis_prev_block_digest(),
                 ),
             };
 
@@ -462,6 +494,7 @@ impl ArchivalState {
         }
     }
 
+    /// searches from tip to `oldest` to find a block containing `output`
     pub async fn find_canonical_block_with_output(
         &self,
         output: AdditionRecord,
@@ -928,25 +961,28 @@ impl ArchivalState {
 }
 
 impl BlockchainBlockSelector for ArchivalState {
-    /// retrieve tip digest
+    // doc'ed in trait
     fn tip_digest(&self) -> Digest {
         self.tip_block.hash()
     }
 
+    // doc'ed in trait
     fn tip_height(&self) -> BlockHeight {
         self.tip_block.header().height
     }
 
-    /// retrieve genesis digest
+    // doc'ed in trait
     fn genesis_digest(&self) -> Digest {
         self.genesis_block.hash()
     }
 
+    // doc'ed in trait
     async fn height_to_canonical_digest(&self, h: BlockHeight) -> Option<Digest> {
         self.block_height_to_canonical_block_digest(h, self.tip_digest())
             .await
     }
 
+    // doc'ed in trait
     async fn digest_to_canonical_height(&self, d: Digest) -> Option<BlockHeight> {
         match self
             .block_belongs_to_canonical_chain(d, self.tip_digest())

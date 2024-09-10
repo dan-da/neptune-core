@@ -242,10 +242,24 @@ impl WalletState {
         wallet_state
     }
 
+    /// notifies wallet to expect a utxo in a future block.
+    ///
     /// panics if an [ExpectedUtxo] already exists with the same [Utxo].
     ///
-    /// perf: the dup check is presently o(n).  It can be made o(1).
-    ///       see find_expected_utxo()
+    /// perf: the dup check is presently o(n).  It can be made o(1).  see
+    ///       find_expected_utxo()
+    ///
+    /// future work:
+    ///   1) remove panic.  return an error instead.
+    ///
+    ///   2) at present, if an expected_utxo is somehow added *after* a block is
+    ///      confirmed that contains the utxo, then the wallet will not
+    ///      recognize it.  Now that *_claim_utxo_for_block() exist it should be
+    ///      possible to have a maintenance process that checks for any
+    ///      old/unclaimed expected utxos and claims them.
+    ///
+    ///      likewise add_expected_utxo() could perhaps be refactored to perform
+    ///      a claim() if the target utxo has already been confirmed in a block.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
         if self
             .find_expected_utxo(&expected_utxo.utxo, expected_utxo.sender_randomness)
@@ -353,14 +367,14 @@ impl WalletState {
     /// note that Utxo alone is not a unique identifier, as payments of
     /// same amount to same key will create dup Utxos. (Eg coinbase)
     ///
-    /// perf: this fn is o(n) with the number of ExpectedUtxo stored.  Iteration
-    ///       is performed from newest to oldest based on expectation that we
-    ///       will most often be working with recent ExpectedUtxos.
+    /// perf: this fn is o(n) with the number of ExpectedUtxo stored.
+    ///       Iteration is performed from newest to oldest based on expectation
+    ///       that we will most often be working with recent ExpectedUtxos.
     ///
     ///       This fn could be made o(1) if we were to store ExpectedUtxo
-    ///       keyed by hash(Utxo).  This would require a separate levelDb
-    ///       file for ExpectedUtxo or using a DB such as redb that supports
-    ///       transactional namespaces.
+    ///       keyed by hash(Utxo, sender_randomness).  This would require a
+    ///       separate levelDb file for ExpectedUtxo or using a DB such as redb
+    ///       that supports transactional namespaces.
     pub async fn find_expected_utxo(
         &self,
         utxo: &Utxo,
@@ -959,10 +973,11 @@ impl WalletState {
     ///
     /// This prepare method is potentially quite lengthy as it must load and
     /// iterate over an unknown number of blocks and it generates a utxo
-    /// membership proof for each block.
+    /// membership proof for each block. The proof generation is performed in
+    /// tokio's blocking threadpool with spawn_blocking().
     ///
-    /// As such it must not take &mut self, which would require a global
-    /// write-lock.
+    /// As this method is lengthy it must not take &mut self, which would
+    /// require a global write-lock, blocking all other tasks.
     pub(crate) async fn prepare_claim_utxo_in_block(
         &self,
         announced_utxo: AnnouncedUtxo,

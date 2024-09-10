@@ -79,8 +79,8 @@ impl MonitoredUtxo {
 
     /// Get the most recent (block hash, membership proof) entry in the database,
     /// if any.
-    pub fn get_oldest_membership_proof_entry(&self) -> Option<(Digest, MsMembershipProof)> {
-        self.blockhash_to_membership_proof.back().cloned()
+    pub fn get_oldest_membership_proof_entry(&self) -> Option<&(Digest, MsMembershipProof)> {
+        self.blockhash_to_membership_proof.back()
     }
 
     /// Returns true if the MUTXO was abandoned

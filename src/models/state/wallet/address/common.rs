@@ -146,6 +146,7 @@ pub fn lock_script(spending_lock: Digest) -> LockScript {
     instructions.into()
 }
 
+/// returns human-readable-prefix for the given network
 pub fn network_hrp_char(network: Network) -> char {
     match network {
         Network::Alpha | Network::Beta | Network::Main => 'm',

@@ -190,6 +190,10 @@ impl SymmetricKey {
     }
 
     /// encodes the key as bech32m with network-specific prefix
+    ///
+    /// security: note that anyone that can view the bech32m string will be able
+    /// to spend the funds. In general it is best practice to avoid display of
+    /// any part of a symmetric key.
     pub fn to_bech32m(&self, network: Network) -> anyhow::Result<String> {
         let hrp = Self::get_hrp(network);
         let payload = bincode::serialize(self)?;

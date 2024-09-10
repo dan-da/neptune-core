@@ -1490,7 +1490,7 @@ mod peer_loop_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(genesis_block, None, a_recipient_address, rng.gen());
         global_state_mut.set_new_tip(block_1.clone()).await?;
         drop(global_state_mut);
 
@@ -1712,7 +1712,7 @@ mod peer_loop_tests {
             .nth_generation_spending_key_for_tests(0)
             .to_address();
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+            make_mock_block_with_valid_pow(genesis_block, None, a_recipient_address, rng.gen());
         let (block_2_a, _, _) =
             make_mock_block_with_valid_pow(&block_1, None, a_recipient_address, rng.gen());
         let (block_3_a, _, _) =
