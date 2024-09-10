@@ -27,6 +27,7 @@ use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_info::BlockInfo;
 use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::block::traits::BlockchainBlockSelector;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::OwnedUtxoNotifyMethod;
 use crate::models::blockchain::transaction::TxAddressOutput;
@@ -155,7 +156,6 @@ pub trait RPC {
         owned_utxo_notify_method: OwnedUtxoNotifyMethod,
         unowned_utxo_notify_method: UnownedUtxoNotifyMethod,
     ) -> Result<(TxParams, Vec<TxOutputMeta>), String>;
-
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
@@ -332,14 +332,18 @@ impl RPC for NeptuneRPCServer {
         let _enter = span.enter();
 
         let state = self.state.lock_guard().await;
-        let archival_state = state.chain.archival_state();
-        let digest = block_selector.as_digest(archival_state).await?;
+        let digest = block_selector.as_digest(&state.chain).await?;
 
-        let block = archival_state.get_block(digest).await.unwrap()?;
+        let block = state
+            .chain
+            .archival_state()
+            .get_block(digest)
+            .await
+            .unwrap()?;
         Some(BlockInfo::from_block_and_digests(
             &block,
-            archival_state.genesis_block().hash(),
-            state.chain.light_state().hash(),
+            state.chain.genesis_digest(),
+            state.chain.tip_digest(),
         ))
     }
 

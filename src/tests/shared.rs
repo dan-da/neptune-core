@@ -194,7 +194,7 @@ pub async fn mock_genesis_global_state(
         peer_map.insert(peer_address, get_dummy_peer(peer_address));
     }
     let networking_state = NetworkingState::new(peer_map, peer_db, syncing);
-    let genesis_block = archival_state.get_tip().await;
+    let genesis_block = archival_state.tip();
 
     // Sanity check
     assert_eq!(archival_state.genesis_block().hash(), genesis_block.hash());
@@ -204,11 +204,11 @@ pub async fn mock_genesis_global_state(
         "Genesis light state MSA hash: {}",
         light_state.body().mutator_set_accumulator.hash()
     );
+    let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
         light_state,
         archival_state,
     });
-    let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
     let cli_args = cli_args::Args {
         network,
         ..Default::default()

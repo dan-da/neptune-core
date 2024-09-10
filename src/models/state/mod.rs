@@ -1145,15 +1145,17 @@ impl GlobalState {
                 };
 
             // try latest (block hash, membership proof) entry
-            let (block_hash, mut membership_proof) = monitored_utxo
+            let (block_hash, membership_proof_ref) = monitored_utxo
                 .get_latest_membership_proof_entry()
                 .expect("Database not in consistent state. Monitored UTXO must have at least one membership proof.");
+
+            let mut membership_proof = membership_proof_ref.to_owned();
 
             // request path-to-tip
             let (backwards, _luca, forwards) = self
                 .chain
                 .archival_state()
-                .find_path(block_hash, tip_hash)
+                .find_path(*block_hash, tip_hash)
                 .await;
 
             // after this point, we may be modifying it.
@@ -1364,7 +1366,7 @@ impl GlobalState {
         self.chain.archival_state_mut().block_index_db.flush().await;
 
         // persist archival_mutator_set, with sync label
-        let hash = self.chain.archival_state().get_tip().await.hash();
+        let hash = self.chain.archival_state().tip().hash();
         self.chain
             .archival_state_mut()
             .archival_mutator_set
@@ -1909,7 +1911,7 @@ mod global_state_tests {
         let own_receiving_address = own_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
-        let genesis_block = global_state.chain.archival_state().get_tip().await;
+        let genesis_block = global_state.chain.archival_state().tip().to_owned();
         let (mock_block_1a, coinbase_utxo, coinbase_output_randomness) =
             make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());
         global_state
@@ -1997,7 +1999,7 @@ mod global_state_tests {
             .to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
-        let genesis_block = global_state.chain.archival_state().get_tip().await;
+        let genesis_block = global_state.chain.archival_state().tip().to_owned();
         assert!(genesis_block.kernel.header.height.is_genesis());
         let (mock_block_1a, coinbase_utxo_1a, cb_utxo_output_randomness_1a) =
             make_mock_block(&genesis_block, None, own_receiving_address, rng.gen());

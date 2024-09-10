@@ -119,7 +119,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<()> {
     .await;
 
     // Get latest block. Use hardcoded genesis block if nothing is in database.
-    let latest_block: Block = archival_state.get_tip().await;
+    let latest_block = archival_state.tip().to_owned();
 
     // Bind socket to port on this machine, to handle incoming connections from peers
     let incoming_peer_listener = TcpListener::bind((cli_args.listen_addr, cli_args.peer_port))

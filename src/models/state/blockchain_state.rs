@@ -1,5 +1,10 @@
+use tasm_lib::Digest;
+
 use super::archival_state::ArchivalState;
 use super::light_state::LightState;
+
+use crate::models::blockchain::block::block_height::BlockHeight;
+use crate::models::blockchain::block::traits::BlockchainBlockSelector;
 
 /// `BlockChainState` provides an `Archival` variant
 /// for full nodes and a `Light` variant for light nodes.
@@ -77,6 +82,48 @@ impl BlockchainState {
         match self {
             Self::Archival(bac) => &mut bac.light_state,
             Self::Light(light_state) => light_state,
+        }
+    }
+}
+
+impl BlockchainBlockSelector for BlockchainState {
+    /// returns the tip digest
+    fn tip_digest(&self) -> Digest {
+        self.light_state().hash()
+    }
+
+    /// returns the tip height
+    fn tip_height(&self) -> BlockHeight {
+        self.light_state().header().height
+    }
+
+    /// panics for light-state
+    /// Probably LightState should be modified to hold the genesis block
+    /// the way that ArchivalState does.
+    fn genesis_digest(&self) -> Digest {
+        match self {
+            Self::Archival(bac) => bac.archival_state.genesis_digest(),
+            Self::Light(_) => todo!(),
+        }
+    }
+
+    /// panics for light-state as it does not have any history
+    /// the only way it could impl this would be to query peer(s)
+    /// or some decentralized data-storage layer.
+    async fn height_to_canonical_digest(&self, h: BlockHeight) -> Option<Digest> {
+        match self {
+            Self::Archival(bac) => bac.archival_state.height_to_canonical_digest(h).await,
+            Self::Light(_) => unimplemented!(),
+        }
+    }
+
+    /// panics for light-state as it does not have any history
+    /// the only way it could impl this would be to query peer(s)
+    /// or some decentralized data-storage layer.
+    async fn digest_to_canonical_height(&self, d: Digest) -> Option<BlockHeight> {
+        match self {
+            Self::Archival(bac) => bac.archival_state.digest_to_canonical_height(d).await,
+            Self::Light(_) => unimplemented!(),
         }
     }
 }

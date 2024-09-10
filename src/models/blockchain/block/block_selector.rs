@@ -20,11 +20,11 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::models::state::archival_state::ArchivalState;
 use crate::twenty_first::error::TryFromHexDigestError;
 use crate::twenty_first::math::digest::Digest;
 
 use super::block_height::BlockHeight;
+use super::traits::BlockchainBlockSelector;
 
 /// Provides alternatives for looking up a block.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -104,25 +104,21 @@ impl FromStr for BlockSelector {
 
 impl BlockSelector {
     /// returns Digest for this selector, if it exists.
-    pub async fn as_digest(&self, state: &ArchivalState) -> Option<Digest> {
+    pub async fn as_digest(&self, state: &impl BlockchainBlockSelector) -> Option<Digest> {
         match self {
             BlockSelector::Digest(d) => Some(*d),
-            BlockSelector::Height(h) => {
-                state
-                    .block_height_to_canonical_block_digest(*h, state.get_tip().await.hash())
-                    .await
-            }
-            BlockSelector::Tip => Some(state.get_tip().await.hash()),
-            BlockSelector::Genesis => Some(state.genesis_block().hash()),
+            BlockSelector::Height(h) => state.height_to_canonical_digest(*h).await,
+            BlockSelector::Tip => Some(state.tip_digest()),
+            BlockSelector::Genesis => Some(state.genesis_digest()),
         }
     }
 
     /// returns Digest for this selector, if it exists.
-    pub async fn as_height(&self, state: &ArchivalState) -> Option<BlockHeight> {
+    pub async fn as_height(&self, state: &impl BlockchainBlockSelector) -> Option<BlockHeight> {
         match self {
-            BlockSelector::Digest(d) => state.get_block_header(*d).await.map(|h| h.height),
+            BlockSelector::Digest(d) => state.digest_to_canonical_height(*d).await,
             BlockSelector::Height(h) => Some(*h),
-            BlockSelector::Tip => Some(state.get_tip().await.header().height),
+            BlockSelector::Tip => Some(state.tip_height()),
             BlockSelector::Genesis => Some(BlockHeight::genesis()),
         }
     }

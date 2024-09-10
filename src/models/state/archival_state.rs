@@ -21,6 +21,7 @@ use crate::database::WriteBatchAsync;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_selector::BlockSelector;
+use crate::models::blockchain::block::traits::BlockchainBlockSelector;
 use crate::models::blockchain::block::Block;
 use crate::models::database::BlockFileLocation;
 use crate::models::database::BlockIndexKey;
@@ -63,6 +64,9 @@ pub struct ArchivalState {
     // The genesis block is stored on the heap, as we would otherwise get stack overflows whenever we instantiate
     // this object in a spawned worker task.
     genesis_block: Box<Block>,
+
+    /// The tip of canonical chain
+    tip_block: Box<Block>,
 
     // The archival mutator set is persisted to one database that also records a sync label,
     // which corresponds to the hash of the block to which the mutator set is synced.
@@ -214,12 +218,40 @@ impl ArchivalState {
             archival_mutator_set.persist().await;
         }
 
+        let tip_block = Self::load_tip(&data_dir, &block_index_db)
+            .await
+            .unwrap_or_else(|| genesis_block.clone());
+
         Self {
+            tip_block,
             data_dir,
             block_index_db,
             genesis_block,
             archival_mutator_set,
         }
+    }
+
+    // loads tip from DB+disk
+    async fn load_tip(
+        data_dir: &DataDirectory,
+        block_index_db: &NeptuneLevelDb<BlockIndexKey, BlockIndexValue>,
+    ) -> Option<Box<Block>> {
+        if let Some(v) = block_index_db.get(BlockIndexKey::BlockTipDigest).await {
+            if let Some(bv) = block_index_db
+                .get(BlockIndexKey::Block(v.as_tip_digest()))
+                .await
+            {
+                let block_record = bv.as_block_record();
+                return Self::get_block_from_block_record(
+                    Self::block_file_path(&data_dir, &block_record),
+                    block_record,
+                )
+                .await
+                .map(Box::new)
+                .ok();
+            }
+        }
+        None
     }
 
     pub fn genesis_block(&self) -> &Block {
@@ -349,15 +381,20 @@ impl ArchivalState {
 
         self.block_index_db.batch_write(batch).await;
 
+        self.tip_block = Box::new(new_block.to_owned());
+
         Ok(())
     }
 
-    async fn get_block_from_block_record(&self, block_record: BlockRecord) -> Result<Block> {
-        // Get path of file for block
-        let block_file_path: PathBuf = self
-            .data_dir
-            .block_file_path(block_record.file_location.file_index);
+    // Get path of file for block
+    fn block_file_path(data_dir: &DataDirectory, block_record: &BlockRecord) -> PathBuf {
+        data_dir.block_file_path(block_record.file_location.file_index)
+    }
 
+    async fn get_block_from_block_record(
+        block_file_path: PathBuf,
+        block_record: BlockRecord,
+    ) -> Result<Block> {
         // Open file as read-only
         let block_file: tokio::fs::File = tokio::fs::OpenOptions::new()
             .read(true)
@@ -386,8 +423,11 @@ impl ArchivalState {
         oldest: BlockSelector,
         newest: BlockSelector,
     ) -> impl Stream<Item = Box<Block>> + '_ {
-        let mut iter_height = oldest.as_height(self).await.unwrap();
-        let newest_height = newest.as_height(self).await.unwrap();
+        let (mut iter_height, newest_height) =
+            match (oldest.as_height(self).await, newest.as_height(self).await) {
+                (Some(o), Some(n)) => (o, n),
+                _ => (1.into(), 0.into()), // 1 > 0, so loop exits immediately.
+            };
 
         async_stream::stream! {
             while iter_height <= newest_height {
@@ -403,8 +443,15 @@ impl ArchivalState {
         oldest: BlockSelector,
         newest: BlockSelector,
     ) -> impl Stream<Item = Box<Block>> + '_ {
-        let oldest_digest = oldest.as_digest(self).await.unwrap();
-        let mut iter_digest = newest.as_digest(self).await.unwrap();
+        let (oldest_digest, mut iter_digest) =
+            match (oldest.as_digest(self).await, newest.as_digest(self).await) {
+                (Some(o), Some(n)) => (o, n),
+                _ => (
+                    // so loop will exit immediately on failure.
+                    Block::genesis_prev_block_digest().into(),
+                    Block::genesis_prev_block_digest().into(),
+                ),
+            };
 
         async_stream::stream! {
             while iter_digest != oldest_digest && iter_digest != Block::genesis_prev_block_digest() {
@@ -421,7 +468,7 @@ impl ArchivalState {
         oldest: BlockSelector,
     ) -> Option<Block> {
         let oldest_digest = oldest.as_digest(self).await?;
-        let mut block = self.get_tip().await;
+        let mut block = self.tip().to_owned();
 
         loop {
             if block
@@ -448,59 +495,22 @@ impl ArchivalState {
 
     /// Return the latest block that was stored to disk. If no block has been stored to disk, i.e.
     /// if tip is genesis, then `None` is returned
-    async fn get_tip_from_disk(&self) -> Result<Option<Block>> {
-        let tip_digest = self.block_index_db.get(BlockIndexKey::BlockTipDigest).await;
-        let tip_digest: Digest = match tip_digest {
-            Some(digest) => digest.as_tip_digest(),
-            None => return Ok(None),
-        };
-
-        let tip_block_record: BlockRecord = self
-            .block_index_db
-            .get(BlockIndexKey::Block(tip_digest))
-            .await
-            .unwrap()
-            .as_block_record();
-
-        let block: Block = self.get_block_from_block_record(tip_block_record).await?;
-
-        Ok(Some(block))
+    #[cfg(test)]
+    async fn get_tip_from_disk(&self) -> Option<Box<Block>> {
+        Self::load_tip(&self.data_dir, &self.block_index_db).await
     }
 
     /// Return latest block from database, or genesis block if no other block
     /// is known.
-    pub async fn get_tip(&self) -> Block {
-        let lookup_res_info: Option<Block> = self
-            .get_tip_from_disk()
-            .await
-            .expect("Failed to read block from disk");
-
-        match lookup_res_info {
-            None => *self.genesis_block.clone(),
-            Some(block) => block,
-        }
+    pub fn tip(&self) -> &Block {
+        &self.tip_block
     }
 
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
     pub async fn get_tip_parent(&self) -> Option<Block> {
-        let tip_digest = self
-            .block_index_db
-            .get(BlockIndexKey::BlockTipDigest)
-            .await?;
-        let tip_digest: Digest = tip_digest.as_tip_digest();
-        let tip_header = self
-            .block_index_db
-            .get(BlockIndexKey::Block(tip_digest))
+        self.get_block(self.tip_block.header().prev_block_digest)
             .await
-            .map(|x| x.as_block_record().block_header)
-            .expect("Indicated block must exist in block record");
-
-        let parent = self
-            .get_block(tip_header.prev_block_digest)
-            .await
-            .expect("Fetching indicated block must succeed");
-
-        Some(parent.expect("Indicated block must exist"))
+            .expect("Fetching indicated block must succeed")
     }
 
     pub async fn get_block_header(&self, block_digest: Digest) -> Option<BlockHeader> {
@@ -537,7 +547,11 @@ impl ArchivalState {
         };
 
         // Fetch block from disk
-        let block = self.get_block_from_block_record(record).await?;
+        let block = Self::get_block_from_block_record(
+            Self::block_file_path(&self.data_dir, &record),
+            record,
+        )
+        .await?;
 
         Ok(Some(block))
     }
@@ -905,6 +919,37 @@ impl ArchivalState {
         self.archival_mutator_set.persist().await;
 
         Ok(())
+    }
+}
+
+impl BlockchainBlockSelector for ArchivalState {
+    /// retrieve tip digest
+    fn tip_digest(&self) -> Digest {
+        self.tip_block.hash()
+    }
+
+    fn tip_height(&self) -> BlockHeight {
+        self.tip_block.header().height
+    }
+
+    /// retrieve genesis digest
+    fn genesis_digest(&self) -> Digest {
+        self.genesis_block.hash()
+    }
+
+    async fn height_to_canonical_digest(&self, h: BlockHeight) -> Option<Digest> {
+        self.block_height_to_canonical_block_digest(h, self.tip_digest())
+            .await
+    }
+
+    async fn digest_to_canonical_height(&self, d: Digest) -> Option<BlockHeight> {
+        match self
+            .block_belongs_to_canonical_chain(d, self.tip_digest())
+            .await
+        {
+            true => self.get_block_header(d).await.map(|h| h.height),
+            false => None,
+        }
     }
 }
 
@@ -1937,7 +1982,7 @@ mod archival_state_tests {
                     .await,
                 "AMS must be correctly updated"
             );
-            assert_eq!(block_2, state.chain.archival_state().get_tip().await);
+            assert_eq!(block_2, *state.chain.archival_state().tip());
             assert_eq!(
                 block_1,
                 state.chain.archival_state().get_tip_parent().await.unwrap()
@@ -1960,13 +2005,10 @@ mod archival_state_tests {
             let mut archival_state: ArchivalState = make_test_archival_state(network).await;
 
             assert!(
-                archival_state.get_tip_from_disk().await.unwrap().is_none(),
+                archival_state.get_tip_from_disk().await.is_none(),
                 "Must return None when no block is stored in DB"
             );
-            assert_eq!(
-                archival_state.genesis_block(),
-                &archival_state.get_tip().await
-            );
+            assert_eq!(archival_state.genesis_block(), archival_state.tip());
             assert!(
                 archival_state.get_tip_parent().await.is_none(),
                 "Genesis tip has no parent"
@@ -1987,13 +2029,13 @@ mod archival_state_tests {
 
             assert_eq!(
                 mock_block_1,
-                archival_state.get_tip_from_disk().await.unwrap().unwrap(),
+                *archival_state.get_tip_from_disk().await.unwrap(),
                 "Returned block must match the one inserted"
             );
-            assert_eq!(mock_block_1, archival_state.get_tip().await);
+            assert_eq!(mock_block_1, *archival_state.tip());
             assert_eq!(
-                archival_state.genesis_block(),
-                &archival_state.get_tip_parent().await.unwrap()
+                Some(archival_state.genesis_block()),
+                archival_state.get_tip_parent().await.as_ref()
             );
 
             // Add a 2nd block and verify that this new block is now returned
@@ -2006,17 +2048,17 @@ mod archival_state_tests {
             add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
                 .await
                 .unwrap();
-            let ret2 = archival_state.get_tip_from_disk().await.unwrap();
+            let ret2 = archival_state.get_tip_from_disk().await;
             assert!(
                 ret2.is_some(),
                 "Must return a block when one is stored to DB"
             );
             assert_eq!(
                 mock_block_2,
-                ret2.unwrap(),
+                *ret2.unwrap(),
                 "Returned block must match the one inserted"
             );
-            assert_eq!(mock_block_2, archival_state.get_tip().await);
+            assert_eq!(mock_block_2, *archival_state.tip());
             assert_eq!(mock_block_1, archival_state.get_tip_parent().await.unwrap());
         }
 
@@ -2906,6 +2948,7 @@ mod archival_state_tests {
             .as_tip_digest();
 
         assert_eq!(mock_block_1.hash(), tip_digest);
+        assert_eq!(archival_state.tip_digest(), tip_digest);
 
         // Verify that `Block` is stored correctly
         let actual_block: BlockRecord = archival_state
@@ -3027,14 +3070,16 @@ mod archival_state_tests {
         );
 
         // Test `get_latest_block_from_disk`
-        let read_latest_block = archival_state.get_tip_from_disk().await?.unwrap();
+        let read_latest_block = *archival_state.get_tip_from_disk().await.unwrap();
         assert_eq!(mock_block_2, read_latest_block);
 
         // Test `get_block_from_block_record`
-        let block_from_block_record = archival_state
-            .get_block_from_block_record(actual_block_record_2)
-            .await
-            .unwrap();
+        let block_from_block_record = ArchivalState::get_block_from_block_record(
+            ArchivalState::block_file_path(&archival_state.data_dir, &actual_block_record_2),
+            actual_block_record_2,
+        )
+        .await
+        .unwrap();
         assert_eq!(mock_block_2, block_from_block_record);
         assert_eq!(mock_block_2.hash(), block_from_block_record.hash());
 
