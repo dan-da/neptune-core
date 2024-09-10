@@ -506,6 +506,11 @@ impl ArchivalState {
         &self.tip_block
     }
 
+    /// returns mutable reference to tip block
+    pub(crate) fn tip_mut(&mut self) -> &mut Block {
+        &mut self.tip_block
+    }
+
     /// Return parent of tip block. Returns `None` iff tip is genesis block.
     pub async fn get_tip_parent(&self) -> Option<Block> {
         self.get_block(self.tip_block.header().prev_block_digest)

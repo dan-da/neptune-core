@@ -76,7 +76,6 @@ use crate::models::peer::PeerInfo;
 use crate::models::peer::PeerMessage;
 use crate::models::peer::PeerStanding;
 use crate::models::state::archival_state::ArchivalState;
-use crate::models::state::blockchain_state::BlockchainArchivalState;
 use crate::models::state::blockchain_state::BlockchainState;
 use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
@@ -205,10 +204,7 @@ pub async fn mock_genesis_global_state(
         light_state.body().mutator_set_accumulator.hash()
     );
     let mempool = Mempool::new(ByteSize::gb(1), genesis_block.hash());
-    let blockchain_state = BlockchainState::Archival(BlockchainArchivalState {
-        light_state,
-        archival_state,
-    });
+    let blockchain_state = BlockchainState::Archival(archival_state);
     let cli_args = cli_args::Args {
         network,
         ..Default::default()
