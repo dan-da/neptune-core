@@ -378,9 +378,8 @@ impl GlobalStateLock {
         // check if wallet is already expecting this utxo.
         let has_expected_utxo = state
             .wallet_state
-            .find_expected_utxo(&announced_utxo.utxo, announced_utxo.sender_randomness)
-            .await
-            .is_some();
+            .has_expected_utxo(&(announced_utxo.clone(), UtxoNotifier::Claim).into())
+            .await;
 
         // look for a canonical block that has this utxo as an output
         let maybe_prepared_claim = match state

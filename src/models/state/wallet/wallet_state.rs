@@ -244,7 +244,7 @@ impl WalletState {
 
     /// notifies wallet to expect a utxo in a future block.
     ///
-    /// panics if an [ExpectedUtxo] already exists with the same [Utxo].
+    /// panics if an [ExpectedUtxo] already exists.
     ///
     /// perf: the dup check is presently o(n).  It can be made o(1).  see
     ///       find_expected_utxo()
@@ -261,11 +261,7 @@ impl WalletState {
     ///      likewise add_expected_utxo() could perhaps be refactored to perform
     ///      a claim() if the target utxo has already been confirmed in a block.
     pub(crate) async fn add_expected_utxo(&mut self, expected_utxo: ExpectedUtxo) {
-        if self
-            .find_expected_utxo(&expected_utxo.utxo, expected_utxo.sender_randomness)
-            .await
-            .is_some()
-        {
+        if self.has_expected_utxo(&expected_utxo).await {
             panic!("ExpectedUtxo already exists in wallet");
         }
 
@@ -359,13 +355,11 @@ impl WalletState {
             .filter_map(move |a| eu_map.get(a).map(|eu| eu.into()))
     }
 
-    /// find the `ExpectedUtxo` that matches `utxo`, if any
+    /// check if wallet already has the provided `expected_utxo`
     ///
     /// note that [WalletState::add_expected_utxo()] prevents duplicate
-    /// [ExpectedUtxo] for a given [(Utxo, sender_randomness)].
-    ///
-    /// note that Utxo alone is not a unique identifier, as payments of
-    /// same amount to same key will create dup Utxos. (Eg coinbase)
+    /// [ExpectedUtxo], however its possible for distinct `ExpectedUtxo` to
+    /// include the same `Utxo`.
     ///
     /// perf:
     ///
@@ -374,29 +368,17 @@ impl WalletState {
     /// often be working with recent ExpectedUtxos.
     ///
     /// This fn could be made o(1) if we were to store ExpectedUtxo keyed by
-    /// hash(Utxo, sender_randomness).  This would require a separate levelDb
+    /// hash(ExpectedUtxo).  This would require a separate levelDb
     /// file for ExpectedUtxo or using a DB such as redb that supports
     /// transactional namespaces.
-    pub async fn find_expected_utxo(
-        &self,
-        utxo: &Utxo,
-        sender_randomness: Digest,
-    ) -> Option<ExpectedUtxo> {
+    pub async fn has_expected_utxo(&self, expected_utxo: &ExpectedUtxo) -> bool {
         let len = self.wallet_db.expected_utxos().len().await;
-        let stream = self
-            .wallet_db
+        self.wallet_db
             .expected_utxos()
             .stream_many_values((0..len).rev())
             .await
-            .filter(|eu| {
-                futures::future::ready(
-                    eu.utxo == *utxo && eu.sender_randomness == sender_randomness,
-                )
-            });
-
-        pin_mut!(stream); // needed for iteration
-
-        stream.next().await
+            .any(|eu| futures::future::ready(eu == *expected_utxo))
+            .await
     }
 
     /// find the `MonitoredUtxo` that matches `utxo`, if any

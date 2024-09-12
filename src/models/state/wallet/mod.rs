@@ -271,25 +271,79 @@ impl WalletSecret {
 
     /// Return the secret key that is used to deterministically generate commitment pseudo-randomness
     /// for the mutator set.
+    ///
+    /// design choices:
+    ///
+    /// 1. random or deterministic?
+    ///
+    /// This method could generate a random value or a deterministic value.  if
+    /// random, then we don't need to accept any params and can just call
+    /// rand::random() and we're done.
+    ///
+    /// However, there is a [stated goal](https://github.com/Neptune-Crypto/neptune-core/issues/181#issuecomment-2341230087)
+    /// that if a utxo recipient somehow loses the sender randomness then they
+    /// could ask the sender to re-send it.  The sender could do that either by
+    /// storing a list of sender_randomness per sent utxo or by regenerating it
+    /// deterministically.  The latter is thought to be simpler.
+    ///
+    /// Further choices are constrained by this goal.
+    ///
+    /// 2. which params?
+    ///
+    /// Ideally each tx output (utxo) would have a unique sender_randomness.
+    /// We can't really guarantee that deterministically.  But we can get
+    /// pretty close with the params:
+    ///
+    /// block_height, lock_script, tx_timestamp, output_index
+    ///
+    /// But there's a problem.  Once a block is mined the tx_timestamp
+    /// disappears because all the transactions are merged into a single
+    /// block-tx which has the timestamp of the latest user-tx.  So neither
+    /// recipient nor sender can lookup the user-tx timetamp after the user-tx
+    /// is confirmed in a block.
+    ///
+    /// output_index has the same problem as tx_timestamp.  The original index
+    /// gets lost when all the user-tx are merged into the block-tx.
+    ///
+    /// If we remove tx_timestamp and output_index then any user-tx in the same
+    /// block with same lock_script will share the same sender_randomness.
+    ///
+    /// 3. is that a big problem?
+    ///
+    /// Apparently not.  privacy does not depend on the sender_randomness
+    /// being unique.  see [1].
+    ///
+    /// So it is decided not to include tx_timestamp and output_index since
+    /// inclusion would defeat our stated goal.
+    ///
+    /// 4. anyone_can_spend, etc
+    ///
+    /// Not all output utxos are generated from ReceivingAddress::lock_script().
+    /// An example is LockScript::anyone_can_spend().  Unit-test code that uses
+    /// anyone-can-spend always passes random() for the receiver_digest field
+    /// which makes the output of sender_randomness non-deterministic anyway.
+    /// This asymmetry is a bit gross, but does not appear to be an actual
+    /// problem.
+    ///
+    /// [1] further discussion at:
+    /// <https://github.com/Neptune-Crypto/neptune-core/issues/181>
     pub fn generate_sender_randomness(
         &self,
-        _block_height: BlockHeight,
-        _receiver_digest: Digest,
+        block_height: BlockHeight,
+        receiver_digest: Digest,
     ) -> Digest {
-        rand::random()
-
-        // const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
-        // Hash::hash_varlen(
-        //     &[
-        //         self.secret_seed.0.encode(),
-        //         vec![
-        //             BFieldElement::new(SENDER_RANDOMNESS_FLAG),
-        //             block_height.into(),
-        //         ],
-        //         receiver_digest.encode(),
-        //     ]
-        //     .concat(),
-        // )
+        const SENDER_RANDOMNESS_FLAG: u64 = 0x5e116e1270u64;
+        Hash::hash_varlen(
+            &[
+                self.secret_seed.0.encode(),
+                vec![
+                    BFieldElement::new(SENDER_RANDOMNESS_FLAG),
+                    block_height.into(),
+                ],
+                receiver_digest.encode(),
+            ]
+            .concat(),
+        )
     }
 
     /// Read Wallet from file as JSON
@@ -896,6 +950,8 @@ mod wallet_tests {
 
         let previous_msa = genesis_block.kernel.body.mutator_set_accumulator.clone();
         let (mut block_1, _, _) = make_mock_block(&genesis_block, None, own_address, rng.gen());
+        let mut now = genesis_block.kernel.header.timestamp;
+        let tx_timestamp = now + seven_months;
 
         let tx_outputs_12_to_other = TxOutput::fake_address(
             Utxo {
@@ -926,12 +982,11 @@ mod wallet_tests {
             own_address.privacy_digest,
         );
         let tx_outputs_to_other = vec![tx_outputs_12_to_other, tx_outputs_one_to_other];
-        let mut now = genesis_block.kernel.header.timestamp;
         let (valid_tx, expected_utxos) = premine_receiver_global_state
             .create_transaction_test_wrapper(
                 tx_outputs_to_other.clone(),
                 NeptuneCoins::new(2),
-                now + seven_months,
+                tx_timestamp,
             )
             .await
             .unwrap();
