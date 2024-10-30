@@ -680,7 +680,7 @@ mod wallet_tests {
 
         let alice_wallet_secret = WalletSecret::new_random();
         let mut alice = mock_genesis_global_state(network, 1, alice_wallet_secret).await;
-        let alice_proving_lock = alice.proving_lock.clone();
+        let alice_vm_job_queue = alice.vm_job_queue().clone();
         let alice_spending_key = alice
             .lock_guard()
             .await
@@ -719,8 +719,8 @@ mod wallet_tests {
 
         // Add block 1 to wallet state
         {
-            let mut alice = alice.lock_guard_mut().await;
-            alice
+            let mut alice_mut = alice.lock_guard_mut().await;
+            alice_mut
                 .wallet_state
                 .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo,
@@ -729,8 +729,8 @@ mod wallet_tests {
                     UtxoNotifier::OwnMiner,
                 ))
                 .await;
-            alice
-                .set_new_tip(block_1.clone(), &alice_proving_lock)
+            alice_mut
+                .set_new_tip(block_1.clone(), &alice_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -754,6 +754,7 @@ mod wallet_tests {
         // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
         {
+            let alice_vm_job_queue = alice.vm_job_queue().clone();
             let mut alice = alice.lock_guard_mut().await;
             for _ in 0..21 {
                 let previous_block = next_block;
@@ -773,7 +774,7 @@ mod wallet_tests {
                     ))
                     .await;
                 alice
-                    .set_new_tip(next_block_prime.clone(), &alice_proving_lock)
+                    .set_new_tip(next_block_prime.clone(), &alice_vm_job_queue)
                     .await
                     .unwrap();
                 next_block = next_block_prime;
@@ -875,9 +876,9 @@ mod wallet_tests {
         let bob_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
             .await
             .wallet_secret;
-        let mut bob = mock_genesis_global_state(network, 2, bob_wallet.clone()).await;
-        let bob_proving_lock = bob.proving_lock.clone();
-        let mut bob = bob.lock_guard_mut().await;
+        let mut bob_global_lock = mock_genesis_global_state(network, 2, bob_wallet.clone()).await;
+        let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
+        let mut bob = bob_global_lock.lock_guard_mut().await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
 
         let bobs_original_balance = bob
@@ -931,7 +932,7 @@ mod wallet_tests {
 
         // Notification for Bob's change happens on-chain. No need to ask
         // wallet to expect change UTXO.
-        bob.set_new_tip(block_1.clone(), &bob_proving_lock)
+        bob.set_new_tip(block_1.clone(), &bob_vm_job_queue)
             .await
             .unwrap();
 
@@ -1007,7 +1008,7 @@ mod wallet_tests {
                 .add_expected_utxo(expected_utxo)
                 .await;
             alice.set_new_tip(next_block.clone()).await.unwrap();
-            bob.set_new_tip(next_block.clone(), &bob_proving_lock)
+            bob.set_new_tip(next_block.clone(), &bob_vm_job_queue)
                 .await
                 .unwrap();
         }
@@ -1082,7 +1083,7 @@ mod wallet_tests {
             rng.gen(),
         );
         alice.set_new_tip(block_2_b.clone()).await.unwrap();
-        bob.set_new_tip(block_2_b.clone(), &bob_proving_lock)
+        bob.set_new_tip(block_2_b.clone(), &bob_vm_job_queue)
             .await
             .unwrap();
         let alice_monitored_utxos_at_2b: Vec<_> =

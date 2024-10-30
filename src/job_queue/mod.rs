@@ -38,7 +38,19 @@ pub trait Job {
     type JobResult: std::fmt::Debug + Send;
 
     fn is_async(&self) -> bool;
-    fn run(self) -> Self::JobResult;
+
+    // note: we provide unimplemented default methods for
+    // run and run_async().  This is so that implementing
+    // types only need to impl the method that corresponds
+    // to result of is_async().
+
+    fn run(self) -> Self::JobResult
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
     fn run_async(self) -> impl std::future::Future<Output = Self::JobResult> + Send;
 }
 
@@ -83,6 +95,16 @@ impl<T: Job + Send + Sync + 'static> JobQueue<T> {
         });
 
         Self { tx }
+    }
+
+    // alias of Self::start().
+    // here for two reasons:
+    //  1. backwards compat with existing tests
+    //  2. if tests call dummy() instead of start(), then it is easier
+    //     to find where start() is called for real.
+    #[cfg(test)]
+    pub fn dummy() -> Self {
+        Self::start()
     }
 
     /// adds job to job-queue and returns immediately.
@@ -143,7 +165,11 @@ mod tests {
     impl Job for DoubleJob {
         type JobResult = (u64, u64);
 
-        async fn run(&self) -> Self::JobResult {
+        fn is_async(&self) -> bool {
+            true
+        }
+
+        async fn run_async(self) -> Self::JobResult {
             let r = (self.data, self.data * 2);
 
             println!("{} * 2 = {}", r.0, r.1);

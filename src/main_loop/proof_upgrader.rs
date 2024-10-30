@@ -151,7 +151,7 @@ impl UpgradeJob {
     /// informs peers of this new transaction.
     pub(crate) async fn handle_upgrade(
         self,
-        triton_vm_job_queue: TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
         main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,

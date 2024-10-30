@@ -1175,10 +1175,11 @@ mod tests {
         // <https://github.com/Neptune-Crypto/neptune-core/issues/207>.
 
         let network = Network::Main;
-        let mut alice = mock_genesis_global_state(network, 0, WalletSecret::devnet_wallet()).await;
+        let mut alice_global_lock =
+            mock_genesis_global_state(network, 0, WalletSecret::devnet_wallet()).await;
+        let alice_vm_job_queue = alice_global_lock.vm_job_queue().clone();
 
-        let alice_proving_lock = alice.proving_lock.clone();
-        let mut alice = alice.global_state_lock.lock_guard_mut().await;
+        let mut alice = alice_global_lock.global_state_lock.lock_guard_mut().await;
         let launch_timestamp = alice.chain.light_state().header().timestamp;
         let released_timestamp = launch_timestamp + Timestamp::months(12);
         let genesis = alice.chain.light_state();
@@ -1238,7 +1239,7 @@ mod tests {
                     alice_key.privacy_preimage,
                     UtxoNotifier::OwnMiner,
                 ),
-                &alice_proving_lock,
+                &alice_vm_job_queue,
             )
             .await
             .unwrap();
@@ -1278,9 +1279,9 @@ mod tests {
         let network = Network::RegTest;
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let mut bob = mock_genesis_global_state(network, 0, bob_wallet_secret).await;
-        let bob_proving_lock = bob.proving_lock.clone();
-        let mut bob = bob.lock_guard_mut().await;
+        let mut bob_global_lock = mock_genesis_global_state(network, 0, bob_wallet_secret).await;
+        let bob_vm_job_queue = bob_global_lock.vm_job_queue().clone();
+        let mut bob = bob_global_lock.lock_guard_mut().await;
         let genesis_block = Block::genesis_block(network);
         let monitored_utxos_count_init = bob.wallet_state.wallet_db.monitored_utxos().len().await;
         let mut mutator_set_accumulator = genesis_block.kernel.body.mutator_set_accumulator.clone();
@@ -1346,7 +1347,7 @@ mod tests {
                 bob_spending_key.privacy_preimage,
                 UtxoNotifier::OwnMiner,
             ),
-            &bob_proving_lock,
+            &bob_vm_job_queue,
         )
         .await
         .unwrap();
@@ -1379,7 +1380,7 @@ mod tests {
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
             make_mock_block(&latest_block, None, alice_address, rng.gen());
-        bob.set_new_tip(block_3b.clone(), &bob_proving_lock)
+        bob.set_new_tip(block_3b.clone(), &bob_vm_job_queue)
             .await
             .unwrap();
 
@@ -1406,7 +1407,7 @@ mod tests {
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
                 make_mock_block(&latest_block, None, alice_address, rng.gen());
-            bob.set_new_tip(new_block.clone(), &bob_proving_lock)
+            bob.set_new_tip(new_block.clone(), &bob_vm_job_queue)
                 .await
                 .unwrap();
 
@@ -1432,7 +1433,7 @@ mod tests {
 
         // Mine *one* more block. Verify that MUTXO is pruned
         let (block_12, _, _) = make_mock_block(&latest_block, None, alice_address, rng.gen());
-        bob.set_new_tip(block_12.clone(), &bob_proving_lock)
+        bob.set_new_tip(block_12.clone(), &bob_vm_job_queue)
             .await
             .unwrap();
 

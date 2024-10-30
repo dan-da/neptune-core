@@ -474,7 +474,7 @@ impl Mempool {
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
-        vm_job_queue: JobQueue<TritonVmJob>,
+        vm_job_queue: &JobQueue<TritonVmJob>,
     ) -> Vec<MempoolEvent> {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
@@ -534,7 +534,7 @@ impl Mempool {
                 .new_with_updated_mutator_set_records(
                     &previous_mutator_set_accumulator,
                     block,
-                    &vm_job_queue,
+                    vm_job_queue,
                 )
                 .await
             {
@@ -640,7 +640,6 @@ mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::locks::tokio::AtomicMutex;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -656,6 +655,7 @@ mod tests {
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::GlobalStateLock;
+    use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
     use crate::tests::shared::make_plenty_mock_transaction_with_primitive_witness;
@@ -994,7 +994,7 @@ mod tests {
             .update_with_block(
                 block_1.kernel.body.mutator_set_accumulator.clone(),
                 &block_2,
-                &AtomicMutex::from(()),
+                &TritonVmJobQueue::dummy(),
             )
             .await;
         assert_eq!(1, mempool.len());
@@ -1050,7 +1050,7 @@ mod tests {
                 .update_with_block(
                     previous_block.kernel.body.mutator_set_accumulator.clone(),
                     &next_block,
-                    &AtomicMutex::from(()),
+                    &TritonVmJobQueue::dummy(),
                 )
                 .await;
             previous_block = next_block;
@@ -1085,7 +1085,7 @@ mod tests {
             .update_with_block(
                 previous_block.kernel.body.mutator_set_accumulator.clone(),
                 &block_5,
-                &AtomicMutex::from(()),
+                &TritonVmJobQueue::dummy(),
             )
             .await;
 

@@ -1490,10 +1490,7 @@ mod rpc_server_tests {
         );
 
         // --- Init.  append the block to blockchain ---
-        let prover_lock = state_lock.proving_lock.clone();
         state_lock
-            .lock_guard_mut()
-            .await
             .set_new_self_mined_tip(
                 block_1,
                 ExpectedUtxo::new(
@@ -1502,7 +1499,6 @@ mod rpc_server_tests {
                     wallet_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMiner,
                 ),
-                &prover_lock,
             )
             .await?;
 
