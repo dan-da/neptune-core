@@ -9,7 +9,6 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::info;
 
@@ -138,7 +137,7 @@ impl ProofCollection {
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Self, TryLockError> {
+    ) -> anyhow::Result<Self> {
         let (
             removal_records_integrity_witness,
             collect_lock_scripts_witness,

@@ -11,7 +11,6 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::info;
 
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -280,7 +279,7 @@ impl SingleProof {
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Proof, TryLockError> {
+    ) -> anyhow::Result<Proof> {
         let proof_collection = ProofCollection::produce(primitive_witness, sync_device).await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();

@@ -45,9 +45,17 @@ pub trait Job {
 /// implements a prioritized job queue that sends result of each job to a listener.
 /// At present order of jobs with the same priority is undefined.
 /// todo: fix it so that jobs with same priority execute FIFO.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JobQueue<T: Job> {
     tx: mpsc::Sender<(T, oneshot::Sender<<T as Job>::JobResult>), JobPriority>,
+}
+
+impl<T: Job> Clone for JobQueue<T> {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+        }
+    }
 }
 
 impl<T: Job + Send + Sync + 'static> JobQueue<T> {

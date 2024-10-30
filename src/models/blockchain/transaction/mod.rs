@@ -31,7 +31,6 @@ use tasm_lib::triton_vm;
 use tasm_lib::triton_vm::stark::Stark;
 use tasm_lib::twenty_first::util_types::mmr::mmr_successor_proof::MmrSuccessorProof;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::info;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
@@ -308,7 +307,7 @@ impl Transaction {
         mutator_set_update: MutatorSetUpdate,
         old_single_proof: Proof,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Transaction, TryLockError> {
+    ) -> anyhow::Result<Transaction> {
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
         let mut calculated_new_mutator_set = previous_mutator_set_accumulator.clone();
@@ -424,8 +423,8 @@ impl Transaction {
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
-        sync_device: &TritonVmJobQueue,
-    ) -> Result<Transaction, TryLockError> {
+        triton_vm_job_queue: &TritonVmJobQueue,
+    ) -> Result<Transaction> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
             "Mutator sets must be equal for transaction merger."
@@ -462,7 +461,11 @@ impl Transaction {
         info!("Start: creating merge proof");
         let merge_claim = merge_witness.claim();
         let merge_proof = Merge
-            .prove(&merge_claim, merge_witness.nondeterminism(), sync_device)
+            .prove(
+                &merge_claim,
+                merge_witness.nondeterminism(),
+                triton_vm_job_queue,
+            )
             .await?;
         info!("Done: creating merge proof");
         let new_single_proof_witness =
@@ -473,7 +476,7 @@ impl Transaction {
             .prove(
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
             )
             .await?;
         info!("Done: creating new single proof");

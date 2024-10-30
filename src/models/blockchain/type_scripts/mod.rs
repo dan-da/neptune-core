@@ -17,7 +17,6 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
 use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
@@ -177,7 +176,7 @@ impl TypeScriptAndWitness {
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Proof, TryLockError> {
+    ) -> anyhow::Result<Proof> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
             .flat_map(|d| d.reversed().values())

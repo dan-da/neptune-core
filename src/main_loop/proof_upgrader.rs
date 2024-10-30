@@ -1,12 +1,10 @@
 use std::time::SystemTime;
 
-use anyhow::Result;
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::proof::Proof;
-use tokio::sync::TryLockError;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -191,6 +189,7 @@ impl UpgradeJob {
                 info!("Failed to upgrade transaction because prover was occupied:\n{err}");
                 return;
             }
+            _ => panic!("got unexpected upgrade-proof result"),
         };
 
         let new_update_job: UpdateMutatorSetDataJob = {
@@ -274,7 +273,7 @@ impl UpgradeJob {
     pub(crate) async fn upgrade(
         self,
         triton_vm_job_queue: TritonVmJobQueue,
-    ) -> Result<Transaction, TryLockError> {
+    ) -> anyhow::Result<Transaction> {
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());

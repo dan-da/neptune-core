@@ -8,11 +8,12 @@ use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::triton_vm::vm::VMState;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
-use tokio::sync::TryLockError;
 use tracing::debug;
 
 use super::environment;
 use crate::job_queue::triton_vm_job::TritonVmJob;
+use crate::job_queue::triton_vm_job::TritonVmJobResult;
+use crate::job_queue::JobPriority;
 use crate::job_queue::JobQueue;
 
 #[derive(Debug, Clone)]
@@ -108,7 +109,7 @@ where
         claim: &Claim,
         nondeterminism: NonDeterminism,
         triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<Proof, TryLockError> {
+    ) -> anyhow::Result<Proof> {
         {
             prove_consensus_program(
                 self.program(),
@@ -117,6 +118,31 @@ where
                 triton_vm_job_queue,
             )
             .await
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConsensusProgramProver {
+    program: Program,
+    claim: Claim,
+    nondeterminism: NonDeterminism,
+}
+impl ConsensusProgramProver {
+    pub(crate) fn prove(self) -> Proof {
+        #[cfg(test)]
+        {
+            test::load_proof_or_produce_and_save(&self.claim, self.program, self.nondeterminism)
+        }
+        #[cfg(not(test))]
+        {
+            tasm_lib::triton_vm::prove(
+                tasm_lib::triton_vm::stark::Stark::default(),
+                &self.claim,
+                &self.program,
+                self.nondeterminism,
+            )
+            .unwrap()
         }
     }
 }
@@ -135,59 +161,37 @@ pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-    _triton_vm_job_queue: &TritonVmJobQueue,
-) -> Result<Proof, TryLockError> {
-    // Hold proving lock until this function has terminated to prevent multiple
-    // tasks from attempting to produce proofs simultaneously -- as this will
-    // crash most computers and since the prover is already heavily parallel.
-
-    // let _lock = if priority.wait_if_busy {
-    //     priority.proving_lock.lock_guard().await
-    // } else {
-    //     match priority.proving_lock.try_lock_guard() {
-    //         Ok(lock) => lock,
-    //         Err(err) => {
-    //             info!("Failed to grab prover lock. Not waiting because this is a non-blocking call to proof. Is prover already running?");
-    //             return Err(err);
-    //         }
-    //     }
-    // };
+    triton_vm_job_queue: &TritonVmJobQueue,
+) -> anyhow::Result<Proof> {
+    // Adds the proof execution job to global triton-vm job queue.
+    // This prevents multiple tasks from attempting to produce proofs
+    // simultaneously -- as this will crash most computers and since the
+    // prover is already heavily parallel and requires huge amounts of RAM.
 
     assert_eq!(program.hash(), claim.program_digest);
 
     let init_vm_state = VMState::new(&program, claim.input.clone().into(), nondeterminism.clone());
     maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
 
-    let proof = {
-        #[cfg(test)]
-        {
-            test::load_proof_or_produce_and_save(&claim, program.clone(), nondeterminism.clone())
-        }
-        #[cfg(not(test))]
-        {
-            let claim_clone = claim.clone();
-            let program_clone = program.clone();
-            let nondeterminism_clone = nondeterminism.clone();
-            tokio::task::spawn_blocking(move || {
-                tasm_lib::triton_vm::prove(
-                    tasm_lib::triton_vm::stark::Stark::default(),
-                    &claim_clone,
-                    &program_clone,
-                    nondeterminism_clone,
-                )
-                .unwrap()
-            })
-            .await
-            .unwrap()
-        }
-    };
-
-    let vm_output = VM::run(&program, claim.input.clone().into(), nondeterminism);
+    let vm_output = VM::run(&program, claim.input.clone().into(), nondeterminism.clone());
     assert!(vm_output.is_ok());
     assert_eq!(claim.program_digest, program.hash());
     assert_eq!(claim.output, vm_output.unwrap());
 
-    Ok(proof)
+    let prover = ConsensusProgramProver {
+        program,
+        claim,
+        nondeterminism,
+    };
+    let job = TritonVmJob::ProveConsensusProgram(prover);
+    match triton_vm_job_queue
+        .add_and_await_job(job, JobPriority::Medium)
+        .await?
+    {
+        Ok(TritonVmJobResult::ProveConsensusProgram(proof)) => Ok(proof),
+        Err(e) => Err(e),
+        _ => panic!("got unexpected proof result"),
+    }
 }
 
 #[cfg(test)]

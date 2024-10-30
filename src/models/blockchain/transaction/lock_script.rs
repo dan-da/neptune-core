@@ -5,7 +5,6 @@ use get_size::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::*;
-use tokio::sync::TryLockError;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::tip5::Digest;
@@ -135,7 +134,7 @@ impl LockScriptAndWitness {
         &self,
         public_input: PublicInput,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Proof, TryLockError> {
+    ) -> anyhow::Result<Proof> {
         let claim = Claim::new(self.program.hash()).with_input(public_input.individual_tokens);
         prove_consensus_program(
             self.program.clone(),

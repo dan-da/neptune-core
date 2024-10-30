@@ -23,7 +23,6 @@ use num_traits::CheckedSub;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tasm_lib::triton_vm::prelude::*;
-use tokio::sync::TryLockError;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
@@ -156,7 +155,11 @@ impl GlobalStateLock {
         }
     }
 
-    /// Block execution until prover is free.
+    /// returns reference-counted clone of the triton vm job queue.
+    ///
+    /// callers should execute resource intensive triton-vm tasks in this
+    /// queue to avoid running simultaneous tasks that could exceed hardware
+    /// capabilities.
     pub(crate) fn vm_job_queue(&self) -> TritonVmJobQueue {
         self.vm_job_queue.clone()
     }
@@ -784,7 +787,7 @@ impl GlobalState {
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Transaction, TryLockError> {
+    ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
         //       block the tokio executor and other async tasks.
@@ -801,7 +804,7 @@ impl GlobalState {
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
         sync_device: &TritonVmJobQueue,
-    ) -> Result<Transaction, TryLockError> {
+    ) -> anyhow::Result<Transaction> {
         let TransactionDetails {
             tx_inputs,
             tx_outputs,
