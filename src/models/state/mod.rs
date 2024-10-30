@@ -55,6 +55,7 @@ use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
+use crate::job_queue::triton_vm_job::VmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -68,7 +69,6 @@ use crate::time_fn_call_async;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 use crate::VERSION;
-use crate::job_queue::triton_vm_job::VmJobQueue;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
 /// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
@@ -131,8 +131,7 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-
-    pub(crate) vm_job_queue: VmJobQueue,  // todo: make private.
+    pub(crate) vm_job_queue: VmJobQueue, // todo: make private.
 }
 
 impl GlobalStateLock {
@@ -159,7 +158,7 @@ impl GlobalStateLock {
 
     /// Block execution until prover is free.
     pub(crate) fn vm_job_queue(&self) -> TritonVmJobQueue {
-        TritonVmJobQueue::new(self.vm_job_queue.clone())
+        self.vm_job_queue.clone()
     }
 
     // check if mining

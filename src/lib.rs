@@ -7,6 +7,7 @@
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
+pub mod job_queue;
 pub mod locks;
 pub mod macros;
 pub mod main_loop;
@@ -16,7 +17,6 @@ pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_server;
 pub mod util_types;
-pub mod job_queue;
 
 #[cfg(test)]
 pub mod tests;

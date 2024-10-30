@@ -12,8 +12,8 @@ use tokio::sync::TryLockError;
 use tracing::debug;
 
 use super::environment;
-use crate::job_queue::JobQueue;
 use crate::job_queue::triton_vm_job::TritonVmJob;
+use crate::job_queue::JobQueue;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -21,32 +21,7 @@ pub enum ConsensusError {
     TritonVMPanic(String, InstructionError),
 }
 
-/// Holds a lock ensuring that maximum one instance of the Triton VM STARK
-/// prover is running at a time, and the policy of what to do if an instance is
-/// already waiting: Wait or return an error.
-#[derive(Debug, Clone)]
-pub struct TritonVmJobQueue {
-    pub(crate) vm_job_queue: JobQueue<TritonVmJob>,
-}
-
-impl TritonVmJobQueue {
-    /// Block execution until prover is free.
-    pub(crate) fn new(vm_job_queue: JobQueue<TritonVmJob>) -> Self {
-        Self {
-            vm_job_queue,
-        }
-    }
-
-    /// Prover synchronization instance for unit tests. Does not guarantee
-    /// that only one instance of the Triton VM prover is running.
-    // #[cfg(test)]
-    pub(crate) fn dummy() -> Self {
-
-        Self {
-            vm_job_queue: JobQueue::start(),
-        }
-    }
-}
+pub type TritonVmJobQueue = JobQueue<TritonVmJob>;
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
@@ -132,10 +107,16 @@ where
         &self,
         claim: &Claim,
         nondeterminism: NonDeterminism,
-        priority: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<Proof, TryLockError> {
         {
-            prove_consensus_program(self.program(), claim.clone(), nondeterminism, priority).await
+            prove_consensus_program(
+                self.program(),
+                claim.clone(),
+                nondeterminism,
+                triton_vm_job_queue,
+            )
+            .await
         }
     }
 }
@@ -154,7 +135,7 @@ pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-    _priority: &TritonVmJobQueue,
+    _triton_vm_job_queue: &TritonVmJobQueue,
 ) -> Result<Proof, TryLockError> {
     // Hold proving lock until this function has terminated to prevent multiple
     // tasks from attempting to produce proofs simultaneously -- as this will

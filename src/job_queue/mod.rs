@@ -21,7 +21,6 @@
 ///
 /// Using an unbounded channel means that there is no backpressure and no
 /// upper limit on the number of jobs. (except RAM).
-
 pub mod triton_vm_job;
 
 use async_priority_channel as mpsc;
@@ -42,7 +41,6 @@ pub trait Job {
     fn run(self) -> Self::JobResult;
     fn run_async(self) -> impl std::future::Future<Output = Self::JobResult> + Send;
 }
-
 
 /// implements a prioritized job queue that sends result of each job to a listener.
 /// At present order of jobs with the same priority is undefined.
@@ -70,7 +68,7 @@ impl<T: Job + Send + Sync + 'static> JobQueue<T> {
                     true => job.run_async().await,
                     false => tokio::task::spawn_blocking(move || job.run())
                         .await
-                        .unwrap()
+                        .unwrap(),
                 };
                 let _ = otx.send(result);
             }

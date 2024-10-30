@@ -12,12 +12,19 @@ pub type VmJobQueue = JobQueue<TritonVmJob>;
 /// update (updates mutator set data of one single proof)
 #[derive(Debug, Clone)]
 pub enum TritonVmJob {
-    UpgradeProof(UpgradeJob)
+    UpgradeProof {
+        upgrade_job: UpgradeJob,
+        triton_vm_job_queue: VmJobQueue,
+    },
+}
+
+#[derive(Debug)]
+pub enum TritonVmJobResult {
+    UpgradeProof(Transaction),
 }
 
 impl Job for TritonVmJob {
-
-    type JobResult = anyhow::Result<Transaction>;
+    type JobResult = anyhow::Result<TritonVmJobResult>;
 
     fn is_async(&self) -> bool {
         true
@@ -25,7 +32,12 @@ impl Job for TritonVmJob {
 
     async fn run_async(self) -> Self::JobResult {
         match self {
-            Self::UpgradeProof(upgrade_job) => Ok(upgrade_job.upgrade().await?),
+            Self::UpgradeProof {
+                upgrade_job,
+                triton_vm_job_queue,
+            } => Ok(TritonVmJobResult::UpgradeProof(
+                upgrade_job.upgrade(triton_vm_job_queue).await?,
+            )),
         }
     }
 

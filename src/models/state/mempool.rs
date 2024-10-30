@@ -43,8 +43,8 @@ use tracing::error;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
-use crate::job_queue::JobQueue;
 use crate::job_queue::triton_vm_job::TritonVmJob;
+use crate::job_queue::JobQueue;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -52,7 +52,7 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
-use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
+// use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -527,7 +527,6 @@ impl Mempool {
 
         // Update the remaining transactions so their mutator set data is still valid
         // But kick out those transactions that we were unable to update.
-        let skip_if_prover_is_busy = TritonVmJobQueue::new(vm_job_queue);
         let mut kick_outs = Vec::with_capacity(self.tx_dictionary.len());
         for (tx_id, tx) in self.tx_dictionary.iter_mut() {
             if let Ok(new_tx) = tx
@@ -535,7 +534,7 @@ impl Mempool {
                 .new_with_updated_mutator_set_records(
                     &previous_mutator_set_accumulator,
                     block,
-                    &skip_if_prover_is_busy,
+                    &vm_job_queue,
                 )
                 .await
             {
