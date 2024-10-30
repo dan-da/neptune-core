@@ -7,7 +7,6 @@ use rand::SeedableRng;
 use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use tracing::info;
-use tracing::warn;
 
 use crate::job_queue::triton_vm_job::TritonVmJob;
 use crate::job_queue::triton_vm_job::TritonVmJobResult;
@@ -157,110 +156,113 @@ impl UpgradeJob {
         mut global_state_lock: GlobalStateLock,
         main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,
     ) {
-        // Record that we're attempting an upgrade.
-        global_state_lock
-            .lock_guard_mut()
-            .await
-            .net
-            .last_tx_proof_upgrade_attempt = SystemTime::now();
+        let mut upgrade_job = self;
 
-        let affected_txids = self.affected_txids();
-        let mutator_set_for_tx = self.mutator_set();
-
-        let triton_vm_job = TritonVmJob::UpgradeProof {
-            upgrade_job: self,
-            triton_vm_job_queue: triton_vm_job_queue.clone(),
-        };
-        let upgraded = match triton_vm_job_queue
-            .add_and_await_job(triton_vm_job, JobPriority::Medium)
-            .await
-            .unwrap()
-        {
-            Ok(TritonVmJobResult::UpgradeProof(upgraded_tx)) => {
-                info!(
-                    "Successfully upgraded transaction {}",
-                    upgraded_tx.kernel.txid()
-                );
-                upgraded_tx
-            }
-            Err(err) => {
-                // This should only happens when performing low-priority upgrades
-                // e.g. not transactions we have initiated.
-                info!("Failed to upgrade transaction because prover was occupied:\n{err}");
-                return;
-            }
-            _ => panic!("got unexpected upgrade-proof result"),
-        };
-
-        let new_update_job: UpdateMutatorSetDataJob = {
-            let mut global_state = global_state_lock.lock_guard_mut().await;
-            // Did we receive a new block while proving? If so, perform an
-            // update also, if this was requested (and we have a single proof)
-            // if we only have a ProofCollection, then we throw away the work
-            // regardless.
-
-            let transaction_is_deprecated = upgraded.kernel.mutator_set_hash
-                != global_state
-                    .chain
-                    .light_state()
-                    .body()
-                    .mutator_set_accumulator
-                    .hash();
-
-            if !transaction_is_deprecated {
-                // Happy path
-
-                // Inform all peers about our hard work
-                main_to_peer_channel
-                    .send(MainToPeerTask::TransactionNotification(
-                        (&upgraded).try_into().unwrap(),
-                    ))
-                    .unwrap();
-
-                global_state.mempool_insert(upgraded).await;
-
-                info!("Successfully handled proof upgrade.");
-                return;
-            }
-
-            info!(
-                "Transaction is deprecated after upgrade because of new block(s). Affected txs: [{}]",
-                affected_txids.iter().join("\n"));
-
-            if !perform_ms_update_if_needed {
-                info!("Not performing update as this was not requested");
-                return;
-            }
-
-            let TransactionProof::SingleProof(single_proof) = upgraded.proof else {
-                info!("Cannot perform update, as we don't have a SingleProof");
-                return;
-            };
-
-            let Some(ms_update) = global_state
-                .chain
-                .archival_state()
-                .get_mutator_set_update_to_tip(
-                    &mutator_set_for_tx,
-                    SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF,
-                )
+        // process in a loop.  in case a new block comes in while processing
+        // the current tx, then we can move on to the next, and so on.
+        loop {
+            // Record that we're attempting an upgrade.
+            global_state_lock
+                .lock_guard_mut()
                 .await
-            else {
-                info!("Couldn't find path from old mutator set to current tip. Did a reorganization happen?");
-                return;
+                .net
+                .last_tx_proof_upgrade_attempt = SystemTime::now();
+
+            let affected_txids = upgrade_job.affected_txids();
+            let mutator_set_for_tx = upgrade_job.mutator_set();
+
+            let triton_vm_job = TritonVmJob::UpgradeProof {
+                upgrade_job,
+                triton_vm_job_queue: triton_vm_job_queue.clone(),
+            };
+            let upgraded = match triton_vm_job_queue
+                .add_and_await_job(triton_vm_job, JobPriority::Medium)
+                .await
+                .unwrap()
+            {
+                Ok(TritonVmJobResult::UpgradeProof(upgraded_tx)) => {
+                    info!(
+                        "Successfully upgraded transaction {}",
+                        upgraded_tx.kernel.txid()
+                    );
+                    upgraded_tx
+                }
+                Err(e) => {
+                    panic!("UpgradeProof job failed. error: {}", e.to_string());
+                }
+                _ => panic!("got unexpected upgrade-proof result"),
             };
 
-            UpdateMutatorSetDataJob {
-                old_kernel: upgraded.kernel,
-                old_single_proof: single_proof,
-                old_mutator_set: mutator_set_for_tx,
-                mutator_set_update: ms_update,
-            }
-        };
+            let new_update_job: UpdateMutatorSetDataJob = {
+                let mut global_state = global_state_lock.lock_guard_mut().await;
+                // Did we receive a new block while proving? If so, perform an
+                // update also, if this was requested (and we have a single proof)
+                // if we only have a ProofCollection, then we throw away the work
+                // regardless.
 
-        let _new_update_job = UpgradeJob::UpdateMutatorSetData(new_update_job);
+                let transaction_is_deprecated = upgraded.kernel.mutator_set_hash
+                    != global_state
+                        .chain
+                        .light_state()
+                        .body()
+                        .mutator_set_accumulator
+                        .hash();
 
-        warn!("We should perform an upgrade now. But that isn't implemented yet");
+                if !transaction_is_deprecated {
+                    // Happy path
+
+                    // Inform all peers about our hard work
+                    main_to_peer_channel
+                        .send(MainToPeerTask::TransactionNotification(
+                            (&upgraded).try_into().unwrap(),
+                        ))
+                        .unwrap();
+
+                    global_state.mempool_insert(upgraded).await;
+
+                    info!("Successfully handled proof upgrade.");
+                    return;
+                }
+
+                info!(
+                    "Transaction is deprecated after upgrade because of new block(s). Affected txs: [{}]",
+                    affected_txids.iter().join("\n"));
+
+                if !perform_ms_update_if_needed {
+                    info!("Not performing update as this was not requested");
+                    return;
+                }
+
+                let TransactionProof::SingleProof(single_proof) = upgraded.proof else {
+                    info!("Cannot perform update, as we don't have a SingleProof");
+                    return;
+                };
+
+                let Some(ms_update) = global_state
+                    .chain
+                    .archival_state()
+                    .get_mutator_set_update_to_tip(
+                        &mutator_set_for_tx,
+                        SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF,
+                    )
+                    .await
+                else {
+                    info!("Couldn't find path from old mutator set to current tip. Did a reorganization happen?");
+                    return;
+                };
+
+                UpdateMutatorSetDataJob {
+                    old_kernel: upgraded.kernel,
+                    old_single_proof: single_proof,
+                    old_mutator_set: mutator_set_for_tx,
+                    mutator_set_update: ms_update,
+                }
+            };
+
+            upgrade_job = UpgradeJob::UpdateMutatorSetData(new_update_job);
+        }
+
+        // warn!("We should perform an upgrade now. But that isn't implemented yet");
         // TODO: Make recursive call here. Or use a proof queue.
     }
 
