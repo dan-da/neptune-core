@@ -27,7 +27,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::models::blockchain::transaction::validity::merge::Merge;
@@ -279,7 +279,7 @@ impl SingleProof {
     /// This involves generating a [ProofCollection] as an intermediate step.
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Proof, TryLockError> {
         let proof_collection = ProofCollection::produce(primitive_witness, sync_device).await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
@@ -809,7 +809,7 @@ mod test {
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
         let proof_collection =
-            ProofCollection::produce(&primitive_witness, &TritonProverSync::dummy())
+            ProofCollection::produce(&primitive_witness, &TritonVmJobQueue::dummy())
                 .await
                 .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
@@ -849,7 +849,7 @@ mod test {
         let txk_mast_hash = primitive_witness.kernel.mast_hash();
 
         let proof_collection =
-            ProofCollection::produce(&primitive_witness, &TritonProverSync::dummy())
+            ProofCollection::produce(&primitive_witness, &TritonVmJobQueue::dummy())
                 .await
                 .unwrap();
         assert!(proof_collection.verify(txk_mast_hash));
@@ -886,7 +886,7 @@ mod test {
             .prove(
                 &claim_for_update,
                 nondeterminism_for_update,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -921,7 +921,7 @@ mod test {
             .prove(
                 &claim_for_merge,
                 nondeterminism_for_witness,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();

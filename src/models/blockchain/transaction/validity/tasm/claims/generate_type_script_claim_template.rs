@@ -140,7 +140,7 @@ mod test {
     use super::GenerateTypeScriptClaimTemplate;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 
     impl Function for GenerateTypeScriptClaimTemplate {
         fn rust_shadow(
@@ -193,7 +193,7 @@ mod test {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
                 ))
                 .unwrap();
 

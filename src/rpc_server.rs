@@ -314,7 +314,7 @@ impl NeptuneRPCServer {
                 fee,
                 now,
                 tx_proving_capability,
-                &self.state.wait_if_busy(),
+                &self.state.vm_job_queue(),
             )
             .await
         {

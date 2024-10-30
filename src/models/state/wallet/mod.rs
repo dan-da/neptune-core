@@ -443,7 +443,7 @@ mod wallet_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
@@ -914,7 +914,7 @@ mod wallet_tests {
                 NeptuneCoins::new(2),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1176,7 +1176,7 @@ mod wallet_tests {
                 NeptuneCoins::new(4),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1186,7 +1186,7 @@ mod wallet_tests {
                 .await
                 .unwrap();
         let merged_tx = coinbase_tx
-            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .merge_with(tx_from_bob, Default::default(), &TritonVmJobQueue::dummy())
             .await
             .unwrap();
         let block_3_b =
@@ -1348,12 +1348,12 @@ mod wallet_tests {
                 one_money,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
         let tx_for_block = sender_tx
-            .merge_with(cbtx, Default::default(), &TritonProverSync::dummy())
+            .merge_with(cbtx, Default::default(), &TritonVmJobQueue::dummy())
             .await
             .unwrap();
         let block_1 =

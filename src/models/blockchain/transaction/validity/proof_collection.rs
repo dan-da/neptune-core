@@ -26,7 +26,7 @@ use crate::models::blockchain::transaction::validity::removal_records_integrity:
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::triton_vm::proof::Proof;
 
@@ -137,7 +137,7 @@ impl ProofCollection {
 
     pub(crate) async fn produce(
         primitive_witness: &PrimitiveWitness,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Self, TryLockError> {
         let (
             removal_records_integrity_witness,

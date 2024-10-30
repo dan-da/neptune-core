@@ -24,7 +24,7 @@ use super::transaction::transaction_kernel::TransactionKernel;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
@@ -176,7 +176,7 @@ impl TypeScriptAndWitness {
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Proof, TryLockError> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()

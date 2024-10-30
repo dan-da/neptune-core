@@ -49,7 +49,7 @@ use super::blockchain::transaction::transaction_output::UtxoNotificationMedium;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::proof_abstractions::tasm::program::TritonProverSync;
+use super::proof_abstractions::tasm::program::TritonVmJobQueue;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
@@ -68,8 +68,7 @@ use crate::time_fn_call_async;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 use crate::VERSION;
-
-pub(crate) type ProvingLock = sync_tokio::AtomicMutex<()>;
+use crate::job_queue::triton_vm_job::VmJobQueue;
 
 /// `GlobalStateLock` holds a [`tokio::AtomicRw`](crate::locks::tokio::AtomicRw)
 /// ([`RwLock`](std::sync::RwLock)) over [`GlobalState`].
@@ -132,10 +131,8 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    /// Lock held used to indicate that the Triton VM prover is running. Used
-    /// to ensure that only one proof is produced at a time. All calls to
-    /// Triton VM's prover (except tests) must acquire this lock.
-    pub(crate) proving_lock: ProvingLock,
+
+    pub(crate) vm_job_queue: VmJobQueue,  // todo: make private.
 }
 
 impl GlobalStateLock {
@@ -153,27 +150,16 @@ impl GlobalStateLock {
             Some("GlobalState"),
             Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
         ));
-        let proving_lock = sync_tokio::AtomicMutex::<()>::from((
-            (),
-            Some("proving_lock"),
-            Some(crate::LOG_TOKIO_LOCK_EVENT_CB),
-        ));
-
         Self {
             global_state_lock,
             cli,
-            proving_lock,
+            vm_job_queue: VmJobQueue::start(),
         }
     }
 
     /// Block execution until prover is free.
-    pub(crate) fn wait_if_busy(&self) -> TritonProverSync {
-        TritonProverSync::wait_if_busy(self.proving_lock.clone())
-    }
-
-    /// Skip proof generation if prover is busy.
-    pub(crate) fn skip_if_busy(&self) -> TritonProverSync {
-        TritonProverSync::skip_if_busy(self.proving_lock.clone())
+    pub(crate) fn vm_job_queue(&self) -> TritonVmJobQueue {
+        TritonVmJobQueue::new(self.vm_job_queue.clone())
     }
 
     // check if mining
@@ -202,19 +188,19 @@ impl GlobalStateLock {
         new_block: Block,
         coinbase_utxo_info: ExpectedUtxo,
     ) -> Result<()> {
-        let prover_lock = self.proving_lock.clone();
+        let vm_job_queue = self.vm_job_queue.clone();
         self.lock_guard_mut()
             .await
-            .set_new_self_mined_tip(new_block, coinbase_utxo_info, &prover_lock)
+            .set_new_self_mined_tip(new_block, coinbase_utxo_info, vm_job_queue)
             .await
     }
 
     /// store a block (non coinbase)
     pub async fn set_new_tip(&mut self, new_block: Block) -> Result<()> {
-        let prover_lock = self.proving_lock.clone();
+        let vm_job_queue = self.vm_job_queue.clone();
         self.lock_guard_mut()
             .await
-            .set_new_tip(new_block, &prover_lock)
+            .set_new_tip(new_block, vm_job_queue)
             .await
     }
 
@@ -688,7 +674,7 @@ impl GlobalState {
         change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
         timestamp: Timestamp,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         // TODO: function not used because all callers got through its
         // equivalent method `create_transaction_with_prover_capability`,
@@ -717,7 +703,7 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
@@ -798,7 +784,7 @@ impl GlobalState {
     pub(crate) async fn create_raw_transaction(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Transaction, TryLockError> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
@@ -815,7 +801,7 @@ impl GlobalState {
     async fn create_transaction_from_data_worker(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Transaction, TryLockError> {
         let TransactionDetails {
             tx_inputs,
@@ -1292,8 +1278,8 @@ impl GlobalState {
 
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
     /// The received block will be set as the new tip, regardless of its accumulated PoW.
-    pub async fn set_new_tip(&mut self, new_block: Block, prover_lock: &ProvingLock) -> Result<()> {
-        self.set_new_tip_internal(new_block, None, prover_lock)
+    pub async fn set_new_tip(&mut self, new_block: Block, vm_job_queue: VmJobQueue) -> Result<()> {
+        self.set_new_tip_internal(new_block, None, vm_job_queue)
             .await
     }
 
@@ -1304,9 +1290,9 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         coinbase_utxo_info: ExpectedUtxo,
-        prover_lock: &ProvingLock,
+        vm_job_queue: VmJobQueue,
     ) -> Result<()> {
-        self.set_new_tip_internal(new_block, Some(coinbase_utxo_info), prover_lock)
+        self.set_new_tip_internal(new_block, Some(coinbase_utxo_info), vm_job_queue)
             .await
     }
 
@@ -1317,7 +1303,7 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         coinbase_utxo_info: Option<ExpectedUtxo>,
-        prover_lock: &ProvingLock,
+        vm_job_queue: VmJobQueue,
     ) -> Result<()> {
         // note: we make this fn internal so we can log its duration and ensure it will
         // never be called directly by another fn, without the timings.
@@ -1325,7 +1311,7 @@ impl GlobalState {
             myself: &mut GlobalState,
             new_block: Block,
             coinbase_utxo_info: Option<ExpectedUtxo>,
-            prover_lock: &ProvingLock,
+            vm_job_queue: VmJobQueue,
         ) -> Result<()> {
             // Apply the updates
             myself
@@ -1385,7 +1371,7 @@ impl GlobalState {
 
             myself
                 .mempool
-                .update_with_block(previous_ms_accumulator, &new_block, prover_lock)
+                .update_with_block(previous_ms_accumulator, &new_block, vm_job_queue)
                 .await;
 
             myself.chain.light_state_mut().set_block(new_block);
@@ -1400,7 +1386,7 @@ impl GlobalState {
             self,
             new_block,
             coinbase_utxo_info,
-            prover_lock
+            vm_job_queue,
         ))
     }
 
@@ -1590,7 +1576,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 launch + six_months - one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy()
+                &TritonVmJobQueue::dummy()
             )
             .await
             .is_err());
@@ -1606,7 +1592,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -1645,7 +1631,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 launch + six_months + one_month,
                 TxProvingCapability::ProofCollection,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2142,7 +2128,7 @@ mod global_state_tests {
                 fee,
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2168,7 +2154,7 @@ mod global_state_tests {
             .merge_with(
                 coinbase_transaction,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2301,7 +2287,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2338,7 +2324,7 @@ mod global_state_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();
@@ -2360,11 +2346,11 @@ mod global_state_tests {
             .merge_with(
                 tx_from_alice,
                 Default::default(),
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap()
-            .merge_with(tx_from_bob, Default::default(), &TritonProverSync::dummy())
+            .merge_with(tx_from_bob, Default::default(), &TritonVmJobQueue::dummy())
             .await
             .unwrap();
         let block_2 =
@@ -2911,7 +2897,7 @@ mod global_state_tests {
                         alice_to_bob_fee,
                         seven_months_post_launch,
                         TxProvingCapability::SingleProof,
-                        &TritonProverSync::dummy(),
+                        &TritonVmJobQueue::dummy(),
                     )
                     .await
                     .unwrap();

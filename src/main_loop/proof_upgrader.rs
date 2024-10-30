@@ -20,7 +20,7 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProofW
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -28,6 +28,8 @@ use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::MainToPeerTask;
+use crate::job_queue::triton_vm_job::TritonVmJob;
+use crate::job_queue::JobPriority;
 
 const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF: usize = 100;
 
@@ -37,7 +39,7 @@ const SEARCH_DEPTH_FOR_BLOCKS_FOR_MS_UPDATE_PROOF: usize = 100;
 /// be shared in its current state without leaking secret keys, or to make it
 /// more likely that a miner picks up this transaction.
 #[derive(Clone, Debug)]
-pub(super) enum UpgradeJob {
+pub enum UpgradeJob {
     PrimitiveWitnessToProofCollection {
         primitive_witness: PrimitiveWitness,
     },
@@ -61,7 +63,7 @@ pub(super) enum UpgradeJob {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct UpdateMutatorSetDataJob {
+pub struct UpdateMutatorSetDataJob {
     old_kernel: TransactionKernel,
     old_single_proof: Proof,
     old_mutator_set: MutatorSetAccumulator,
@@ -149,9 +151,9 @@ impl UpgradeJob {
 
     /// Upgrade transaction proofs, inserts upgraded tx into the mempool and
     /// informs peers of this new transaction.
-    pub(super) async fn handle_upgrade(
+    pub(crate) async fn handle_upgrade(
         self,
-        priority: TritonProverSync,
+        priority: TritonVmJobQueue,
         perform_ms_update_if_needed: bool,
         mut global_state_lock: GlobalStateLock,
         main_to_peer_channel: tokio::sync::broadcast::Sender<MainToPeerTask>,
@@ -165,7 +167,9 @@ impl UpgradeJob {
 
         let affected_txids = self.affected_txids();
         let mutator_set_for_tx = self.mutator_set();
-        let upgraded = match self.upgrade(&priority).await {
+
+        let triton_vm_job = TritonVmJob::UpgradeProof(self);
+        let upgraded = match priority.vm_job_queue.add_and_await_job(triton_vm_job, JobPriority::Medium).await.unwrap() {
             Ok(upgraded_tx) => {
                 info!(
                     "Successfully upgraded transaction {}",
@@ -259,14 +263,15 @@ impl UpgradeJob {
     /// to be picked up by a miner. Returns the upgraded proof, or an error if
     /// the prover is already in use and the priority is set to not wait if
     /// prover is busy.
-    async fn upgrade(self, priority: &TritonProverSync) -> Result<Transaction, TryLockError> {
+    pub(crate) async fn upgrade(self) -> Result<Transaction, TryLockError> {
+        let priority = TritonVmJobQueue::dummy();
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());
                 let claim = single_proof_witness.claim();
                 let nondeterminism = single_proof_witness.nondeterminism();
                 info!("Proof-upgrader: Start generate single proof");
-                let single_proof = SingleProof.prove(&claim, nondeterminism, priority).await?;
+                let single_proof = SingleProof.prove(&claim, nondeterminism, &priority).await?;
                 info!("Proof-upgrader: Done");
 
                 Ok(Transaction {
@@ -292,7 +297,7 @@ impl UpgradeJob {
                 };
                 info!("Proof-upgrader: Start merging");
                 let ret =
-                    Transaction::merge_with(left, right, shuffle_seed.to_owned(), priority).await?;
+                    Transaction::merge_with(left, right, shuffle_seed.to_owned(), &priority).await?;
                 info!("Proof-upgrader: Done");
 
                 Ok(ret)
@@ -301,7 +306,7 @@ impl UpgradeJob {
                 primitive_witness: witness,
             } => {
                 info!("Proof-upgrader: Start producing proof collection");
-                let proof_collection = ProofCollection::produce(&witness, priority).await?;
+                let proof_collection = ProofCollection::produce(&witness, &priority).await?;
                 info!("Proof-upgrader: Done");
                 Ok(Transaction {
                     kernel: witness.kernel,
@@ -312,7 +317,7 @@ impl UpgradeJob {
                 primitive_witness: witness,
             } => {
                 info!("Proof-upgrader: Start producing single proof");
-                let proof = SingleProof::produce(&witness, priority).await?;
+                let proof = SingleProof::produce(&witness, &priority).await?;
                 info!("Proof-upgrader: Done");
                 Ok(Transaction {
                     kernel: witness.kernel,
@@ -331,7 +336,7 @@ impl UpgradeJob {
                     &old_mutator_set,
                     mutator_set_update,
                     old_single_proof,
-                    priority,
+                    &priority,
                 )
                 .await?;
                 info!("Proof-upgrader: Done");

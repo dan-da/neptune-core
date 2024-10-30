@@ -365,7 +365,7 @@ impl MainLoopHandler {
 
                 // Store block in database
                 // This block spans global state write lock for updating.
-                let prover_lock = self.global_state_lock.proving_lock.clone();
+                let vm_job_queue = self.global_state_lock.vm_job_queue.clone();
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 let (tip_hash, tip_proof_of_work_family) = (
@@ -393,7 +393,7 @@ impl MainLoopHandler {
                     .set_new_self_mined_tip(
                         new_block.as_ref().clone(),
                         new_block_info.coinbase_utxo_info.as_ref().clone(),
-                        &prover_lock,
+                        vm_job_queue,
                     )
                     .await?;
                 drop(global_state_mut);
@@ -433,7 +433,7 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let prover_lock = self.global_state_lock.proving_lock.clone();
+                    let vm_job_queue = self.global_state_lock.vm_job_queue.clone();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                     let tip_proof_of_work_family = global_state_mut
@@ -486,7 +486,7 @@ impl MainLoopHandler {
                         // test for a test of this phenomenon.
 
                         global_state_mut
-                            .set_new_tip(new_block, &prover_lock)
+                            .set_new_tip(new_block, vm_job_queue.clone())
                             .await?;
                     }
                 }
@@ -925,7 +925,7 @@ impl MainLoopHandler {
         // like mining, or proving our own transaction. Running the prover takes
         // a long time (minutes), so we spawn a task for this such that we do
         // not block the main loop.
-        let skip_if_busy = self.global_state_lock.skip_if_busy();
+        let skip_if_busy = self.global_state_lock.vm_job_queue();
         let perform_ms_update_if_needed = false;
 
         let global_state_lock_clone = self.global_state_lock.clone();
@@ -1226,7 +1226,7 @@ impl MainLoopHandler {
                         UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
 
                     // TODO: Replace this logic with a proof queue
-                    let wait_if_busy = self.global_state_lock.wait_if_busy();
+                    let wait_if_busy = self.global_state_lock.vm_job_queue();
                     let global_state_lock_clone = self.global_state_lock.clone();
                     let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
                     let _proof_upgrader_task = tokio::task::Builder::new()
@@ -1377,7 +1377,7 @@ mod tests {
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
-        use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+        use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
         use crate::models::proof_abstractions::timestamp::Timestamp;
 
         async fn a_transaction(
@@ -1409,7 +1409,7 @@ mod tests {
                     fee,
                     in_seven_months,
                     tx_proof_type,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
                 )
                 .await
                 .unwrap()

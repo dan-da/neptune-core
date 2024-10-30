@@ -139,7 +139,7 @@ mod tests {
 
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 
     #[test]
     fn unit_test() {
@@ -201,7 +201,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
                 ))
                 .unwrap();
 

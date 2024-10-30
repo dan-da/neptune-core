@@ -1517,7 +1517,7 @@ mod tests {
 
         use super::*;
         use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
-        use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+        use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
         use crate::models::state::wallet::address::ReceivingAddress;
         use crate::tests::shared::mine_block_to_wallet;
@@ -1587,7 +1587,7 @@ mod tests {
                         NeptuneCoins::zero(),
                         timestamp,
                         TxProvingCapability::SingleProof,
-                        &TritonProverSync::dummy(),
+                        &TritonVmJobQueue::dummy(),
                     )
                     .await?;
                 tx

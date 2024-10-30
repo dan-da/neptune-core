@@ -10,10 +10,10 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
 use tokio::sync::TryLockError;
 use tracing::debug;
-use tracing::info;
 
 use super::environment;
-use crate::models::state::ProvingLock;
+use crate::job_queue::JobQueue;
+use crate::job_queue::triton_vm_job::TritonVmJob;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -25,37 +25,25 @@ pub enum ConsensusError {
 /// prover is running at a time, and the policy of what to do if an instance is
 /// already waiting: Wait or return an error.
 #[derive(Debug, Clone)]
-pub struct TritonProverSync {
-    wait_if_busy: bool,
-    proving_lock: ProvingLock,
+pub struct TritonVmJobQueue {
+    pub(crate) vm_job_queue: JobQueue<TritonVmJob>,
 }
 
-impl TritonProverSync {
+impl TritonVmJobQueue {
     /// Block execution until prover is free.
-    pub(crate) fn wait_if_busy(lock: ProvingLock) -> Self {
+    pub(crate) fn new(vm_job_queue: JobQueue<TritonVmJob>) -> Self {
         Self {
-            wait_if_busy: true,
-            proving_lock: lock,
-        }
-    }
-
-    /// Skip proof generation if prover is busy.
-    pub(crate) fn skip_if_busy(lock: ProvingLock) -> Self {
-        Self {
-            wait_if_busy: false,
-            proving_lock: lock,
+            vm_job_queue,
         }
     }
 
     /// Prover synchronization instance for unit tests. Does not guarantee
     /// that only one instance of the Triton VM prover is running.
-    #[cfg(test)]
+    // #[cfg(test)]
     pub(crate) fn dummy() -> Self {
-        use crate::locks::tokio::AtomicMutex;
 
         Self {
-            wait_if_busy: true,
-            proving_lock: AtomicMutex::from(()),
+            vm_job_queue: JobQueue::start(),
         }
     }
 }
@@ -144,7 +132,7 @@ where
         &self,
         claim: &Claim,
         nondeterminism: NonDeterminism,
-        priority: &TritonProverSync,
+        priority: &TritonVmJobQueue,
     ) -> Result<Proof, TryLockError> {
         {
             prove_consensus_program(self.program(), claim.clone(), nondeterminism, priority).await
@@ -166,22 +154,23 @@ pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
-    priority: &TritonProverSync,
+    _priority: &TritonVmJobQueue,
 ) -> Result<Proof, TryLockError> {
     // Hold proving lock until this function has terminated to prevent multiple
     // tasks from attempting to produce proofs simultaneously -- as this will
     // crash most computers and since the prover is already heavily parallel.
-    let _lock = if priority.wait_if_busy {
-        priority.proving_lock.lock_guard().await
-    } else {
-        match priority.proving_lock.try_lock_guard() {
-            Ok(lock) => lock,
-            Err(err) => {
-                info!("Failed to grab prover lock. Not waiting because this is a non-blocking call to proof. Is prover already running?");
-                return Err(err);
-            }
-        }
-    };
+
+    // let _lock = if priority.wait_if_busy {
+    //     priority.proving_lock.lock_guard().await
+    // } else {
+    //     match priority.proving_lock.try_lock_guard() {
+    //         Ok(lock) => lock,
+    //         Err(err) => {
+    //             info!("Failed to grab prover lock. Not waiting because this is a non-blocking call to proof. Is prover already running?");
+    //             return Err(err);
+    //         }
+    //     }
+    // };
 
     assert_eq!(program.hash(), claim.program_digest);
 

@@ -303,7 +303,7 @@ pub(crate) async fn make_coinbase_transaction(
     // It's important to not hold any locks (not even read-locks), as
     // that prevents peers from connecting to this node.
     info!("Start: generate single proof for coinbase transaction");
-    let wait_if_busy = global_state_lock.wait_if_busy();
+    let wait_if_busy = global_state_lock.vm_job_queue();
     let transaction = GlobalState::create_raw_transaction(
         transaction_details,
         TxProvingCapability::SingleProof,
@@ -358,7 +358,7 @@ pub(crate) async fn create_block_transaction(
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
     let mut block_transaction = coinbase_transaction;
-    let wait_if_busy = global_state_lock.wait_if_busy();
+    let wait_if_busy = global_state_lock.vm_job_queue();
     for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
         info!(
             "Merging transaction {} / {}",
@@ -551,7 +551,7 @@ mod mine_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction;
@@ -642,7 +642,7 @@ mod mine_loop_tests {
                 NeptuneCoins::new(1),
                 in_seven_months,
                 TxProvingCapability::SingleProof,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();

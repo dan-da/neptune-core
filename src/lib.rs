@@ -16,6 +16,7 @@ pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_server;
 pub mod util_types;
+pub mod job_queue;
 
 #[cfg(test)]
 pub mod tests;

@@ -2,7 +2,7 @@ use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -307,7 +307,7 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: MutatorSetUpdate,
         old_single_proof: Proof,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Transaction, TryLockError> {
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
@@ -376,7 +376,7 @@ impl Transaction {
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Transaction, TransactionProofError> {
         match self.proof {
             TransactionProof::Witness(primitive_witness) => Ok(
@@ -424,7 +424,7 @@ impl Transaction {
         self,
         other: Transaction,
         shuffle_seed: [u8; 32],
-        sync_device: &TritonProverSync,
+        sync_device: &TritonVmJobQueue,
     ) -> Result<Transaction, TryLockError> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
@@ -600,7 +600,7 @@ mod transaction_tests {
                 .unwrap()
                 .current();
 
-        let as_single_proof = SingleProof::produce(&to_be_updated, &TritonProverSync::dummy())
+        let as_single_proof = SingleProof::produce(&to_be_updated, &TritonVmJobQueue::dummy())
             .await
             .unwrap();
         let original_tx = Transaction {
@@ -618,7 +618,7 @@ mod transaction_tests {
             .new_with_updated_mutator_set_records(
                 &to_be_updated.mutator_set_accumulator,
                 &block,
-                &TritonProverSync::dummy(),
+                &TritonVmJobQueue::dummy(),
             )
             .await
             .unwrap();

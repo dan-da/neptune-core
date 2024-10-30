@@ -234,7 +234,7 @@ mod tests {
     use super::*;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
-    use crate::models::proof_abstractions::tasm::program::TritonProverSync;
+    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]
@@ -310,7 +310,7 @@ mod tests {
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
-                    &TritonProverSync::dummy(),
+                    &TritonVmJobQueue::dummy(),
                 ))
                 .unwrap();
 
