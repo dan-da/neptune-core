@@ -131,7 +131,7 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    pub(crate) vm_job_queue: VmJobQueue, // todo: make private.
+    vm_job_queue: VmJobQueue,
 }
 
 impl GlobalStateLock {
@@ -187,7 +187,7 @@ impl GlobalStateLock {
         new_block: Block,
         coinbase_utxo_info: ExpectedUtxo,
     ) -> Result<()> {
-        let vm_job_queue = self.vm_job_queue.clone();
+        let vm_job_queue = self.vm_job_queue();
         self.lock_guard_mut()
             .await
             .set_new_self_mined_tip(new_block, coinbase_utxo_info, vm_job_queue)
@@ -196,7 +196,7 @@ impl GlobalStateLock {
 
     /// store a block (non coinbase)
     pub async fn set_new_tip(&mut self, new_block: Block) -> Result<()> {
-        let vm_job_queue = self.vm_job_queue.clone();
+        let vm_job_queue = self.vm_job_queue();
         self.lock_guard_mut()
             .await
             .set_new_tip(new_block, vm_job_queue)

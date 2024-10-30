@@ -365,7 +365,7 @@ impl MainLoopHandler {
 
                 // Store block in database
                 // This block spans global state write lock for updating.
-                let vm_job_queue = self.global_state_lock.vm_job_queue.clone();
+                let vm_job_queue = self.global_state_lock.vm_job_queue();
                 let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                 let (tip_hash, tip_proof_of_work_family) = (
@@ -433,7 +433,7 @@ impl MainLoopHandler {
                     // they are not more canonical than what we currently have, in the case of deep reorganizations
                     // that is. This check fails to correctly resolve deep reorganizations. Should that be fixed,
                     // or should deep reorganizations simply be fixed by clearing the database?
-                    let vm_job_queue = self.global_state_lock.vm_job_queue.clone();
+                    let vm_job_queue = self.global_state_lock.vm_job_queue();
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
 
                     let tip_proof_of_work_family = global_state_mut
