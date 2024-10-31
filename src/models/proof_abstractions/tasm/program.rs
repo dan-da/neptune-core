@@ -10,9 +10,9 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::Digest;
 use tracing::debug;
 
+use super::consensus_program_prover_job::ConsensusProgramProverJob;
+use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
 use super::environment;
-use crate::job_queue::triton_vm::jobs::ConsensusProgramProverJob;
-use crate::job_queue::triton_vm::jobs::ConsensusProgramProverJobResult;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::job_queue::JobPriority;
 
@@ -120,31 +120,6 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ConsensusProgramProver {
-    program: Program,
-    claim: Claim,
-    nondeterminism: NonDeterminism,
-}
-impl ConsensusProgramProver {
-    pub(crate) fn prove(self) -> Proof {
-        #[cfg(test)]
-        {
-            test::load_proof_or_produce_and_save(&self.claim, self.program, self.nondeterminism)
-        }
-        #[cfg(not(test))]
-        {
-            tasm_lib::triton_vm::prove(
-                tasm_lib::triton_vm::stark::Stark::default(),
-                &self.claim,
-                &self.program,
-                self.nondeterminism,
-            )
-            .unwrap()
-        }
-    }
-}
-
 /// Run the program and generate a proof for it, assuming the Triton VM run
 /// halts gracefully.
 ///
@@ -154,40 +129,30 @@ impl ConsensusProgramProver {
 /// This method works for arbitrary programs, including ones that do not
 /// implement trait [`ConsensusProgram`].
 ///
-/// Holds a mutex lock to ensure no two tasks run the prover simultaneously.
+/// The proof is executed as a triton-vm-job-queue job which ensures that
+/// no two tasks run the prover simultaneously.
 pub(crate) async fn prove_consensus_program(
     program: Program,
     claim: Claim,
     nondeterminism: NonDeterminism,
     triton_vm_job_queue: &TritonVmJobQueue,
 ) -> anyhow::Result<Proof> {
-    // Adds the proof execution job to global triton-vm job queue.
-    // This prevents multiple tasks from attempting to produce proofs
-    // simultaneously -- as this will crash most computers and since the
-    // prover is already heavily parallel and requires huge amounts of RAM.
-
-    assert_eq!(program.hash(), claim.program_digest);
-
-    let init_vm_state = VMState::new(&program, claim.input.clone().into(), nondeterminism.clone());
-    maybe_write_debuggable_program_to_disk(&program, &init_vm_state);
-
-    let vm_output = VM::run(&program, claim.input.clone().into(), nondeterminism.clone());
-    assert!(vm_output.is_ok());
-    assert_eq!(claim.program_digest, program.hash());
-    assert_eq!(claim.output, vm_output.unwrap());
-
-    let job = ConsensusProgramProverJob(ConsensusProgramProver {
+    // create a triton-vm-job-queue job for generating this proof.
+    let job = ConsensusProgramProverJob {
         program,
         claim,
         nondeterminism,
-    });
+    };
+    // queue the job and await the result.
     let result = triton_vm_job_queue
         .add_and_await_job(Box::new(job), JobPriority::Medium)
         .await?;
+
+    // obtain resulting proof.
     let proof: Proof = result
         .as_any()
         .downcast_ref::<ConsensusProgramProverJobResult>()
-        .unwrap()
+        .expect("downcast should succeed, else bug")
         .into();
     Ok(proof)
 }
