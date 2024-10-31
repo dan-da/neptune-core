@@ -20,6 +20,7 @@ use tasm_lib::Digest;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
@@ -175,7 +176,8 @@ impl TypeScriptAndWitness {
         txk_mast_hash: Digest,
         salted_inputs_hash: Digest,
         salted_outputs_hash: Digest,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> anyhow::Result<Proof> {
         let input = [txk_mast_hash, salted_inputs_hash, salted_outputs_hash]
             .into_iter()
@@ -186,7 +188,8 @@ impl TypeScriptAndWitness {
             self.program.clone(),
             claim,
             self.nondeterminism(),
-            sync_device,
+            triton_vm_job_queue,
+            priority,
         )
         .await
     }

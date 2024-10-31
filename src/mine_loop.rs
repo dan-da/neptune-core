@@ -20,6 +20,7 @@ use twenty_first::amount::u32s::U32s;
 use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::block::block_body::BlockBody;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -308,6 +309,7 @@ pub(crate) async fn make_coinbase_transaction(
         transaction_details,
         TxProvingCapability::SingleProof,
         vm_job_queue,
+        TritonVmJobPriority::High,
     )
     .await?;
     info!("Done: generating single proof for coinbase transaction");
@@ -370,6 +372,7 @@ pub(crate) async fn create_block_transaction(
             transaction_to_include,
             rng.gen(),
             vm_job_queue,
+            TritonVmJobPriority::High,
         )
         .await
         .expect("Must be able to merge transactions in mining context");

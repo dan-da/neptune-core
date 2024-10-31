@@ -53,6 +53,7 @@ use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -675,7 +676,7 @@ impl GlobalState {
         change_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
         timestamp: Timestamp,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         // TODO: function not used because all callers got through its
         // equivalent method `create_transaction_with_prover_capability`,
@@ -687,7 +688,7 @@ impl GlobalState {
             fee,
             timestamp,
             self.net.tx_proving_capability,
-            sync_device,
+            triton_vm_job_queue,
         )
         .await
     }
@@ -704,7 +705,7 @@ impl GlobalState {
         fee: NeptuneCoins,
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
     ) -> Result<(Transaction, Option<TxOutput>)> {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
@@ -748,9 +749,13 @@ impl GlobalState {
         )?;
 
         // 2. Create the transaction
-        let transaction =
-            Self::create_raw_transaction(transaction_details, prover_capability, sync_device)
-                .await?;
+        let transaction = Self::create_raw_transaction(
+            transaction_details,
+            prover_capability,
+            triton_vm_job_queue,
+            TritonVmJobPriority::High,
+        )
+        .await?;
 
         Ok((transaction, maybe_change_output))
     }
@@ -785,13 +790,19 @@ impl GlobalState {
     pub(crate) async fn create_raw_transaction(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> anyhow::Result<Transaction> {
         // note: this executes the prover which can take a very
         //       long time, perhaps minutes.  The `await` here, should avoid
         //       block the tokio executor and other async tasks.
-        Self::create_transaction_from_data_worker(transaction_details, proving_power, sync_device)
-            .await
+        Self::create_transaction_from_data_worker(
+            transaction_details,
+            proving_power,
+            triton_vm_job_queue,
+            priority,
+        )
+        .await
     }
 
     // note: this executes the prover which can take a very
@@ -802,7 +813,8 @@ impl GlobalState {
     async fn create_transaction_from_data_worker(
         transaction_details: TransactionDetails,
         proving_power: TxProvingCapability,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> anyhow::Result<Transaction> {
         let TransactionDetails {
             tx_inputs,
@@ -853,10 +865,10 @@ impl GlobalState {
             TxProvingCapability::PrimitiveWitness => TransactionProof::Witness(primitive_witness),
             TxProvingCapability::LockScript => todo!(),
             TxProvingCapability::ProofCollection => TransactionProof::ProofCollection(
-                ProofCollection::produce(&primitive_witness, sync_device).await?,
+                ProofCollection::produce(&primitive_witness, triton_vm_job_queue, priority).await?,
             ),
             TxProvingCapability::SingleProof => TransactionProof::SingleProof(
-                SingleProof::produce(&primitive_witness, sync_device).await?,
+                SingleProof::produce(&primitive_witness, triton_vm_job_queue, priority).await?,
             ),
         };
 
@@ -1376,7 +1388,12 @@ impl GlobalState {
 
             myself
                 .mempool
-                .update_with_block(previous_ms_accumulator, &new_block, vm_job_queue)
+                .update_with_block(
+                    previous_ms_accumulator,
+                    &new_block,
+                    vm_job_queue,
+                    TritonVmJobPriority::Highest,
+                )
                 .await;
 
             myself.chain.light_state_mut().set_block(new_block);
@@ -2160,6 +2177,7 @@ mod global_state_tests {
                 coinbase_transaction,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -2352,10 +2370,16 @@ mod global_state_tests {
                 tx_from_alice,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap()
-            .merge_with(tx_from_bob, Default::default(), &TritonVmJobQueue::dummy())
+            .merge_with(
+                tx_from_bob,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_2 =

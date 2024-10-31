@@ -433,6 +433,7 @@ mod wallet_tests {
     use super::*;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::block::block_height::BlockHeight;
@@ -1186,7 +1187,12 @@ mod wallet_tests {
                 .await
                 .unwrap();
         let merged_tx = coinbase_tx
-            .merge_with(tx_from_bob, Default::default(), &TritonVmJobQueue::dummy())
+            .merge_with(
+                tx_from_bob,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_3_b =
@@ -1353,7 +1359,12 @@ mod wallet_tests {
             .await
             .unwrap();
         let tx_for_block = sender_tx
-            .merge_with(cbtx, Default::default(), &TritonVmJobQueue::dummy())
+            .merge_with(
+                cbtx,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_1 =

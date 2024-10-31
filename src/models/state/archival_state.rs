@@ -936,6 +936,7 @@ mod archival_state_tests {
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScript;
@@ -1529,6 +1530,7 @@ mod archival_state_tests {
                 tx_to_alice_and_bob,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1737,10 +1739,16 @@ mod archival_state_tests {
                 tx_from_alice,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap()
-            .merge_with(tx_from_bob, Default::default(), &TritonVmJobQueue::dummy())
+            .merge_with(
+                tx_from_bob,
+                Default::default(),
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
             .await
             .unwrap();
         let block_2 = Block::new_block_from_template(&block_1, block_tx2, in_seven_months, None);

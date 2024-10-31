@@ -92,6 +92,7 @@ mod test {
     use tasm_lib::Digest;
 
     use super::GenerateLockScriptClaimTemplate;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -158,6 +159,7 @@ mod test {
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
                     &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 ))
                 .unwrap();
 

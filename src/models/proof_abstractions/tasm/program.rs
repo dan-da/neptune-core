@@ -107,6 +107,7 @@ where
         claim: &Claim,
         nondeterminism: NonDeterminism,
         triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> anyhow::Result<Proof> {
         {
             prove_consensus_program(
@@ -114,6 +115,7 @@ where
                 claim.clone(),
                 nondeterminism,
                 triton_vm_job_queue,
+                priority,
             )
             .await
         }
@@ -136,6 +138,7 @@ pub(crate) async fn prove_consensus_program(
     claim: Claim,
     nondeterminism: NonDeterminism,
     triton_vm_job_queue: &TritonVmJobQueue,
+    priority: TritonVmJobPriority,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
     let job = ConsensusProgramProverJob {
@@ -147,7 +150,7 @@ pub(crate) async fn prove_consensus_program(
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
     let result = triton_vm_job_queue
-        .add_and_await_job(Box::new(job), TritonVmJobPriority::Normal)
+        .add_and_await_job(Box::new(job), priority)
         .await?;
 
     // obtain resulting proof.

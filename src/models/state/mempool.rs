@@ -43,6 +43,7 @@ use tracing::error;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -473,6 +474,7 @@ impl Mempool {
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
         vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> Vec<MempoolEvent> {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity
@@ -533,6 +535,7 @@ impl Mempool {
                     &previous_mutator_set_accumulator,
                     block,
                     vm_job_queue,
+                    priority,
                 )
                 .await
             {
@@ -980,6 +983,7 @@ mod tests {
                 coinbase_transaction,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -993,6 +997,7 @@ mod tests {
                 block_1.kernel.body.mutator_set_accumulator.clone(),
                 &block_2,
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await;
         assert_eq!(1, mempool.len());
@@ -1018,6 +1023,7 @@ mod tests {
                 coinbase_transaction2,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1049,6 +1055,7 @@ mod tests {
                     previous_block.kernel.body.mutator_set_accumulator.clone(),
                     &next_block,
                     &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 )
                 .await;
             previous_block = next_block;
@@ -1064,6 +1071,7 @@ mod tests {
                 tx_by_alice_updated,
                 Default::default(),
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();
@@ -1084,6 +1092,7 @@ mod tests {
                 previous_block.kernel.body.mutator_set_accumulator.clone(),
                 &block_5,
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await;
 
@@ -1108,12 +1117,20 @@ mod tests {
             .unwrap()
             .current();
 
-            let left_single_proof = SingleProof::produce(&left, &TritonVmJobQueue::dummy())
-                .await
-                .unwrap();
-            let right_single_proof = SingleProof::produce(&right, &TritonVmJobQueue::dummy())
-                .await
-                .unwrap();
+            let left_single_proof = SingleProof::produce(
+                &left,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
+            .await
+            .unwrap();
+            let right_single_proof = SingleProof::produce(
+                &right,
+                &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
+            )
+            .await
+            .unwrap();
 
             let left = Transaction {
                 kernel: left.kernel,
@@ -1133,6 +1150,7 @@ mod tests {
                 right.clone(),
                 shuffle_seed,
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();

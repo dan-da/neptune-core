@@ -1,3 +1,4 @@
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
@@ -306,7 +307,8 @@ impl Transaction {
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         mutator_set_update: MutatorSetUpdate,
         old_single_proof: Proof,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> anyhow::Result<Transaction> {
         // apply mutator set update to get new mutator set accumulator
         let addition_records = mutator_set_update.additions.clone();
@@ -345,7 +347,12 @@ impl Transaction {
         let update_nondeterminism = update_witness.nondeterminism();
         info!("updating transaction; starting update proof ...");
         let update_proof = Update
-            .prove(&update_claim, update_nondeterminism, sync_device)
+            .prove(
+                &update_claim,
+                update_nondeterminism,
+                triton_vm_job_queue,
+                priority,
+            )
             .await?;
         info!("done.");
 
@@ -357,7 +364,8 @@ impl Transaction {
             .prove(
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
-                sync_device,
+                triton_vm_job_queue,
+                priority,
             )
             .await?;
         info!("done.");
@@ -375,7 +383,8 @@ impl Transaction {
         self,
         previous_mutator_set_accumulator: &MutatorSetAccumulator,
         block: &Block,
-        sync_device: &TritonVmJobQueue,
+        triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> Result<Transaction, TransactionProofError> {
         match self.proof {
             TransactionProof::Witness(primitive_witness) => Ok(
@@ -393,7 +402,8 @@ impl Transaction {
                     previous_mutator_set_accumulator,
                     ms_update,
                     proof,
-                    sync_device,
+                    triton_vm_job_queue,
+                    priority,
                 )
                 .await
                 .map_err(|_| TransactionProofError::ProverLockWasTaken)
@@ -424,6 +434,7 @@ impl Transaction {
         other: Transaction,
         shuffle_seed: [u8; 32],
         triton_vm_job_queue: &TritonVmJobQueue,
+        priority: TritonVmJobPriority,
     ) -> Result<Transaction> {
         assert_eq!(
             self.kernel.mutator_set_hash, other.kernel.mutator_set_hash,
@@ -465,6 +476,7 @@ impl Transaction {
                 &merge_claim,
                 merge_witness.nondeterminism(),
                 triton_vm_job_queue,
+                priority,
             )
             .await?;
         info!("Done: creating merge proof");
@@ -477,6 +489,7 @@ impl Transaction {
                 &new_single_proof_claim,
                 new_single_proof_witness.nondeterminism(),
                 triton_vm_job_queue,
+                priority,
             )
             .await?;
         info!("Done: creating new single proof");
@@ -603,9 +616,13 @@ mod transaction_tests {
                 .unwrap()
                 .current();
 
-        let as_single_proof = SingleProof::produce(&to_be_updated, &TritonVmJobQueue::dummy())
-            .await
-            .unwrap();
+        let as_single_proof = SingleProof::produce(
+            &to_be_updated,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
         let original_tx = Transaction {
             kernel: to_be_updated.kernel,
             proof: TransactionProof::SingleProof(as_single_proof),
@@ -622,6 +639,7 @@ mod transaction_tests {
                 &to_be_updated.mutator_set_accumulator,
                 &block,
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();

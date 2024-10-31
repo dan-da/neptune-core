@@ -945,6 +945,7 @@ pub(crate) mod test {
     use tasm_lib::triton_vm::prelude::PublicInput;
 
     use super::MergeWitness;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::validity::merge::Merge;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -993,12 +994,20 @@ pub(crate) mod test {
             .unwrap()
             .current();
 
-        let single_proof_1 = SingleProof::produce(&primitive_witness_1, &TritonVmJobQueue::dummy())
-            .await
-            .unwrap();
-        let single_proof_2 = SingleProof::produce(&primitive_witness_2, &TritonVmJobQueue::dummy())
-            .await
-            .unwrap();
+        let single_proof_1 = SingleProof::produce(
+            &primitive_witness_1,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
+        let single_proof_2 = SingleProof::produce(
+            &primitive_witness_2,
+            &TritonVmJobQueue::dummy(),
+            TritonVmJobPriority::default(),
+        )
+        .await
+        .unwrap();
 
         MergeWitness::from_transactions(
             primitive_witness_1.kernel,

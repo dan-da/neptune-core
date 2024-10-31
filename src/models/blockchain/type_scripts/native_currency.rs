@@ -650,6 +650,7 @@ pub mod test {
     use test_strategy::proptest;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -865,6 +866,7 @@ pub mod test {
                 salted_input_utxos_hash,
                 salted_output_utxos_hash,
                 &TritonVmJobQueue::dummy(),
+                TritonVmJobPriority::default(),
             )
             .await
             .unwrap();

@@ -213,6 +213,7 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 
@@ -267,6 +268,7 @@ mod tests {
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
                     &TritonVmJobQueue::dummy(),
+                    TritonVmJobPriority::default(),
                 ))
                 .unwrap();
 

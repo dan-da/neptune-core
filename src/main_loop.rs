@@ -30,6 +30,7 @@ use twenty_first::amount::u32s::U32s;
 
 use crate::connect_to_peers::answer_peer_wrapper;
 use crate::connect_to_peers::call_peer_wrapper;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::models::blockchain::block::block_header::BlockHeader;
 use crate::models::blockchain::block::block_header::PROOF_OF_WORK_COUNT_U32_SIZE;
 use crate::models::blockchain::block::block_height::BlockHeight;
@@ -937,6 +938,7 @@ impl MainLoopHandler {
                     upgrade_candidate
                         .handle_upgrade(
                             &vm_job_queue,
+                            TritonVmJobPriority::Low,
                             perform_ms_update_if_needed,
                             global_state_lock_clone,
                             main_to_peer_broadcast_tx_clone,
@@ -1216,6 +1218,8 @@ impl MainLoopHandler {
                         panic!("Expected Primitive witness. Got: {:?}", transaction.proof);
                     };
 
+                    let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
+
                     let proving_capability = self
                         .global_state_lock
                         .lock_guard()
@@ -1225,22 +1229,35 @@ impl MainLoopHandler {
                     let upgrade_job =
                         UpgradeJob::from_primitive_witness(proving_capability, primitive_witness);
 
-                    // TODO: Replace this logic with a proof queue
-                    let vm_job_queue = self.global_state_lock.vm_job_queue().clone();
-                    let global_state_lock_clone = self.global_state_lock.clone();
-                    let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
-                    let _proof_upgrader_task = tokio::task::Builder::new()
-                        .name("proof_upgrader")
-                        .spawn(async move {
-                        upgrade_job
-                            .handle_upgrade(
-                                &vm_job_queue,
-                                true,
-                                global_state_lock_clone,
-                                main_to_peer_broadcast_tx_clone,
-                            )
-                            .await
-                    })?;
+                    // note: handle_upgrade() hands off proving to the
+                    //       triton-vm job queue and waits for job completion.
+                    // note: handle_upgrade() broadcasts to peers on success.
+
+                    upgrade_job
+                        .handle_upgrade(
+                            &vm_job_queue,
+                            TritonVmJobPriority::High,
+                            true,
+                            self.global_state_lock.clone(),
+                            self.main_to_peer_broadcast_tx.clone(),
+                        )
+                        .await;
+
+                    // let global_state_lock_clone = self.global_state_lock.clone();
+                    // let main_to_peer_broadcast_tx_clone = self.main_to_peer_broadcast_tx.clone();
+                    // let _proof_upgrader_task = tokio::task::Builder::new()
+                    //     .name("proof_upgrader")
+                    //     .spawn(async move {
+                    //     upgrade_job
+                    //         .handle_upgrade(
+                    //             &vm_job_queue,
+                    //             TritonVmJobPriority::High,
+                    //             true,
+                    //             global_state_lock_clone,
+                    //             main_to_peer_broadcast_tx_clone,
+                    //         )
+                    //         .await
+                    // })?;
 
                     // main_loop_state.proof_upgrader_task = Some(proof_upgrader_task);
                     // If transaction could not be shared immediately because
