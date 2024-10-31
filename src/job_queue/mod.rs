@@ -30,5 +30,4 @@ mod queue;
 pub mod traits;
 pub mod triton_vm;
 
-pub use queue::JobPriority;
 pub use queue::JobQueue;

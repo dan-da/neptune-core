@@ -13,8 +13,8 @@ use tracing::debug;
 use super::consensus_program_prover_job::ConsensusProgramProverJob;
 use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
 use super::environment;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::job_queue::JobPriority;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -143,9 +143,11 @@ pub(crate) async fn prove_consensus_program(
         claim,
         nondeterminism,
     };
+
     // queue the job and await the result.
+    // todo: perhaps the priority should (somehow) depend on type of Program?
     let result = triton_vm_job_queue
-        .add_and_await_job(Box::new(job), JobPriority::Medium)
+        .add_and_await_job(Box::new(job), TritonVmJobPriority::Normal)
         .await?;
 
     // obtain resulting proof.
