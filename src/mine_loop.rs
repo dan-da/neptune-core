@@ -551,7 +551,7 @@ mod mine_loop_tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::dummy_expected_utxo;
     use crate::tests::shared::make_mock_transaction;

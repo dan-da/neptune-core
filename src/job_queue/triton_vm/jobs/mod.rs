@@ -1,0 +1,4 @@
+mod consensus_program_prover;
+
+pub use consensus_program_prover::ConsensusProgramProverJob;
+pub use consensus_program_prover::ConsensusProgramProverJobResult;

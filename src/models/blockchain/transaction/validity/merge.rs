@@ -945,12 +945,12 @@ pub(crate) mod test {
     use tasm_lib::triton_vm::prelude::PublicInput;
 
     use super::MergeWitness;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::validity::merge::Merge;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::triton_vm::prelude::Digest;
 

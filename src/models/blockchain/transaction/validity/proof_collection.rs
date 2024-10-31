@@ -15,6 +15,7 @@ use tracing::info;
 use super::collect_type_scripts::CollectTypeScriptsWitness;
 use super::kernel_to_outputs::KernelToOutputsWitness;
 use super::removal_records_integrity::RemovalRecordsIntegrity;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::shared::Hash;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::validity::collect_lock_scripts::CollectLockScripts;
@@ -25,7 +26,6 @@ use crate::models::blockchain::transaction::validity::removal_records_integrity:
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::triton_vm::proof::Proof;
 

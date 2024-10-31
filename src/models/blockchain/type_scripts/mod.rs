@@ -20,10 +20,10 @@ use tasm_lib::Digest;
 
 use super::transaction::primitive_witness::SaltedUtxos;
 use super::transaction::transaction_kernel::TransactionKernel;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::Hash;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]

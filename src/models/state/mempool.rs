@@ -43,7 +43,7 @@ use tracing::error;
 use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
-use crate::job_queue::triton_vm_job::VmJobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -472,7 +472,7 @@ impl Mempool {
         &mut self,
         previous_mutator_set_accumulator: MutatorSetAccumulator,
         block: &Block,
-        vm_job_queue: &VmJobQueue,
+        vm_job_queue: &TritonVmJobQueue,
     ) -> Vec<MempoolEvent> {
         // If we discover a reorganization, we currently just clear the mempool,
         // as we don't have the ability to roll transaction removal record integrity

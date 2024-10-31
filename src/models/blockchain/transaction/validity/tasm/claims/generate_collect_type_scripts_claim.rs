@@ -232,9 +232,9 @@ mod tests {
     use tasm_lib::traits::rust_shadow::RustShadow;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
     use crate::models::blockchain::type_scripts::time_lock::arbitrary_primitive_witness_with_active_timelocks;
-    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
 
     #[test]

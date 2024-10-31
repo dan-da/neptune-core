@@ -1,8 +1,8 @@
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::twenty_first;

@@ -1372,12 +1372,12 @@ mod tests {
 
     mod proof_upgrader {
         use super::*;
+        use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
         use crate::models::blockchain::transaction::Transaction;
         use crate::models::blockchain::transaction::TransactionProof;
         use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
-        use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
         use crate::models::proof_abstractions::timestamp::Timestamp;
 
         async fn a_transaction(

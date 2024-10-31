@@ -26,7 +26,7 @@ use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::builtins as tasmlib;
 use crate::models::blockchain::transaction::validity::tasm::claims::new_claim::NewClaim;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::BFieldElement;
 use crate::models::blockchain::transaction::validity::merge::Merge;

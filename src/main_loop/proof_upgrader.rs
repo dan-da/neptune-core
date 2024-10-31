@@ -8,6 +8,7 @@ use tasm_lib::triton_vm::proof::Proof;
 use tracing::error;
 use tracing::info;
 
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
@@ -17,7 +18,6 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProofW
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;

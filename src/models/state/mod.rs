@@ -48,13 +48,12 @@ use super::blockchain::transaction::transaction_output::UtxoNotificationMedium;
 use super::blockchain::transaction::utxo::Utxo;
 use super::blockchain::transaction::Transaction;
 use super::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use super::proof_abstractions::tasm::program::TritonVmJobQueue;
 use super::proof_abstractions::timestamp::Timestamp;
 use crate::config_models::cli_args;
 use crate::database::storage::storage_schema::traits::StorageWriter as SW;
 use crate::database::storage::storage_vec::traits::*;
 use crate::database::storage::storage_vec::Index;
-use crate::job_queue::triton_vm_job::VmJobQueue;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::locks::tokio as sync_tokio;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -130,7 +129,7 @@ pub struct GlobalStateLock {
     /// The `cli_args::Args` are read-only and accessible by all tasks/threads.
     cli: cli_args::Args,
 
-    vm_job_queue: VmJobQueue,
+    vm_job_queue: TritonVmJobQueue,
 }
 
 impl GlobalStateLock {
@@ -151,7 +150,7 @@ impl GlobalStateLock {
         Self {
             global_state_lock,
             cli,
-            vm_job_queue: VmJobQueue::start(),
+            vm_job_queue: TritonVmJobQueue::start(),
         }
     }
 
@@ -1280,7 +1279,11 @@ impl GlobalState {
 
     /// Update client's state with a new block. Block is assumed to be valid, also wrt. to PoW.
     /// The received block will be set as the new tip, regardless of its accumulated PoW.
-    pub async fn set_new_tip(&mut self, new_block: Block, vm_job_queue: &VmJobQueue) -> Result<()> {
+    pub async fn set_new_tip(
+        &mut self,
+        new_block: Block,
+        vm_job_queue: &TritonVmJobQueue,
+    ) -> Result<()> {
         self.set_new_tip_internal(new_block, None, vm_job_queue)
             .await
     }
@@ -1292,7 +1295,7 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         coinbase_utxo_info: ExpectedUtxo,
-        vm_job_queue: &VmJobQueue,
+        vm_job_queue: &TritonVmJobQueue,
     ) -> Result<()> {
         self.set_new_tip_internal(new_block, Some(coinbase_utxo_info), vm_job_queue)
             .await
@@ -1305,7 +1308,7 @@ impl GlobalState {
         &mut self,
         new_block: Block,
         coinbase_utxo_info: Option<ExpectedUtxo>,
-        vm_job_queue: &VmJobQueue,
+        vm_job_queue: &TritonVmJobQueue,
     ) -> Result<()> {
         // note: we make this fn internal so we can log its duration and ensure it will
         // never be called directly by another fn, without the timings.
@@ -1313,7 +1316,7 @@ impl GlobalState {
             myself: &mut GlobalState,
             new_block: Block,
             coinbase_utxo_info: Option<ExpectedUtxo>,
-            vm_job_queue: &VmJobQueue,
+            vm_job_queue: &TritonVmJobQueue,
         ) -> Result<()> {
             // Apply the updates
             myself

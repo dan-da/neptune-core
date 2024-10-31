@@ -11,18 +11,16 @@ use tasm_lib::Digest;
 use tracing::debug;
 
 use super::environment;
-use crate::job_queue::triton_vm_job::ConsensusProgramProverJob;
-use crate::job_queue::triton_vm_job::ConsensusProgramProverJobResult;
+use crate::job_queue::triton_vm::jobs::ConsensusProgramProverJob;
+use crate::job_queue::triton_vm::jobs::ConsensusProgramProverJobResult;
+use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::job_queue::JobPriority;
-use crate::job_queue::JobQueue;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
     RustShadowPanic(String),
     TritonVMPanic(String, InstructionError),
 }
-
-pub type TritonVmJobQueue = JobQueue;
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.

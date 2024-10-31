@@ -936,6 +936,7 @@ mod archival_state_tests {
     use crate::config_models::data_directory::DataDirectory;
     use crate::config_models::network::Network;
     use crate::database::storage::storage_vec::traits::*;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::mine_loop::make_coinbase_transaction;
     use crate::models::blockchain::transaction::lock_script::LockScript;
     use crate::models::blockchain::transaction::transaction_output::TxOutput;
@@ -943,7 +944,6 @@ mod archival_state_tests {
     use crate::models::blockchain::transaction::transaction_output::UtxoNotificationMedium;
     use crate::models::blockchain::transaction::utxo::Utxo;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::archival_state::ArchivalState;
     use crate::models::state::tx_proving_capability::TxProvingCapability;

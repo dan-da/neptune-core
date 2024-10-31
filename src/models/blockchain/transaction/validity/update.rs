@@ -712,13 +712,13 @@ pub(crate) mod test {
     use tasm_lib::Digest;
 
     use super::*;
+    use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::transaction::validity::update::Update;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;
     use crate::models::proof_abstractions::tasm::program::test::consensus_program_negative_test;
     use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
-    use crate::models::proof_abstractions::tasm::program::TritonVmJobQueue;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::proof_abstractions::SecretWitness;
     use crate::util_types::mutator_set::addition_record::AdditionRecord;
