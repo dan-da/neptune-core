@@ -153,6 +153,7 @@ mod test {
                 .unwrap()
                 .current();
             let rt = tokio::runtime::Runtime::new().unwrap();
+            let _guard = rt.enter();
             let proof_collection = rt
                 .block_on(ProofCollection::produce(
                     &primitive_witness,
