@@ -12,6 +12,7 @@ use tracing::debug;
 
 use super::environment;
 use crate::job_queue::triton_vm_job::ConsensusProgramProverJob;
+use crate::job_queue::triton_vm_job::ConsensusProgramProverJobResult;
 use crate::job_queue::JobPriority;
 use crate::job_queue::JobQueue;
 
@@ -185,8 +186,12 @@ pub(crate) async fn prove_consensus_program(
     let result = triton_vm_job_queue
         .add_and_await_job(Box::new(job), JobPriority::Medium)
         .await?;
-    let proof = result.as_any().downcast_ref::<Proof>().unwrap();
-    Ok(proof.to_owned())
+    let proof: Proof = result
+        .as_any()
+        .downcast_ref::<ConsensusProgramProverJobResult>()
+        .unwrap()
+        .into();
+    Ok(proof)
 }
 
 #[cfg(test)]

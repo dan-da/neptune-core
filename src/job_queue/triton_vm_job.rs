@@ -21,6 +21,11 @@ impl JobResult for ConsensusProgramProverJobResult {
         self
     }
 }
+impl From<&ConsensusProgramProverJobResult> for Proof {
+    fn from(v: &ConsensusProgramProverJobResult) -> Self {
+        v.0.to_owned()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ConsensusProgramProverJob(pub ConsensusProgramProver);
