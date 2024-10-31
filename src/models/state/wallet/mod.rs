@@ -754,7 +754,6 @@ mod wallet_tests {
         // Mine 21 more blocks and verify that 22 * `mining_reward` worth of UTXOs can be allocated
         let mut next_block = block_1.clone();
         {
-            let alice_vm_job_queue = alice.vm_job_queue().clone();
             let mut alice = alice.lock_guard_mut().await;
             for _ in 0..21 {
                 let previous_block = next_block;

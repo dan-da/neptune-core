@@ -11,8 +11,7 @@ use tasm_lib::Digest;
 use tracing::debug;
 
 use super::environment;
-use crate::job_queue::triton_vm_job::TritonVmJob;
-use crate::job_queue::triton_vm_job::TritonVmJobResult;
+use crate::job_queue::triton_vm_job::ConsensusProgramProverJob;
 use crate::job_queue::JobPriority;
 use crate::job_queue::JobQueue;
 
@@ -22,7 +21,7 @@ pub enum ConsensusError {
     TritonVMPanic(String, InstructionError),
 }
 
-pub type TritonVmJobQueue = JobQueue<TritonVmJob>;
+pub type TritonVmJobQueue = JobQueue;
 
 /// A `ConsensusProgram` represents the logic subprogram for transaction or
 /// block validity.
@@ -122,7 +121,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConsensusProgramProver {
     program: Program,
     claim: Claim,
@@ -178,20 +177,16 @@ pub(crate) async fn prove_consensus_program(
     assert_eq!(claim.program_digest, program.hash());
     assert_eq!(claim.output, vm_output.unwrap());
 
-    let prover = ConsensusProgramProver {
+    let job = ConsensusProgramProverJob(ConsensusProgramProver {
         program,
         claim,
         nondeterminism,
-    };
-    let job = TritonVmJob::ProveConsensusProgram(prover);
-    match triton_vm_job_queue
-        .add_and_await_job(job, JobPriority::Medium)
-        .await?
-    {
-        Ok(TritonVmJobResult::ProveConsensusProgram(proof)) => Ok(proof),
-        Err(e) => Err(e),
-        _ => panic!("got unexpected proof result"),
-    }
+    });
+    let result = triton_vm_job_queue
+        .add_and_await_job(Box::new(job), JobPriority::Medium)
+        .await?;
+    let proof = result.as_any().downcast_ref::<Proof>().unwrap();
+    Ok(proof.to_owned())
 }
 
 #[cfg(test)]

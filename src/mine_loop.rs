@@ -303,11 +303,11 @@ pub(crate) async fn make_coinbase_transaction(
     // It's important to not hold any locks (not even read-locks), as
     // that prevents peers from connecting to this node.
     info!("Start: generate single proof for coinbase transaction");
-    let wait_if_busy = global_state_lock.vm_job_queue();
+    let vm_job_queue = global_state_lock.vm_job_queue();
     let transaction = GlobalState::create_raw_transaction(
         transaction_details,
         TxProvingCapability::SingleProof,
-        &wait_if_busy,
+        vm_job_queue,
     )
     .await?;
     info!("Done: generating single proof for coinbase transaction");
@@ -358,7 +358,7 @@ pub(crate) async fn create_block_transaction(
     // Merge incoming transactions with the coinbase transaction
     let num_transactions_to_include = transactions_to_include.len();
     let mut block_transaction = coinbase_transaction;
-    let wait_if_busy = global_state_lock.vm_job_queue();
+    let vm_job_queue = global_state_lock.vm_job_queue();
     for (i, transaction_to_include) in transactions_to_include.into_iter().enumerate() {
         info!(
             "Merging transaction {} / {}",
@@ -369,7 +369,7 @@ pub(crate) async fn create_block_transaction(
             block_transaction,
             transaction_to_include,
             rng.gen(),
-            &wait_if_busy,
+            vm_job_queue,
         )
         .await
         .expect("Must be able to merge transactions in mining context");
