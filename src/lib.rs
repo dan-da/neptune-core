@@ -1,4 +1,6 @@
 // recursion limit for macros (e.g. triton_asm!)
+// #![rustversion::nightly, feature(closure_track_caller))]
+#![feature(async_fn_track_caller)]
 #![recursion_limit = "2048"]
 #![deny(clippy::shadow_unrelated)]
 

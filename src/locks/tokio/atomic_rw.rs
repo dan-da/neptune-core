@@ -235,6 +235,7 @@ impl<T> AtomicRw<T> {
     /// atomic_car.lock_guard_mut().await.year = 2022;
     /// # })
     /// ```
+    #[track_caller]
     pub async fn lock_guard_mut(&mut self) -> AtomicRwWriteGuard<T> {
         self.try_acquire_write_cb();
         let guard = self.inner.write().await;
@@ -244,6 +245,7 @@ impl<T> AtomicRw<T> {
     /// Attempt to acquire write lock immediately.
     ///
     /// If the lock cannot be acquired without waiting, an error is returned.
+    #[track_caller]
     pub fn try_lock_guard_mut(&mut self) -> Result<AtomicRwWriteGuard<T>, TryLockError> {
         self.try_acquire_write_cb();
         let guard = self.inner.try_write()?;
@@ -288,6 +290,7 @@ impl<T> AtomicRw<T> {
     /// let year = atomic_car.lock_mut(|mut c| {c.year = 2023; c.year}).await;
     /// })
     /// ```
+    #[track_caller]
     pub async fn lock_mut<R, F>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut T) -> R,
@@ -343,6 +346,7 @@ impl<T> AtomicRw<T> {
     /// })
     /// ```
     // design background: https://stackoverflow.com/a/77657788/10087197
+    #[track_caller]
     pub async fn lock_mut_async<R>(&mut self, f: impl FnOnce(&mut T) -> BoxFuture<'_, R>) -> R {
         self.try_acquire_write_cb();
         let inner_guard = self.inner.write().await;
@@ -423,9 +427,12 @@ impl<T> Deref for AtomicRwReadGuard<'_, T> {
 pub struct AtomicRwWriteGuard<'a, T> {
     guard: RwLockWriteGuard<'a, T>,
     lock_callback_info: &'a LockCallbackInfo,
+    location: &'static core::panic::Location<'static>,
+    timestamp: std::time::Instant,
 }
 
 impl<'a, T> AtomicRwWriteGuard<'a, T> {
+    #[track_caller]
     fn new(guard: RwLockWriteGuard<'a, T>, lock_callback_info: &'a LockCallbackInfo) -> Self {
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Acquire {
@@ -436,12 +443,19 @@ impl<'a, T> AtomicRwWriteGuard<'a, T> {
         Self {
             guard,
             lock_callback_info,
+            location: core::panic::Location::caller(),
+            timestamp: std::time::Instant::now(),
         }
     }
 }
 
 impl<T> Drop for AtomicRwWriteGuard<'_, T> {
     fn drop(&mut self) {
+        let duration = self.timestamp.elapsed();
+        let max_duration_milli = 100;
+        if duration.as_millis() > max_duration_milli {
+            tracing::warn!("write-lock held for {} seconds. (exceeds max: {} milli)\n  location: {}", duration.as_secs_f32(), max_duration_milli, self.location);
+        }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
             cb(LockEvent::Release {
