@@ -454,7 +454,7 @@ impl<T> Drop for AtomicRwWriteGuard<'_, T> {
         let duration = self.timestamp.elapsed();
         let max_duration_milli = 100;
         if duration.as_millis() > max_duration_milli {
-            tracing::warn!("write-lock held for {} seconds. (exceeds max: {} milli)\n  location: {}", duration.as_secs_f32(), max_duration_milli, self.location);
+            tracing::warn!("write-lock held for {} seconds. (exceeds max: {} milli)  location: {}", duration.as_secs_f32(), max_duration_milli, self.location);
         }
         let lock_callback_info = self.lock_callback_info;
         if let Some(cb) = lock_callback_info.lock_callback_fn {
