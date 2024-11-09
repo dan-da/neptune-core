@@ -8,6 +8,8 @@
 //!
 //! The queue is used to ensure that only one triton-vm
 //! program can execute at a time.
+use std::process::Stdio;
+use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
@@ -42,12 +44,19 @@ pub struct ConsensusProgramProverJob {
 }
 
 impl ConsensusProgramProverJob {
+    async fn prove(&self) -> Proof {
+        match self.prove_worker().await {
+            Ok(p) => p,
+            Err(e) => panic!("Proving job failed with error: {}", e.to_string()),
+        }
+    }
+
     /// Run the program and generate a proof for it, assuming the Triton VM run
     /// halts gracefully.
     ///
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
-    fn prove(&self) -> Proof {
+    async fn prove_worker(&self) -> anyhow::Result<Proof> {
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
         let init_vm_state = VMState::new(
@@ -68,32 +77,62 @@ impl ConsensusProgramProverJob {
 
         #[cfg(test)]
         {
-            test::load_proof_or_produce_and_save(
+            Ok(test::load_proof_or_produce_and_save(
                 &self.claim,
                 self.program.clone(),
                 self.nondeterminism.clone(),
-            )
+            ))
         }
         #[cfg(not(test))]
         {
-            tasm_lib::triton_vm::prove(
-                tasm_lib::triton_vm::stark::Stark::default(),
-                &self.claim,
-                &self.program,
-                self.nondeterminism.clone(),
-            )
-            .unwrap()
+            self.prove_out_of_process().await
+
+            // tasm_lib::triton_vm::prove(
+            //     tasm_lib::triton_vm::stark::Stark::default(),
+            //     &self.claim,
+            //     &self.program,
+            //     self.nondeterminism.clone(),
+            // )
         }
+    }
+
+    async fn prove_out_of_process(&self) -> anyhow::Result<Proof> {
+        // start child process
+        let child_handle = {
+            let inputs = [
+                serde_json::to_string(&self.claim)?,
+                serde_json::to_string(&self.program)?,
+                serde_json::to_string(&self.nondeterminism)?,
+            ];
+
+            let mut child = tokio::process::Command::new("triton-vm-prover")
+                .kill_on_drop(true)
+                .stdin(Stdio::piped())
+                .spawn()?;
+
+            let mut child_stdin = child.stdin.take().expect("should get stdin handle");
+            child_stdin.write_all(inputs.join("\n").as_bytes()).await?;
+
+            child
+        };
+
+        // read result from child process stdout.
+        let result = {
+            let op = child_handle.wait_with_output().await?;
+            let proof = bincode::deserialize(&op.stdout)?;
+            Ok(proof)
+        };
+        result
     }
 }
 
 #[async_trait::async_trait]
 impl Job for ConsensusProgramProverJob {
     fn is_async(&self) -> bool {
-        false
+        true
     }
 
-    fn run(&self) -> Box<dyn JobResult> {
-        Box::new(ConsensusProgramProverJobResult(self.prove()))
+    async fn run_async(&self) -> Box<dyn JobResult> {
+        Box::new(ConsensusProgramProverJobResult(self.prove().await))
     }
 }
