@@ -8,7 +8,9 @@
 //!
 //! The queue is used to ensure that only one triton-vm
 //! program can execute at a time.
+#[cfg(not(test))]
 use std::process::Stdio;
+#[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
@@ -47,7 +49,7 @@ impl ConsensusProgramProverJob {
     async fn prove(&self) -> Proof {
         match self.prove_worker().await {
             Ok(p) => p,
-            Err(e) => panic!("Proving job failed with error: {}", e.to_string()),
+            Err(e) => panic!("Proving job failed with error: {:?}", e),
         }
     }
 
@@ -66,14 +68,24 @@ impl ConsensusProgramProverJob {
         );
         maybe_write_debuggable_program_to_disk(&self.program, &init_vm_state);
 
-        let vm_output = VM::run(
-            &self.program,
-            self.claim.input.clone().into(),
-            self.nondeterminism.clone(),
-        );
+        // run program in VM
+        //
+        // for now this seems to run fast enough it does not need to be in a spawn-blocking
+        // or even in external process.  But we use ScopeDurationLogger to log a warning
+        // if a slower run is encountered.
+        let vm_output = {
+            let _ =
+                crate::ScopeDurationLogger::new_with_threshold(&crate::macros::fn_name!(), 0.00001);
+
+            VM::run(
+                &self.program,
+                self.claim.input.clone().into(),
+                self.nondeterminism.clone(),
+            )
+        };
         assert!(vm_output.is_ok());
         assert_eq!(self.claim.program_digest, self.program.hash());
-        assert_eq!(self.claim.output, vm_output.unwrap());
+        assert_eq!(self.claim.output, vm_output?);
 
         #[cfg(test)]
         {
@@ -96,6 +108,7 @@ impl ConsensusProgramProverJob {
         }
     }
 
+    #[cfg(not(test))]
     async fn prove_out_of_process(&self) -> anyhow::Result<Proof> {
         // start child process
         let child_handle = {
@@ -106,8 +119,8 @@ impl ConsensusProgramProverJob {
             ];
 
             let mut child = tokio::process::Command::new("triton-vm-prover")
-                .kill_on_drop(true)
                 .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
                 .spawn()?;
 
             let mut child_stdin = child.stdin.take().expect("should get stdin handle");
@@ -117,12 +130,11 @@ impl ConsensusProgramProverJob {
         };
 
         // read result from child process stdout.
-        let result = {
+        {
             let op = child_handle.wait_with_output().await?;
             let proof = bincode::deserialize(&op.stdout)?;
             Ok(proof)
-        };
-        result
+        }
     }
 }
 
