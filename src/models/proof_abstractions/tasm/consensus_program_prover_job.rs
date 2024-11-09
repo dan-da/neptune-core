@@ -132,8 +132,12 @@ impl ConsensusProgramProverJob {
         // read result from child process stdout.
         {
             let op = child_handle.wait_with_output().await?;
-            let proof = bincode::deserialize(&op.stdout)?;
-            Ok(proof)
+            if op.status.success() {
+                let proof = bincode::deserialize(&op.stdout)?;
+                Ok(proof)
+            } else {
+                Err(anyhow::anyhow!("prover exited unexpectedly"))
+            }
         }
     }
 }
