@@ -20,12 +20,13 @@ fn main() {
 
     let proof = prove(default_stark, &claim, &program, non_determinism).unwrap();
     info!("triton-vm: completed proof");
-    println!("triton-vm: Completed proof");
 
     let as_bytes = bincode::serialize(&proof).unwrap();
     let mut stdout = std::io::stdout();
     stdout.write_all(&as_bytes).unwrap();
     stdout.flush().unwrap();
+
+    //    std::thread::sleep(std::time::Duration::from_secs(1));
 }
 
 #[cfg(test)]
