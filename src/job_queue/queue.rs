@@ -101,7 +101,7 @@ impl<P: Ord> Clone for JobQueue<P> {
 
 impl<P: Ord> Drop for JobQueue<P> {
     fn drop(&mut self) {
-        self.tx.send(JobQueueMsg::Stop).unwrap();
+        let _ = self.tx.send(JobQueueMsg::Stop);
     }
 }
 
