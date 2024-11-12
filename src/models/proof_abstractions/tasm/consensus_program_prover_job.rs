@@ -89,6 +89,8 @@ impl ConsensusProgramProverJob {
         assert_eq!(self.claim.program_digest, self.program.hash());
         assert_eq!(self.claim.output, vm_output);
 
+        tracing::debug!("job settings: {:?}", self.job_settings);
+
         let padded_height = vm_state.cycle_count.next_power_of_two();
         match self.job_settings.max_log2_padded_height_for_proofs {
             Some(limit) if (limit as u32) < padded_height => anyhow::bail!(
