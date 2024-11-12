@@ -15,6 +15,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
+use crate::job_queue::triton_vm::TritonVmProofJobOptions;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
@@ -23,7 +24,6 @@ use crate::models::proof_abstractions::Program;
 use crate::tasm_lib::maybe_write_debuggable_program_to_disk;
 use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
-use crate::triton_vm::vm::VM;
 
 #[derive(Debug)]
 pub struct ConsensusProgramProverJobResult(pub Proof);
@@ -43,6 +43,7 @@ pub struct ConsensusProgramProverJob {
     pub program: Program,
     pub claim: Claim,
     pub nondeterminism: NonDeterminism,
+    pub proof_job_options: TritonVmProofJobOptions,
 }
 
 impl ConsensusProgramProverJob {
@@ -61,12 +62,12 @@ impl ConsensusProgramProverJob {
     async fn prove_worker(&self) -> anyhow::Result<Proof> {
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
-        let init_vm_state = VMState::new(
+        let mut vm_state = VMState::new(
             &self.program,
             self.claim.input.clone().into(),
             self.nondeterminism.clone(),
         );
-        maybe_write_debuggable_program_to_disk(&self.program, &init_vm_state);
+        maybe_write_debuggable_program_to_disk(&self.program, &vm_state);
 
         // run program in VM
         //
@@ -77,15 +78,21 @@ impl ConsensusProgramProverJob {
             let _ =
                 crate::ScopeDurationLogger::new_with_threshold(&crate::macros::fn_name!(), 0.00001);
 
-            VM::run(
-                &self.program,
-                self.claim.input.clone().into(),
-                self.nondeterminism.clone(),
-            )
+            vm_state.run()?;
+            vm_state.public_output
         };
-        assert!(vm_output.is_ok());
         assert_eq!(self.claim.program_digest, self.program.hash());
-        assert_eq!(self.claim.output, vm_output?);
+        assert_eq!(self.claim.output, vm_output);
+
+        let padded_height = vm_state.cycle_count.next_power_of_two();
+        match self.proof_job_options.max_log2_padded_height_for_proofs {
+            Some(limit) if (limit as u32) < padded_height => anyhow::bail!(
+                "proof execution aborted. padded_height exceeds limit.  height: {}, limit: {}",
+                padded_height,
+                limit
+            ),
+            _ => {}
+        }
 
         #[cfg(test)]
         {

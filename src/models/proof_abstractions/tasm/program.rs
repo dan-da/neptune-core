@@ -13,8 +13,8 @@ use tracing::debug;
 use super::consensus_program_prover_job::ConsensusProgramProverJob;
 use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
 use super::environment;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::job_queue::triton_vm::TritonVmProofJobOptions;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -121,7 +121,7 @@ where
         claim: &Claim,
         nondeterminism: NonDeterminism,
         triton_vm_job_queue: &TritonVmJobQueue,
-        priority: TritonVmJobPriority,
+        proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
         {
             prove_consensus_program(
@@ -129,7 +129,7 @@ where
                 claim.clone(),
                 nondeterminism,
                 triton_vm_job_queue,
-                priority,
+                proof_job_options,
             )
             .await
         }
@@ -152,19 +152,20 @@ pub(crate) async fn prove_consensus_program(
     claim: Claim,
     nondeterminism: NonDeterminism,
     triton_vm_job_queue: &TritonVmJobQueue,
-    priority: TritonVmJobPriority,
+    proof_job_options: TritonVmProofJobOptions,
 ) -> anyhow::Result<Proof> {
     // create a triton-vm-job-queue job for generating this proof.
     let job = ConsensusProgramProverJob {
         program,
         claim,
         nondeterminism,
+        proof_job_options,
     };
 
     // queue the job and await the result.
     // todo: perhaps the priority should (somehow) depend on type of Program?
     let result = triton_vm_job_queue
-        .add_job(Box::new(job), priority)
+        .add_job(Box::new(job), proof_job_options.job_priority)
         .await?
         .result()
         .await?;
