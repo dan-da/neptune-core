@@ -96,7 +96,7 @@ impl ConsensusProgramProverJob {
             Some(limit) if 2u32.pow(limit.into()) < padded_height => anyhow::bail!(
                 "proof execution aborted. padded_height exceeds limit.  height: {}, limit: {}",
                 padded_height,
-                limit
+                2u32.pow(limit.into())
             ),
             _ => {}
         }
