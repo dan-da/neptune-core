@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
-use crate::job_queue::triton_vm::TritonVmProofJobOptions;
+
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
@@ -38,12 +38,17 @@ impl From<&ConsensusProgramProverJobResult> for Proof {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct JobSettings {
+    pub max_log2_padded_height_for_proofs: Option<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConsensusProgramProverJob {
     pub program: Program,
     pub claim: Claim,
     pub nondeterminism: NonDeterminism,
-    pub proof_job_options: TritonVmProofJobOptions,
+    pub job_settings: JobSettings,
 }
 
 impl ConsensusProgramProverJob {
@@ -85,7 +90,7 @@ impl ConsensusProgramProverJob {
         assert_eq!(self.claim.output, vm_output);
 
         let padded_height = vm_state.cycle_count.next_power_of_two();
-        match self.proof_job_options.max_log2_padded_height_for_proofs {
+        match self.job_settings.max_log2_padded_height_for_proofs {
             Some(limit) if (limit as u32) < padded_height => anyhow::bail!(
                 "proof execution aborted. padded_height exceeds limit.  height: {}, limit: {}",
                 padded_height,

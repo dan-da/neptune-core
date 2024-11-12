@@ -1,9 +1,9 @@
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::job_queue::triton_vm::TritonVmProofJobOptions;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::prelude::twenty_first;
@@ -319,7 +319,7 @@ impl Transaction {
                 &update_claim,
                 update_nondeterminism,
                 triton_vm_job_queue,
-                proof_job_options,
+                proof_job_options.clone(),
             )
             .await?;
         info!("done.");
@@ -442,7 +442,7 @@ impl Transaction {
                 &merge_claim,
                 merge_witness.nondeterminism(),
                 triton_vm_job_queue,
-                proof_job_options,
+                proof_job_options.clone(),
             )
             .await?;
         info!("Done: creating merge proof");

@@ -14,7 +14,7 @@ use tasm_lib::verifier::stark_verify::StarkVerify;
 use tasm_lib::Digest;
 use tracing::info;
 
-use crate::job_queue::triton_vm::TritonVmProofJobOptions;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::tasm::claims::generate_collect_lock_scripts_claim::GenerateCollectLockScriptsClaim;
@@ -283,9 +283,12 @@ impl SingleProof {
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        let proof_collection =
-            ProofCollection::produce(primitive_witness, triton_vm_job_queue, proof_job_options)
-                .await?;
+        let proof_collection = ProofCollection::produce(
+            primitive_witness,
+            triton_vm_job_queue,
+            proof_job_options.clone(),
+        )
+        .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
         let nondeterminism = single_proof_witness.nondeterminism();

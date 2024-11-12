@@ -12,9 +12,10 @@ use tracing::debug;
 
 use super::consensus_program_prover_job::ConsensusProgramProverJob;
 use super::consensus_program_prover_job::ConsensusProgramProverJobResult;
+use super::consensus_program_prover_job::JobSettings;
 use super::environment;
+use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::job_queue::triton_vm::TritonVmProofJobOptions;
 
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
@@ -159,7 +160,7 @@ pub(crate) async fn prove_consensus_program(
         program,
         claim,
         nondeterminism,
-        proof_job_options,
+        job_settings: proof_job_options.job_settings,
     };
 
     // queue the job and await the result.
@@ -177,6 +178,33 @@ pub(crate) async fn prove_consensus_program(
         .expect("downcast should succeed, else bug")
         .into();
     Ok(proof)
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TritonVmProofJobOptions {
+    pub job_priority: TritonVmJobPriority,
+    pub job_settings: JobSettings,
+}
+impl From<(TritonVmJobPriority, Option<u8>)> for TritonVmProofJobOptions {
+    fn from(v: (TritonVmJobPriority, Option<u8>)) -> Self {
+        let (job_priority, max_log2_padded_height_for_proofs) = v;
+        Self {
+            job_priority,
+            job_settings: JobSettings {
+                max_log2_padded_height_for_proofs,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
+    fn from(job_priority: TritonVmJobPriority) -> Self {
+        Self {
+            job_priority,
+            job_settings: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]

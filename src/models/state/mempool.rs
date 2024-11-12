@@ -50,7 +50,6 @@ use twenty_first::math::digest::Digest;
 
 use super::transaction_kernel_id::TransactionKernelId;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::job_queue::triton_vm::TritonVmProofJobOptions;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
@@ -58,6 +57,7 @@ use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::peer::transfer_transaction::TransactionProofQuality;
+use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::prelude::twenty_first;
 
@@ -633,7 +633,7 @@ impl Mempool {
                     &previous_mutator_set_accumulator,
                     &mutator_set_update,
                     vm_job_queue,
-                    proof_job_options,
+                    proof_job_options.clone(),
                 )
                 .await
             {
