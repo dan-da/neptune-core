@@ -181,7 +181,7 @@ pub struct Args {
     /// be given to another node for processing, or rejected, or halt execution.
     ///
     /// no limit is applied if unset.
-    #[structopt(long, short)]
+    #[structopt(long, short, value_parser = clap::value_parser!(u8).range(1..32))]
     pub max_log2_padded_height_for_proofs: Option<u8>,
 }
 

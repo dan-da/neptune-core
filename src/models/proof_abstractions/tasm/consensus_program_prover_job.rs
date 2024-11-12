@@ -93,7 +93,7 @@ impl ConsensusProgramProverJob {
 
         let padded_height = vm_state.cycle_count.next_power_of_two();
         match self.job_settings.max_log2_padded_height_for_proofs {
-            Some(limit) if (limit as u32) < padded_height => anyhow::bail!(
+            Some(limit) if 2u32.pow(limit.into()) < padded_height => anyhow::bail!(
                 "proof execution aborted. padded_height exceeds limit.  height: {}, limit: {}",
                 padded_height,
                 limit
