@@ -73,7 +73,7 @@ impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
         D: serde::de::Deserializer<'de>,
     {
         let seed = Digest::deserialize(deserializer)?;
-        Ok(Self::derive_from_seed(seed))
+        Ok(Self::from_seed(seed))
     }
 }
 
