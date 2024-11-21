@@ -137,12 +137,15 @@ impl SendScreen {
             .await
             .unwrap();
 
-        if send_result.is_none() {
-            *notice_arc.lock().await = "Could not send due to error.".to_string();
-            *reset_me.lock().await = ResetType::Notice;
-        } else {
-            *notice_arc.lock().await = "Payment broadcast".to_string();
-            *reset_me.lock().await = ResetType::Form;
+        match send_result {
+            Ok(_) => {
+                *notice_arc.lock().await = "Payment broadcast".to_string();
+                *reset_me.lock().await = ResetType::Form;
+            }
+            Err(e) => {
+                *notice_arc.lock().await = format!("send error.  {}", e.to_string());
+                *reset_me.lock().await = ResetType::Notice;
+            }
         }
         refresh_tx.send(()).await.unwrap();
     }
