@@ -26,6 +26,7 @@ use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
+use ratatui::widgets::Wrap;
 use tarpc::context;
 use tokio::sync::Mutex;
 
@@ -455,7 +456,8 @@ impl Widget for SendScreen {
                     } else {
                         style
                     },
-                ));
+                ))
+                .wrap(Wrap { trim: true });
                 notice_widget.render(notice_rect, buf);
             }
         }
