@@ -448,16 +448,9 @@ impl Widget for SendScreen {
             // notice
             if let Ok(notice_text) = self.notice.try_lock() {
                 vrecter.next(1);
-                let notice_rect = vrecter.next(1);
-                let notice_widget = Paragraph::new(Span::styled(
-                    notice_text.to_string(),
-                    if own_focus == SendScreenWidget::Notice && self.in_focus {
-                        focus_style
-                    } else {
-                        style
-                    },
-                ))
-                .wrap(Wrap { trim: true });
+                let notice_rect = vrecter.next(10);
+                let notice_widget = Paragraph::new(notice_text.as_str())
+                    .wrap(Wrap { trim: true });
                 notice_widget.render(notice_rect, buf);
             }
         }
