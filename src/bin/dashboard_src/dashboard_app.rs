@@ -267,7 +267,7 @@ impl DashboardApp {
         }
 
         // initial draw.
-        terminal.draw(|f| app.render(f))?;
+        terminal.draw(|f| app.render::<CrosstermBackend<Stdout>>(f))?;
 
         let mut continue_running = true;
         while continue_running {
@@ -308,7 +308,7 @@ impl DashboardApp {
                 }
                 drop(console_queue);
                 if draw {
-                    terminal.draw(|f| app.render(f))?;
+                    terminal.draw(|f| app.render::<CrosstermBackend<Stdout>>(f))?;
                 }
             }
 
@@ -322,7 +322,7 @@ impl DashboardApp {
             }
 
             if refresh_rx.try_recv().is_ok() {
-                terminal.draw(|f| app.render(f))?;
+                terminal.draw(|f| app.render::<CrosstermBackend<Stdout>>(f))?;
             }
 
             // note: setting a low duration like 100 can cause high CPU usage
@@ -334,7 +334,7 @@ impl DashboardApp {
                         refresh_tx.clone(),
                     )
                     .await?;
-                    terminal.draw(|f| app.render(f))?;
+                    terminal.draw(|f| app.render::<CrosstermBackend<Stdout>>(f))?;
                 }
             }
 
@@ -347,7 +347,6 @@ impl DashboardApp {
 
                     // mark handled
                     *maybe_event_arc.lock().unwrap() = None;
-                    // terminal.draw(|f| app.render(f))?;
                 };
             }
 
@@ -368,7 +367,7 @@ impl DashboardApp {
         refresh_tx: tokio::sync::mpsc::Sender<()>,
     ) -> Result<Option<Event>, Box<dyn Error>> {
         if let DashboardEvent::RefreshScreen = event {
-            terminal.draw(|f| self.render(f))?;
+            terminal.draw(|f| self.render::<CrosstermBackend<Stdout>>(f))?;
         } else if let DashboardEvent::Shutdown(error_message) = event {
             self.stop();
             self.output = error_message + "\n";
@@ -440,7 +439,7 @@ impl DashboardApp {
 
             match escalated {
                 Some(DashboardEvent::RefreshScreen) => {
-                    terminal.draw(|f| self.render(f))?;
+                    terminal.draw(|f| self.render::<CrosstermBackend<Stdout>>(f))?;
                 }
                 Some(DashboardEvent::ConsoleEvent(Event::Key(key)))
                     if key.kind == KeyEventKind::Press =>
@@ -468,12 +467,12 @@ impl DashboardApp {
         Ok(None)
     }
 
-    fn render<B: Backend>(&mut self, f: &mut Frame<B>) {
+    fn render<B: Backend>(&mut self, f: &mut Frame) {
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
-            .split(f.size());
+            .split(f.area());
         let header_chunk = main_chunks[0];
         let body_chunks = Layout::default()
             .direction(Direction::Horizontal)
