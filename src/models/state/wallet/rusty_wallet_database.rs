@@ -113,18 +113,22 @@ impl RustyWalletDatabase {
         self.counter.set(counter).await;
     }
 
+    /// retrieve wallet derivation counter for generation keys
     pub async fn get_generation_key_counter(&self) -> u64 {
         self.generation_key_counter.get().await
     }
 
+    /// set wallet derivation counter for generation keys
     pub async fn set_generation_key_counter(&mut self, counter: u64) {
         self.generation_key_counter.set(counter).await;
     }
 
+    /// retrieve wallet derivation counter for symmetric keys
     pub async fn get_symmetric_key_counter(&self) -> u64 {
         self.symmetric_key_counter.get().await
     }
 
+    /// set wallet derivation counter for symmetric keys
     pub async fn set_symmetric_key_counter(&mut self, counter: u64) {
         self.symmetric_key_counter.set(counter).await;
     }

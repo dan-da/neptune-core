@@ -734,10 +734,8 @@ impl WalletState {
 
     /// Get the next unused spending key of a given type.
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter (for key_type), and increment the counter.
-    ///
-    /// Note that incrementing the counter requires &mut self.
+    /// returns key at present counter (for key_type), and increments the
+    /// counter. also the returned key is added to the list of known keys.
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
@@ -748,6 +746,7 @@ impl WalletState {
         }
     }
 
+    /// Get the nth derived spending key of a given type.
     pub fn nth_spending_key(&mut self, key_type: KeyType, index: u64) -> SpendingKey {
         match key_type {
             KeyType::Generation => self.wallet_secret.nth_generation_spending_key(index).into(),
@@ -757,8 +756,8 @@ impl WalletState {
 
     /// Get the next unused generation spending key.
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter, and increment the counter.
+    /// returns key at present counter, and increments the counter.
+    /// also the returned key is added to the list of known keys.
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
@@ -774,8 +773,8 @@ impl WalletState {
 
     /// Get the next unused symmetric key.
     ///
-    /// For now, this always returns key at index 0.  In the future it will
-    /// return key at present counter, and increment the counter.
+    /// returns key at present counter, and increments the counter.
+    /// also the returned key is added to the list of known keys.
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
@@ -1851,9 +1850,6 @@ mod tests {
                     UtxoNotificationMedium::OnChain,
                     UtxoNotificationMedium::OnChain,
                 );
-                for txo in tx_outputs.iter() {
-                    debug!("txo amt: {}", txo.utxo().get_native_currency_amount());
-                }
 
                 let (tx, _change_output) = gs
                     .create_transaction_with_prover_capability(
