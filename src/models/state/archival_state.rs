@@ -1122,7 +1122,7 @@ mod archival_state_tests {
         let some_receiving_address = some_spending_key.to_address();
 
         let (block_1, _, _) =
-            make_mock_block_with_valid_pow(&b, None, some_receiving_address, rng.gen());
+            make_mock_block_with_valid_pow(&b, None, some_receiving_address.into(), rng.gen());
         add_block_to_archival_state(&mut archival_state0, block_1.clone())
             .await
             .unwrap();
@@ -1193,14 +1193,14 @@ mod archival_state_tests {
         // Verify that a restored archival mutator set is populated with the right `sync_label`
         let network = Network::Alpha;
         let mut archival_state = make_test_archival_state(network).await;
-        let genesis_wallet_state =
+        let mut genesis_wallet_state =
             mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network).await;
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &archival_state.genesis_block,
             None,
             genesis_wallet_state
-                .wallet_secret
-                .nth_generation_spending_key_for_tests(0)
+                .next_unused_spending_key(KeyType::Generation)
+                .await
                 .to_address(),
             rng.gen(),
         );
@@ -1237,11 +1237,11 @@ mod archival_state_tests {
         let mut alice =
             mock_genesis_global_state(network, 0, alice_wallet, cli_args::Args::default()).await;
         let change_key = alice
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let alice_address = change_key.to_address();
 
         let genesis_block = Block::genesis_block(network);
@@ -1323,7 +1323,7 @@ mod archival_state_tests {
         let (mock_block_1a, _, _) = make_mock_block_with_valid_pow(
             &archival_state.genesis_block,
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         archival_state.write_block_as_tip(&mock_block_1a).await?;
@@ -1338,7 +1338,7 @@ mod archival_state_tests {
         let (mock_block_1b, _, _) = make_mock_block_with_valid_pow(
             &archival_state.genesis_block,
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         archival_state.write_block_as_tip(&mock_block_1a).await?;
@@ -1476,10 +1476,15 @@ mod archival_state_tests {
         let mut rng = thread_rng();
         let alice_wallet = WalletSecret::devnet_wallet();
         let genesis_block = Block::genesis_block(network);
-        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let alice_address = alice_key.to_address();
         let mut alice =
             mock_genesis_global_state(network, 42, alice_wallet, cli_args::Args::default()).await;
+        let alice_key = alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
+        let alice_address = alice_key.to_address();
 
         let mut num_utxos = Block::premine_utxos(network).len();
         let mut previous_block = genesis_block.clone();
@@ -1489,7 +1494,7 @@ mod archival_state_tests {
                 TxOutput::onchain_native_currency(
                     NeptuneCoins::new(1),
                     rng.gen(),
-                    alice_address.into(),
+                    alice_address.clone().into(),
                     false,
                 )
             })
@@ -1584,7 +1589,7 @@ mod archival_state_tests {
         {
             // 3. Create competing block 1 and treat it as new tip
             let (mock_block_1b, _, _) =
-                make_mock_block(&genesis_block, None, alice_address, rng.gen());
+                make_mock_block(&genesis_block, None, alice_address.into(), rng.gen());
             num_utxos += mock_block_1b.body().transaction_kernel.outputs.len()
                 + mock_block_1b.guesser_fee_addition_records().len();
 
@@ -1922,12 +1927,11 @@ mod archival_state_tests {
         ]
         .into();
         let alice_change_key = alice
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_symmetric_key_for_tests(0)
-            .into();
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let (tx_from_alice, alice_change) = alice
             .lock_guard()
             .await
@@ -1968,12 +1972,11 @@ mod archival_state_tests {
         ]
         .into();
         let bob_change_key = bob
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_symmetric_key_for_tests(0)
-            .into();
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let (tx_from_bob, bob_change) = bob
             .lock_guard()
             .await
@@ -2168,8 +2171,12 @@ mod archival_state_tests {
                 .nth_generation_spending_key_for_tests(0)
                 .to_address();
             let genesis = *archival_state.genesis_block.clone();
-            let (mock_block_1, _, _) =
-                make_mock_block_with_valid_pow(&genesis, None, own_receiving_address, rng.gen());
+            let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
+                &genesis,
+                None,
+                own_receiving_address.into(),
+                rng.gen(),
+            );
             add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
                 .await
                 .unwrap();
@@ -2189,7 +2196,7 @@ mod archival_state_tests {
             let (mock_block_2, _, _) = make_mock_block_with_valid_pow(
                 &mock_block_1,
                 None,
-                own_receiving_address,
+                own_receiving_address.into(),
                 rng.gen(),
             );
             add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
@@ -2227,7 +2234,7 @@ mod archival_state_tests {
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
 
@@ -2254,7 +2261,7 @@ mod archival_state_tests {
         let (mock_block_2, _, _) = make_mock_block_with_valid_pow(
             &mock_block_1.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_2.clone()).await?;
@@ -2279,8 +2286,12 @@ mod archival_state_tests {
         let mut last_block = mock_block_2.clone();
         let mut blocks = vec![genesis, mock_block_1, mock_block_2];
         for _ in 0..(thread_rng().next_u32() % 20) {
-            let (new_block, _, _) =
-                make_mock_block_with_valid_pow(&last_block, None, own_receiving_address, rng.gen());
+            let (new_block, _, _) = make_mock_block_with_valid_pow(
+                &last_block,
+                None,
+                own_receiving_address.into(),
+                rng.gen(),
+            );
             add_block_to_archival_state(&mut archival_state, new_block.clone()).await?;
             blocks.push(new_block.clone());
             last_block = new_block;
@@ -2349,7 +2360,8 @@ mod archival_state_tests {
         let genesis_msa = current_block.mutator_set_accumulator_after().clone();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
         for _block_height in 1..=5 {
-            let next_block = make_mock_block(&current_block, None, cb_beneficiary, rng.gen()).0;
+            let next_block =
+                make_mock_block(&current_block, None, cb_beneficiary.into(), rng.gen()).0;
             add_block_to_archival_state(&mut archival_state, next_block.clone())
                 .await
                 .unwrap();
@@ -2426,8 +2438,8 @@ mod archival_state_tests {
         let genesis_msa = &genesis_block.mutator_set_accumulator_after();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
 
-        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
-        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
+        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary.into(), rng.gen()).0;
+        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary.into(), rng.gen()).0;
         let block_1a_msa = &block_1a.mutator_set_accumulator_after();
         let block_1b_msa = &block_1b.mutator_set_accumulator_after();
 
@@ -2466,10 +2478,10 @@ mod archival_state_tests {
         let genesis_msa = &genesis_block.mutator_set_accumulator_after();
         let cb_beneficiary = wallet.nth_generation_spending_key_for_tests(0).to_address();
 
-        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
-        let block_2a = make_mock_block(&block_1a, None, cb_beneficiary, rng.gen()).0;
-        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary, rng.gen()).0;
-        let block_2b = make_mock_block(&block_1b, None, cb_beneficiary, rng.gen()).0;
+        let block_1a = make_mock_block(&genesis_block, None, cb_beneficiary.into(), rng.gen()).0;
+        let block_2a = make_mock_block(&block_1a, None, cb_beneficiary.into(), rng.gen()).0;
+        let block_1b = make_mock_block(&genesis_block, None, cb_beneficiary.into(), rng.gen()).0;
+        let block_2b = make_mock_block(&block_1b, None, cb_beneficiary.into(), rng.gen()).0;
         let block_1a_msa = &block_1a.mutator_set_accumulator_after();
         let block_2a_msa = &block_2a.mutator_set_accumulator_after();
         let block_1b_msa = &block_1b.mutator_set_accumulator_after();
@@ -2569,7 +2581,7 @@ mod archival_state_tests {
         let (mock_block_1_a, _, _) = make_mock_block_with_valid_pow(
             &genesis.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_1_a.clone()).await?;
@@ -2577,7 +2589,7 @@ mod archival_state_tests {
         let (mock_block_1_b, _, _) = make_mock_block_with_valid_pow(
             &genesis.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_1_b.clone()).await?;
@@ -2717,8 +2729,12 @@ mod archival_state_tests {
         let own_receiving_address = own_wallet
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let (block1, _, _) =
-            make_mock_block(&genesis.clone(), None, own_receiving_address, rng.gen());
+        let (block1, _, _) = make_mock_block(
+            &genesis.clone(),
+            None,
+            own_receiving_address.into(),
+            rng.gen(),
+        );
         add_block_to_archival_state(&mut archival_state, block1.clone()).await?;
         assert!(
             archival_state
@@ -2734,20 +2750,24 @@ mod archival_state_tests {
         );
 
         // Insert three more blocks and verify that all are part of the canonical chain
-        let (mock_block_2_a, _, _) =
-            make_mock_block_with_valid_pow(&block1.clone(), None, own_receiving_address, rng.gen());
+        let (mock_block_2_a, _, _) = make_mock_block_with_valid_pow(
+            &block1.clone(),
+            None,
+            own_receiving_address.into(),
+            rng.gen(),
+        );
         add_block_to_archival_state(&mut archival_state, mock_block_2_a.clone()).await?;
         let (mock_block_3_a, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2_a.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_3_a.clone()).await?;
         let (mock_block_4_a, _, _) = make_mock_block_with_valid_pow(
             &mock_block_3_a.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_4_a.clone()).await?;
@@ -2781,27 +2801,31 @@ mod archival_state_tests {
 
         // Make a tree and verify that the correct parts of the tree are identified as
         // belonging to the canonical chain
-        let (mock_block_2_b, _, _) =
-            make_mock_block_with_valid_pow(&block1.clone(), None, own_receiving_address, rng.gen());
+        let (mock_block_2_b, _, _) = make_mock_block_with_valid_pow(
+            &block1.clone(),
+            None,
+            own_receiving_address.into(),
+            rng.gen(),
+        );
         add_block_to_archival_state(&mut archival_state, mock_block_2_b.clone()).await?;
         let (mock_block_3_b, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2_b.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_3_b.clone()).await?;
         let (mock_block_4_b, _, _) = make_mock_block_with_valid_pow(
             &mock_block_3_b.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_4_b.clone()).await?;
         let (mock_block_5_b, _, _) = make_mock_block_with_valid_pow(
             &mock_block_4_b.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_5_b.clone()).await?;
@@ -2867,70 +2891,70 @@ mod archival_state_tests {
         let (mock_block_3_c, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2_a.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_3_c.clone()).await?;
         let (mock_block_4_c, _, _) = make_mock_block_with_valid_pow(
             &mock_block_3_c.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_4_c.clone()).await?;
         let (mock_block_5_c, _, _) = make_mock_block_with_valid_pow(
             &mock_block_4_c.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_5_c.clone()).await?;
         let (mock_block_6_c, _, _) = make_mock_block_with_valid_pow(
             &mock_block_5_c.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_6_c.clone()).await?;
         let (mock_block_7_c, _, _) = make_mock_block_with_valid_pow(
             &mock_block_6_c.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_7_c.clone()).await?;
         let (mock_block_8_c, _, _) = make_mock_block_with_valid_pow(
             &mock_block_7_c.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_8_c.clone()).await?;
         let (mock_block_5_a, _, _) = make_mock_block_with_valid_pow(
             &mock_block_4_a.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_5_a.clone()).await?;
         let (mock_block_3_d, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2_a.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_3_d.clone()).await?;
         let (mock_block_4_d, _, _) = make_mock_block_with_valid_pow(
             &mock_block_3_d.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_4_d.clone()).await?;
         let (mock_block_5_d, _, _) = make_mock_block_with_valid_pow(
             &mock_block_4_d.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_5_d.clone()).await?;
@@ -2939,7 +2963,7 @@ mod archival_state_tests {
         let (mock_block_6_d, _, _) = make_mock_block_with_valid_pow(
             &mock_block_5_d.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_6_d.clone()).await?;
@@ -2947,14 +2971,14 @@ mod archival_state_tests {
         let (mock_block_4_e, _, _) = make_mock_block_with_valid_pow(
             &mock_block_3_d.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_4_e.clone()).await?;
         let (mock_block_5_e, _, _) = make_mock_block_with_valid_pow(
             &mock_block_4_e.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_5_e.clone()).await?;
@@ -3017,7 +3041,7 @@ mod archival_state_tests {
         let (mock_block_6_b, _, _) = make_mock_block_with_valid_pow(
             &mock_block_5_b.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_6_b.clone()).await?;
@@ -3158,7 +3182,7 @@ mod archival_state_tests {
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_1.clone())
@@ -3167,7 +3191,7 @@ mod archival_state_tests {
         let (mock_block_2, _, _) = make_mock_block_with_valid_pow(
             &mock_block_1.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_2.clone())
@@ -3176,7 +3200,7 @@ mod archival_state_tests {
         let (mock_block_3, _, _) = make_mock_block_with_valid_pow(
             &mock_block_2.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_3.clone())
@@ -3185,7 +3209,7 @@ mod archival_state_tests {
         let (mock_block_4, _, _) = make_mock_block_with_valid_pow(
             &mock_block_3.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         add_block_to_archival_state(&mut archival_state, mock_block_4.clone())
@@ -3262,7 +3286,7 @@ mod archival_state_tests {
         let (mock_block_1, _, _) = make_mock_block_with_valid_pow(
             &genesis.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         archival_state.write_block_as_tip(&mock_block_1).await?;
@@ -3349,7 +3373,7 @@ mod archival_state_tests {
         let (mock_block_2, _, _) = make_mock_block_with_valid_pow(
             &mock_block_1.clone(),
             None,
-            own_receiving_address,
+            own_receiving_address.into(),
             rng.gen(),
         );
         archival_state.write_block_as_tip(&mock_block_2).await?;

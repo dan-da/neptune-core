@@ -1505,6 +1505,7 @@ mod peer_loop_tests {
     use crate::models::peer::transaction_notification::TransactionNotification;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::tests::shared::get_dummy_peer_connection_data_genesis;
@@ -2977,10 +2978,15 @@ mod peer_loop_tests {
             quality: TransactionProofQuality,
         ) -> Transaction {
             let wallet_secret = WalletSecret::devnet_wallet();
-            let alice_key = wallet_secret.nth_generation_spending_key_for_tests(0);
-            let alice =
+            let mut alice =
                 mock_genesis_global_state(network, 1, wallet_secret, cli_args::Args::default())
                     .await;
+            let alice_key = alice
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
             let alice = alice.lock_guard().await;
             let genesis_block = alice.chain.light_state();
             let in_seven_months = genesis_block.header().timestamp + Timestamp::months(7);

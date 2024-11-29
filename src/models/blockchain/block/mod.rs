@@ -1052,8 +1052,12 @@ mod block_tests {
                     let duration = i as u64 * multiplier;
                     now += Timestamp::millis(duration);
 
-                    let (block, _, _) =
-                        make_mock_block(&block_prev, Some(now), a_recipient_address, rng.gen());
+                    let (block, _, _) = make_mock_block(
+                        &block_prev,
+                        Some(now),
+                        a_recipient_address.into(),
+                        rng.gen(),
+                    );
 
                     let control = difficulty_control(
                         block.kernel.header.timestamp,
@@ -1109,8 +1113,12 @@ mod block_tests {
         let a_recipient_address = a_wallet_secret
             .nth_generation_spending_key_for_tests(0)
             .to_address();
-        let (mut block_1, _, _) =
-            make_mock_block_with_valid_pow(&genesis_block, None, a_recipient_address, rng.gen());
+        let (mut block_1, _, _) = make_mock_block_with_valid_pow(
+            &genesis_block,
+            None,
+            a_recipient_address.into(),
+            rng.gen(),
+        );
 
         block_1.kernel.body.block_mmr_accumulator = MmrAccumulator::new_from_leafs(vec![]);
         let timestamp = genesis_block.kernel.header.timestamp;
@@ -1139,8 +1147,12 @@ mod block_tests {
             let recipient_address = wallet_secret
                 .nth_generation_spending_key_for_tests(0)
                 .to_address();
-            let (new_block, _, _) =
-                make_mock_block(blocks.last().unwrap(), None, recipient_address, rng.gen());
+            let (new_block, _, _) = make_mock_block(
+                blocks.last().unwrap(),
+                None,
+                recipient_address.into(),
+                rng.gen(),
+            );
             if i != 54 {
                 ammr.append(new_block.hash()).await;
                 mmra.append(new_block.hash());

@@ -229,7 +229,7 @@ impl WalletState {
         let sync_label = rusty_wallet_database.get_sync_label().await;
 
         // generate and cache all used generation keys
-        let mut known_generation_keys: HashSet<_> =
+        let known_generation_keys: HashSet<_> =
             (0..rusty_wallet_database.get_generation_key_counter().await)
                 .map(|idx| wallet_secret.nth_generation_spending_key(idx).into())
                 .collect();
@@ -241,10 +241,10 @@ impl WalletState {
         // In the future all such tests should be fixed, however for
         // right now, we want to demonstrate that the existing tests
         // work with key-derivation in place.
-        if known_generation_keys.is_empty() {
-            let key = wallet_secret.nth_generation_spending_key(0);
-            known_generation_keys.insert(key.into());
-        }
+        // if known_generation_keys.is_empty() {
+        //     let key = wallet_secret.nth_generation_spending_key(0);
+        //     known_generation_keys.insert(key.into());
+        // }
 
         // generate and cache all used symmetric keys
         let known_symmetric_keys = (0..rusty_wallet_database.get_symmetric_key_counter().await)
@@ -761,7 +761,7 @@ impl WalletState {
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    async fn next_unused_generation_spending_key(
+    pub(crate) async fn next_unused_generation_spending_key(
         &mut self,
     ) -> generation_address::GenerationSpendingKey {
         let index = self.wallet_db.get_generation_key_counter().await;
@@ -778,7 +778,7 @@ impl WalletState {
     ///
     /// Note that incrementing the counter modifies wallet state.  It is
     /// important to write to disk afterward to avoid possible funds loss.
-    pub async fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
+    pub(crate) async fn next_unused_symmetric_key(&mut self) -> symmetric_key::SymmetricKey {
         let index = self.wallet_db.get_symmetric_key_counter().await;
         self.wallet_db.set_symmetric_key_counter(index + 1).await;
         let key = self.wallet_secret.nth_symmetric_key(index);
@@ -1445,6 +1445,11 @@ mod tests {
         .await;
 
         let mut alice = alice_global_lock.global_state_lock.lock_guard_mut().await;
+        let alice_key = alice
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
+
         let launch_timestamp = alice.chain.light_state().header().timestamp;
         let released_timestamp = launch_timestamp + Timestamp::months(12);
         let genesis = alice.chain.light_state();
@@ -1484,10 +1489,6 @@ mod tests {
         // selected even when the necessary balance is there through other UTXOs
         // that are *not* timelocked.
         let block_1_timestamp = launch_timestamp + Timestamp::minutes(2);
-        let alice_key = alice
-            .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
         let alice_address = alice_key.to_address();
         let (block1, cb_utxo, cb_sender_randomness) = make_mock_block(
             genesis,
@@ -1501,7 +1502,7 @@ mod tests {
                 vec![ExpectedUtxo::new(
                     cb_utxo,
                     cb_sender_randomness,
-                    alice_key.privacy_preimage,
+                    alice_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
             )
@@ -1565,7 +1566,7 @@ mod tests {
         let mut latest_block = genesis_block;
         for _ in 1..=2 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, alice_address, rng.gen());
+                make_mock_block(&latest_block, None, alice_address.into(), rng.gen());
             bob.wallet_state
                 .update_wallet_state_with_new_block(
                     &latest_block.mutator_set_accumulator_after(),
@@ -1602,7 +1603,7 @@ mod tests {
             make_mock_block(
                 &latest_block.clone(),
                 None,
-                own_recipient_address,
+                own_recipient_address.into(),
                 rng.gen(),
             );
         bob.set_new_self_mined_tip(
@@ -1644,7 +1645,7 @@ mod tests {
 
         // Fork the blockchain with 3b, with no coinbase for us
         let (block_3b, _block_3b_coinbase_utxo, _block_3b_coinbase_sender_randomness) =
-            make_mock_block(&latest_block, None, alice_address, rng.gen());
+            make_mock_block(&latest_block, None, alice_address.into(), rng.gen());
         bob.set_new_tip(block_3b.clone()).await.unwrap();
 
         assert!(
@@ -1669,7 +1670,7 @@ mod tests {
         latest_block = block_3b;
         for _ in 4..=11 {
             let (new_block, _new_block_coinbase_utxo, _new_block_coinbase_sender_randomness) =
-                make_mock_block(&latest_block, None, alice_address, rng.gen());
+                make_mock_block(&latest_block, None, alice_address.into(), rng.gen());
             bob.set_new_tip(new_block.clone()).await.unwrap();
 
             latest_block = new_block;
@@ -1693,7 +1694,8 @@ mod tests {
         );
 
         // Mine *one* more block. Verify that MUTXO is pruned
-        let (block_12, _, _) = make_mock_block(&latest_block, None, alice_address, rng.gen());
+        let (block_12, _, _) =
+            make_mock_block(&latest_block, None, alice_address.into(), rng.gen());
         bob.set_new_tip(block_12.clone()).await.unwrap();
 
         assert!(

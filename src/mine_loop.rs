@@ -741,6 +741,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::mast_hash::MastHash;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::mempool::TransactionOrigin;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::tests::shared::dummy_expected_utxo;
@@ -895,11 +896,11 @@ pub(crate) mod mine_loop_tests {
         let mut rng = StdRng::seed_from_u64(u64::from_str_radix("2350404", 6).unwrap());
 
         let alice_key = alice
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let output_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(4),
             rng.gen(),

@@ -1653,18 +1653,19 @@ mod tests {
         use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
         use crate::models::peer::transfer_transaction::TransactionProofQuality;
         use crate::models::proof_abstractions::timestamp::Timestamp;
+        use crate::models::state::wallet::address::KeyType;
         use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
 
         async fn a_transaction(
-            global_state_lock: &GlobalStateLock,
+            global_state_lock: &mut GlobalStateLock,
             tx_proof_type: TxProvingCapability,
         ) -> Transaction {
             let change_key = global_state_lock
-                .lock_guard()
+                .lock_guard_mut()
                 .await
                 .wallet_state
-                .wallet_secret
-                .nth_generation_spending_key_for_tests(0);
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
             let fee = NeptuneCoins::new(1);
             let in_seven_months = global_state_lock
                 .lock_guard()
@@ -1728,7 +1729,7 @@ mod tests {
             );
 
             let proof_collection_tx = a_transaction(
-                &main_loop_handler.global_state_lock,
+                &mut main_loop_handler.global_state_lock,
                 TxProvingCapability::ProofCollection,
             )
             .await;

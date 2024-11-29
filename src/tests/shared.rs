@@ -88,7 +88,7 @@ use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::ReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -652,7 +652,7 @@ pub(crate) fn invalid_block_with_transaction(
 pub(crate) fn make_mock_block(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
+    coinbase_beneficiary: ReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -663,7 +663,7 @@ pub(crate) fn make_mock_block(
     let coinbase_amount = Block::block_subsidy(new_block_height);
     let coinbase_utxo = Utxo::new(lock_script, coinbase_amount.to_native_coins());
     let coinbase_sender_randomness: Digest = rng.gen();
-    let receiver_digest: Digest = coinbase_beneficiary.privacy_digest;
+    let receiver_digest: Digest = coinbase_beneficiary.privacy_digest();
     let coinbase_digest: Digest = Hash::hash(&coinbase_utxo);
     let coinbase_addition_record: AdditionRecord =
         commit(coinbase_digest, coinbase_sender_randomness, receiver_digest);
@@ -703,7 +703,7 @@ pub(crate) fn make_mock_block(
 pub(crate) fn make_mock_block_with_valid_pow(
     previous_block: &Block,
     block_timestamp: Option<Timestamp>,
-    coinbase_beneficiary: generation_address::GenerationReceivingAddress,
+    coinbase_beneficiary: ReceivingAddress,
     seed: [u8; 32],
 ) -> (Block, Utxo, Digest) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);

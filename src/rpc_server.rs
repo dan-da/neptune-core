@@ -2169,7 +2169,7 @@ mod rpc_server_tests {
         let (block_1, cb_utxo, cb_output_randomness) = make_mock_block(
             &genesis_block,
             Some(timestamp),
-            wallet_spending_key.to_address().try_into()?,
+            wallet_spending_key.to_address(),
             rng.gen(),
         );
 
@@ -2415,7 +2415,7 @@ mod rpc_server_tests {
                     let (block1, cb_utxo, cb_sender_randomness) = make_mock_block(
                         &genesis_block,
                         None,
-                        cb_key.to_address(),
+                        cb_key.to_address().into(),
                         Default::default(),
                     );
                     blocks.push(block1.clone());
@@ -2548,7 +2548,7 @@ mod rpc_server_tests {
                 let (block1, cb_utxo, cb_sender_randomness) = make_mock_block(
                     &genesis_block,
                     None,
-                    bob_key.to_address(),
+                    bob_key.to_address().into(),
                     Default::default(),
                 );
                 let cb = ExpectedUtxo::new(

@@ -816,6 +816,7 @@ mod tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::shared::SIZE_20MB_IN_BYTES;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
@@ -823,6 +824,7 @@ mod tests {
     use crate::models::state::wallet::transaction_output::UtxoNotificationMedium;
     use crate::models::state::wallet::WalletSecret;
     use crate::models::state::GlobalStateLock;
+    use crate::models::state::ReceivingAddress;
     use crate::models::state::TritonVmJobQueue;
     use crate::tests::shared::make_mock_block;
     use crate::tests::shared::make_mock_txs_with_primitive_witness_with_timestamp;
@@ -929,14 +931,19 @@ mod tests {
         let mut mempool = setup_mock_mempool(0, network, TransactionOrigin::Foreign).await;
         let genesis_block = Block::genesis_block(network);
         let bob_wallet_secret = WalletSecret::devnet_wallet();
-        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-        let bob = mock_genesis_global_state(
+        let mut bob = mock_genesis_global_state(
             network,
             2,
             bob_wallet_secret.clone(),
             cli_args::Args::default(),
         )
         .await;
+        let bob_spending_key = bob
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
         let high_fee = NeptuneCoins::new(15);
         let (tx_by_bob, _maybe_change_output) = bob
@@ -1071,24 +1078,34 @@ mod tests {
         let mut rng: StdRng = StdRng::seed_from_u64(0x03ce19960c467f90u64);
         let network = Network::Main;
         let bob_wallet_secret = WalletSecret::devnet_wallet();
-        let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
         let mut bob =
             mock_genesis_global_state(network, 2, bob_wallet_secret, cli_args::Args::default())
                 .await;
+        let bob_spending_key = bob
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         let bob_address = bob_spending_key.to_address();
 
         let alice_wallet = WalletSecret::new_pseudorandom(rng.gen());
-        let alice_spending_key = alice_wallet.nth_generation_spending_key_for_tests(0);
-        let alice_address = alice_spending_key.to_address();
         let mut alice =
             mock_genesis_global_state(network, 2, alice_wallet, cli_args::Args::default()).await;
+        let alice_spending_key = alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
+        let alice_address = alice_spending_key.to_address();
 
         // Ensure that both wallets have a non-zero balance by letting Alice
         // mine a block.
         let genesis_block = Block::genesis_block(network);
         let (block_1, coinbase_utxo_1, cb_sender_randomness_1) =
-            make_mock_block(&genesis_block, None, alice_address, rng.gen());
+            make_mock_block(&genesis_block, None, alice_address.clone(), rng.gen());
 
         // Update both states with block 1
         alice
@@ -1098,7 +1115,7 @@ mod tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 coinbase_utxo_1,
                 cb_sender_randomness_1,
-                alice_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
@@ -1112,7 +1129,7 @@ mod tests {
             utxos_from_bob.push(TxOutput::onchain_native_currency(
                 amount,
                 rng.gen(),
-                bob_address.into(),
+                bob_address.clone().into(),
                 true,
             ));
         }
@@ -1158,7 +1175,7 @@ mod tests {
         let utxos_from_alice = vec![TxOutput::onchain_native_currency(
             NeptuneCoins::new(68),
             rng.gen(),
-            alice_address.into(),
+            alice_address.clone().into(),
             true,
         )];
         let (tx_from_alice_original, _maybe_change_output) = alice
@@ -1256,7 +1273,7 @@ mod tests {
         let mut previous_block = block_2;
         for _ in 0..2 {
             let (next_block, _, _) =
-                make_mock_block(&previous_block, None, alice_address, rng.gen());
+                make_mock_block(&previous_block, None, alice_address.clone(), rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
             bob.set_new_tip(next_block.clone()).await.unwrap();
             let (_, joinhandles1) = mempool
@@ -1431,25 +1448,38 @@ mod tests {
         // Then mine a a block 1b that also does not contain this transaction.
         let network = Network::Main;
         let alice_wallet = WalletSecret::devnet_wallet();
-        let alice_key = alice_wallet.nth_generation_spending_key_for_tests(0);
         let proving_capability = TxProvingCapability::SingleProof;
         let cli_with_proof_capability = cli_args::Args {
             tx_proving_capability: Some(proving_capability),
             ..Default::default()
         };
         let mut alice =
-            mock_genesis_global_state(network, 2, alice_wallet, cli_with_proof_capability).await;
+            mock_genesis_global_state(network, 2, alice_wallet, cli_with_proof_capability.clone())
+                .await;
+        let alice_key = alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         let mut rng: StdRng = StdRng::seed_from_u64(u64::from_str_radix("42", 6).unwrap());
         let bob_wallet_secret = WalletSecret::new_pseudorandom(rng.gen());
-        let bob_address = bob_wallet_secret
-            .nth_generation_spending_key_for_tests(0)
+        let mut bob =
+            mock_genesis_global_state(network, 2, bob_wallet_secret, cli_with_proof_capability)
+                .await;
+        let bob_address = bob
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await
             .to_address();
 
         let tx_receiver_data = TxOutput::onchain_native_currency(
             NeptuneCoins::new(1),
             rng.gen(),
-            bob_address.into(),
+            bob_address.clone().into(),
             false,
         );
 
@@ -1493,8 +1523,12 @@ mod tests {
                 "The inserted tx must be in the mempool"
             );
 
-            let (next_block, _, _) =
-                make_mock_block(&current_block, Some(in_seven_years), bob_address, rng.gen());
+            let (next_block, _, _) = make_mock_block(
+                &current_block,
+                Some(in_seven_years),
+                bob_address.clone(),
+                rng.gen(),
+            );
             alice.set_new_tip(next_block.clone()).await.unwrap();
 
             let mempool_txs =
@@ -1524,8 +1558,12 @@ mod tests {
         }
 
         // Now make a deep reorganization and verify that nothing crashes
-        let (block_1b, _, _) =
-            make_mock_block(&genesis_block, Some(in_seven_years), bob_address, rng.gen());
+        let (block_1b, _, _) = make_mock_block(
+            &genesis_block,
+            Some(in_seven_years),
+            bob_address.clone(),
+            rng.gen(),
+        );
         assert!(
             block_1b.header().height.previous().is_genesis(),
             "Sanity check that new tip has height 1"
@@ -1560,23 +1598,26 @@ mod tests {
         )
         .await;
         let premine_spending_key = preminer
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let premine_address = premine_spending_key.to_address();
         let mut rng = StdRng::seed_from_u64(589111u64);
 
         let make_transaction_with_fee =
-            |fee: NeptuneCoins, preminer_clone: GlobalStateLock, sender_randomness: Digest| async move {
+            |fee: NeptuneCoins,
+             preminer_clone: GlobalStateLock,
+             sender_randomness: Digest,
+             premine_address: ReceivingAddress| async move {
                 let in_seven_months =
                     Block::genesis_block(network).kernel.header.timestamp + Timestamp::months(7);
 
                 let receiver_data = TxOutput::offchain_native_currency(
                     NeptuneCoins::new(1),
                     sender_randomness,
-                    premine_address.into(),
+                    premine_address,
                     false,
                 );
                 let tx_outputs: TxOutputList = vec![receiver_data.clone()].into();
@@ -1601,8 +1642,13 @@ mod tests {
         assert_eq!(0, preminer.lock_guard().await.mempool.len());
 
         // Insert transaction into mempool
-        let tx_low_fee =
-            make_transaction_with_fee(NeptuneCoins::new(1), preminer.clone(), rng.gen()).await;
+        let tx_low_fee = make_transaction_with_fee(
+            NeptuneCoins::new(1),
+            preminer.clone(),
+            rng.gen(),
+            premine_address.clone(),
+        )
+        .await;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_low_fee.clone(), TransactionOrigin::Foreign);
@@ -1612,8 +1658,13 @@ mod tests {
 
         // Insert a transaction that spends the same UTXO and has a higher fee.
         // Verify that this replaces the previous transaction.
-        let tx_high_fee =
-            make_transaction_with_fee(NeptuneCoins::new(10), preminer.clone(), rng.gen()).await;
+        let tx_high_fee = make_transaction_with_fee(
+            NeptuneCoins::new(10),
+            preminer.clone(),
+            rng.gen(),
+            premine_address.clone(),
+        )
+        .await;
         {
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_high_fee.clone(), TransactionOrigin::Foreign);
@@ -1627,8 +1678,13 @@ mod tests {
         // Insert a conflicting transaction with a lower fee and verify that it
         // does *not* replace the existing transaction.
         {
-            let tx_medium_fee =
-                make_transaction_with_fee(NeptuneCoins::new(4), preminer.clone(), rng.gen()).await;
+            let tx_medium_fee = make_transaction_with_fee(
+                NeptuneCoins::new(4),
+                preminer.clone(),
+                rng.gen(),
+                premine_address.clone(),
+            )
+            .await;
             let mempool = &mut preminer.lock_guard_mut().await.mempool;
             mempool.insert(tx_medium_fee.clone(), TransactionOrigin::Foreign);
             assert_eq!(1, mempool.len());
@@ -1763,21 +1819,26 @@ mod tests {
         ) -> Transaction {
             let genesis_block = Block::genesis_block(network);
             let bob_wallet_secret = WalletSecret::devnet_wallet();
-            let bob_spending_key = bob_wallet_secret.nth_generation_spending_key_for_tests(0);
-            let bob = mock_genesis_global_state(
+            let mut bob = mock_genesis_global_state(
                 network,
                 2,
                 bob_wallet_secret.clone(),
                 cli_args::Args::default(),
             )
             .await;
+            let bob_spending_key = bob
+                .lock_guard_mut()
+                .await
+                .wallet_state
+                .next_unused_spending_key(KeyType::Generation)
+                .await;
             let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
             let (tx_by_bob, _maybe_change_output) = bob
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
                     vec![].into(),
-                    bob_spending_key.into(),
+                    bob_spending_key,
                     UtxoNotificationMedium::OnChain,
                     fee,
                     in_seven_months,

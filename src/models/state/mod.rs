@@ -121,7 +121,7 @@ use crate::VERSION;
 /// let global_state = foo.global_state_lock.lock_guard().await;
 ///
 /// // write guard naming:
-/// let global_state_mut = foo.global_state_lock.lock_guard_mut().await;
+/// let lock_guard_mut = foo.global_state_lock.lock_guard_mut().await;
 /// ```
 ///
 /// These conventions make it easy to distinguish read access from write
@@ -1669,8 +1669,15 @@ mod global_state_tests {
         let network = Network::Main;
         let mut rng = StdRng::seed_from_u64(u64::from_str_radix("3014221", 6).unwrap());
 
-        let alice = WalletSecret::new_pseudorandom(rng.gen());
-        let bob = mock_genesis_global_state(
+        let mut alice = mock_genesis_global_state(
+            network,
+            2,
+            WalletSecret::new_pseudorandom(rng.gen()),
+            cli_args::Args::default(),
+        )
+        .await;
+
+        let mut bob = mock_genesis_global_state(
             network,
             2,
             WalletSecret::devnet_wallet(),
@@ -1690,18 +1697,24 @@ mod global_state_tests {
         );
 
         let bob_spending_key = bob
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         let genesis_block = Block::genesis_block(network);
-        let alice_address = alice.nth_generation_spending_key_for_tests(0).to_address();
+        let alice_address = alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await
+            .to_address();
         let nine_money_output = TxOutput::offchain_native_currency(
             NeptuneCoins::new(9),
             rng.gen(),
-            alice_address.into(),
+            alice_address.clone().into(),
             false,
         );
         let tx_outputs: TxOutputList = vec![nine_money_output].into();
@@ -1760,7 +1773,7 @@ mod global_state_tests {
             let output_utxo = TxOutput::offchain_native_currency(
                 that_much_money,
                 rng.gen(),
-                alice_address.into(),
+                alice_address.clone().into(),
                 false,
             );
             output_utxos.push(output_utxo);
@@ -1799,10 +1812,15 @@ mod global_state_tests {
         let network = Network::Main;
         let mut rng = thread_rng();
         let wallet = WalletSecret::devnet_wallet();
-        let own_key = wallet.nth_generation_spending_key_for_tests(0);
-        let own_address = own_key.to_address();
         let mut global_state_lock =
             mock_genesis_global_state(network, 2, wallet, cli_args::Args::default()).await;
+        let own_key = global_state_lock
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
+        let own_address = own_key.to_address();
         let genesis_block = Block::genesis_block(network);
         let (mock_block_1, cb_utxo, cb_sender_randomness) =
             make_mock_block(&genesis_block, None, own_address, rng.gen());
@@ -1813,7 +1831,7 @@ mod global_state_tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 cb_utxo,
                 cb_sender_randomness,
-                own_key.privacy_preimage,
+                own_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
@@ -1896,7 +1914,8 @@ mod global_state_tests {
         let genesis_block = Block::genesis_block(network);
         let launch = genesis_block.kernel.header.timestamp;
         let seven_months = Timestamp::months(7);
-        let (mock_block_1a, _, _) = make_mock_block(&genesis_block, None, bob_address, rng.gen());
+        let (mock_block_1a, _, _) =
+            make_mock_block(&genesis_block, None, bob_address.into(), rng.gen());
         {
             alice
                 .chain
@@ -1947,8 +1966,8 @@ mod global_state_tests {
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let alice_address = alice_spending_key.to_address();
 
         // 1. Create new block 1a where we receive a coinbase UTXO, store it
@@ -1961,7 +1980,7 @@ mod global_state_tests {
                 vec![ExpectedUtxo::new(
                     coinbase_utxo,
                     coinbase_output_randomness,
-                    alice_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
             )
@@ -1982,11 +2001,12 @@ mod global_state_tests {
         // Make a new fork from genesis that makes us lose the coinbase UTXO of block 1a
         let bob_wallet_secret = WalletSecret::new_random();
         let bob_address = bob_wallet_secret
-            .nth_generation_spending_key(0)
+            .nth_generation_spending_key_for_tests(0)
             .to_address();
         let mut parent_block = genesis_block;
         for _ in 0..5 {
-            let (next_block, _, _) = make_mock_block(&parent_block, None, bob_address, rng.gen());
+            let (next_block, _, _) =
+                make_mock_block(&parent_block, None, bob_address.into(), rng.gen());
             alice.set_new_tip(next_block.clone()).await.unwrap();
             parent_block = next_block;
         }
@@ -2053,8 +2073,12 @@ mod global_state_tests {
                         first_for_2.to_owned()
                     };
                     for _ in 0..num_blocks_per_branch {
-                        let (next_block, _, _) =
-                            make_mock_block(&block, None, cb_recipient.to_owned(), rng.gen());
+                        let (next_block, _, _) = make_mock_block(
+                            &block,
+                            None,
+                            cb_recipient.to_owned().into(),
+                            rng.gen(),
+                        );
                         ret.push(next_block.clone());
                         block = next_block;
                     }
@@ -2078,8 +2102,8 @@ mod global_state_tests {
         let mut alice = alice.lock_guard_mut().await;
         let alice_spending_key = alice
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let alice_address = alice_spending_key.to_address();
         let bob_secret = WalletSecret::new_random();
         let bob_address = bob_secret.nth_generation_spending_key(0).to_address();
@@ -2095,7 +2119,7 @@ mod global_state_tests {
                     vec![ExpectedUtxo::new(
                         coinbase_utxo_1,
                         cb_utxo_output_randomness_1,
-                        alice_spending_key.privacy_preimage,
+                        alice_spending_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     )],
                 )
@@ -2244,23 +2268,33 @@ mod global_state_tests {
         )
         .await;
         let genesis_spending_key = premine_receiver
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         let wallet_secret_alice = WalletSecret::new_pseudorandom(rng.gen());
-        let alice_spending_key = wallet_secret_alice.nth_generation_spending_key_for_tests(0);
         let mut alice =
             mock_genesis_global_state(network, 3, wallet_secret_alice, cli_args::Args::default())
                 .await;
+        let alice_spending_key = alice
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         let wallet_secret_bob = WalletSecret::new_pseudorandom(rng.gen());
-        let bob_spending_key = wallet_secret_bob.nth_generation_spending_key_for_tests(0);
         let mut bob =
             mock_genesis_global_state(network, 3, wallet_secret_bob, cli_args::Args::default())
                 .await;
+        let bob_spending_key = bob
+            .lock_guard_mut()
+            .await
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
 
         let genesis_block = Block::genesis_block(network);
         let in_seven_months = genesis_block.kernel.header.timestamp + Timestamp::months(7);
@@ -2414,7 +2448,7 @@ mod global_state_tests {
                         ExpectedUtxo::new(
                             expected_utxo.utxo,
                             expected_utxo.sender_randomness,
-                            genesis_spending_key.privacy_preimage,
+                            genesis_spending_key.privacy_preimage(),
                             UtxoNotifier::OwnMinerComposeBlock,
                         )
                     })
@@ -2843,8 +2877,12 @@ mod global_state_tests {
             let spending_key = wallet_secret.nth_generation_spending_key(0);
 
             let mut block_with_cb = move |previous_block: &Block| {
-                let (new_block, cb_utxo, cb_output_randomness) =
-                    make_mock_block(previous_block, None, spending_key.to_address(), rng.gen());
+                let (new_block, cb_utxo, cb_output_randomness) = make_mock_block(
+                    previous_block,
+                    None,
+                    spending_key.to_address().into(),
+                    rng.gen(),
+                );
                 (
                     new_block,
                     ExpectedUtxo::new(
@@ -2922,11 +2960,15 @@ mod global_state_tests {
             let mut rng = thread_rng();
             let genesis_block = Block::genesis_block(network);
             let wallet_secret = WalletSecret::devnet_wallet();
-            let spending_key = wallet_secret.nth_generation_spending_key(0);
+            let spending_key = wallet_secret.nth_generation_spending_key_for_tests(0);
 
             let mut block_with_cb = move |previous_block: &Block| {
-                let (new_block, cb_utxo, cb_output_randomness) =
-                    make_mock_block(previous_block, None, spending_key.to_address(), rng.gen());
+                let (new_block, cb_utxo, cb_output_randomness) = make_mock_block(
+                    previous_block,
+                    None,
+                    spending_key.to_address().into(),
+                    rng.gen(),
+                );
                 (
                     new_block,
                     ExpectedUtxo::new(
@@ -2989,8 +3031,12 @@ mod global_state_tests {
 
                 // Verify that we can also reorganize with last shared ancestor being
                 // the genesis block.
-                let (block_1b, _, _) =
-                    make_mock_block(&genesis_block, None, spending_key.to_address(), random());
+                let (block_1b, _, _) = make_mock_block(
+                    &genesis_block,
+                    None,
+                    spending_key.to_address().into(),
+                    random(),
+                );
                 global_state.set_new_tip(block_1b.clone()).await.unwrap();
                 assert_correct_global_state(
                     &global_state,
@@ -3035,8 +3081,12 @@ mod global_state_tests {
             let genesis_block = Block::genesis_block(network);
             let spend_key = wallet_secret.nth_generation_spending_key(0);
 
-            let (block_1, cb_utxo1, cb_sender_randomness1) =
-                make_mock_block(&genesis_block, None, spend_key.to_address(), rng.gen());
+            let (block_1, cb_utxo1, cb_sender_randomness1) = make_mock_block(
+                &genesis_block,
+                None,
+                spend_key.to_address().into(),
+                rng.gen(),
+            );
             let cb = ExpectedUtxo::new(
                 cb_utxo1,
                 cb_sender_randomness1,

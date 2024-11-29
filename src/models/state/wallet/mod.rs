@@ -430,6 +430,7 @@ mod wallet_tests {
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::models::state::wallet::address::KeyType;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::transaction_output::TxOutputList;
@@ -485,7 +486,7 @@ mod wallet_tests {
             for _ in 0..12 {
                 let previous_block = next_block;
                 let (nb, _coinbase_utxo, _sender_randomness) =
-                    make_mock_block(&previous_block, None, charlie_address, rng.gen());
+                    make_mock_block(&previous_block, None, charlie_address.into(), rng.gen());
                 next_block = nb;
                 alice
                     .update_wallet_state_with_new_block(
@@ -534,17 +535,17 @@ mod wallet_tests {
 
         let genesis_block = Block::genesis_block(network);
         let alice_spending_key = alice_wallet
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let alice_address = alice_spending_key.to_address();
         let (block_1, block_1_coinbase_utxo, block_1_coinbase_sender_randomness) =
-            make_mock_block(&genesis_block, None, alice_address, rng.gen());
+            make_mock_block(&genesis_block, None, alice_address.into(), rng.gen());
 
         alice_wallet
             .add_expected_utxo(ExpectedUtxo::new(
                 block_1_coinbase_utxo.clone(),
                 block_1_coinbase_sender_randomness,
-                alice_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
@@ -592,8 +593,8 @@ mod wallet_tests {
 
         // Create new blocks, verify that the membership proofs are *not* valid
         // under this block as tip
-        let (block_2, _, _) = make_mock_block(&block_1, None, bob_address, rng.gen());
-        let (block_3, _, _) = make_mock_block(&block_2, None, bob_address, rng.gen());
+        let (block_2, _, _) = make_mock_block(&block_1, None, bob_address.into(), rng.gen());
+        let (block_3, _, _) = make_mock_block(&block_2, None, bob_address.into(), rng.gen());
 
         if ms_membership_proof_block1
             .auth_path_aocl
@@ -655,11 +656,11 @@ mod wallet_tests {
             mock_genesis_global_state(network, 1, alice_wallet_secret, cli_args::Args::default())
                 .await;
         let alice_spending_key = alice
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let genesis_block = Block::genesis_block(network);
 
         let mut rng = thread_rng();
@@ -700,7 +701,7 @@ mod wallet_tests {
                 .add_expected_utxo(ExpectedUtxo::new(
                     cb_utxo,
                     cb_output_randomness,
-                    alice_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 ))
                 .await;
@@ -752,7 +753,7 @@ mod wallet_tests {
                     .add_expected_utxo(ExpectedUtxo::new(
                         cb_utxo_prime,
                         cb_output_randomness_prime,
-                        alice_spending_key.privacy_preimage,
+                        alice_spending_key.privacy_preimage(),
                         UtxoNotifier::OwnMinerComposeBlock,
                     ))
                     .await;
@@ -898,11 +899,11 @@ mod wallet_tests {
             mock_genesis_global_state(network, 2, alice_wallet_secret, cli_args::Args::default())
                 .await;
         let alice_spending_key = alice
-            .lock_guard()
+            .lock_guard_mut()
             .await
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let alice_address = alice_spending_key.to_address();
         let genesis_block = Block::genesis_block(network);
         let bob_wallet = mock_genesis_wallet_state(WalletSecret::devnet_wallet(), network)
@@ -925,27 +926,31 @@ mod wallet_tests {
 
         let bob_sender_randomness = bob.wallet_state.wallet_secret.generate_sender_randomness(
             genesis_block.kernel.header.height,
-            alice_address.privacy_digest,
+            alice_address.privacy_digest(),
         );
         let receiver_data_12_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(12),
             bob_sender_randomness,
-            alice_address.into(),
+            alice_address.clone().into(),
             false,
         );
         let receiver_data_1_to_alice = TxOutput::offchain_native_currency(
             NeptuneCoins::new(1),
             bob_sender_randomness,
-            alice_address.into(),
+            alice_address.clone().into(),
             false,
         );
 
         let receiver_data_to_alice: TxOutputList =
             vec![receiver_data_12_to_alice, receiver_data_1_to_alice].into();
+        let bob_spending_key = bob
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let (tx, _change_output) = bob
             .create_transaction_with_prover_capability(
                 receiver_data_to_alice.clone(),
-                bob_wallet.nth_generation_spending_key_for_tests(0).into(),
+                bob_spending_key,
                 UtxoNotificationMedium::OnChain,
                 NeptuneCoins::new(2),
                 in_seven_months,
@@ -1024,14 +1029,14 @@ mod wallet_tests {
             let (block, cb_utxo, cb_sender_randomness) = make_mock_block(
                 &previous_block,
                 Some(in_seven_months + MINIMUM_BLOCK_TIME * i),
-                alice_address,
+                alice_address.clone(),
                 rng.gen(),
             );
             next_block = block;
             let expected_utxo = ExpectedUtxo::new(
                 cb_utxo,
                 cb_sender_randomness,
-                alice_spending_key.privacy_preimage,
+                alice_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             );
             alice
@@ -1103,8 +1108,8 @@ mod wallet_tests {
         // Bob mines a block, ignoring Alice's spree and forking instead
         let bob_wallet_spending_key = bob
             .wallet_state
-            .wallet_secret
-            .nth_generation_spending_key_for_tests(0);
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let (block_2_b, _, _) = make_mock_block(
             &block_1,
             None,
@@ -1191,14 +1196,18 @@ mod wallet_tests {
         let receiver_data_1_to_alice_new = TxOutput::offchain_native_currency(
             NeptuneCoins::new(1),
             rng.gen(),
-            alice_address.into(),
+            alice_address.clone().into(),
             false,
         );
 
+        let bob_next_key = bob
+            .wallet_state
+            .next_unused_spending_key(KeyType::Generation)
+            .await;
         let (tx_from_bob, _maybe_change_output) = bob
             .create_transaction_with_prover_capability(
                 vec![receiver_data_1_to_alice_new.clone()].into(),
-                bob_wallet.nth_generation_spending_key_for_tests(0).into(),
+                bob_next_key,
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::new(4),
                 block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
@@ -1254,7 +1263,7 @@ mod wallet_tests {
                 ExpectedUtxo::new(
                     expected_utxo.utxo,
                     expected_utxo.sender_randomness,
-                    alice_spending_key.privacy_preimage,
+                    alice_spending_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )
             })
@@ -1269,7 +1278,7 @@ mod wallet_tests {
         let expected_utxo_for_alice = ExpectedUtxo::new(
             receiver_data_1_to_alice_new.utxo(),
             receiver_data_1_to_alice_new.sender_randomness(),
-            alice_spending_key.privacy_preimage,
+            alice_spending_key.privacy_preimage(),
             UtxoNotifier::Cli,
         );
         alice
