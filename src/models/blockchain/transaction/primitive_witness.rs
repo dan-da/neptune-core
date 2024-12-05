@@ -51,6 +51,7 @@ use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::Hash;
 
+
 /// A list of UTXOs with an associated salt.
 ///
 /// `SaltedUtxos` is a struct for representing a list of UTXOs in a witness object when it
@@ -300,9 +301,7 @@ impl PrimitiveWitness {
     ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
         let input_spending_keys = address_seeds
             .iter()
-            .map(|address_seed| {
-                generation_address::GenerationSpendingKey::derive_from_seed(*address_seed)
-            })
+            .map(|address_seed| generation_address::GenerationSpendingKey::from_seed(*address_seed))
             .collect_vec();
 
         let input_lock_scripts_and_witnesses = input_spending_keys
@@ -397,7 +396,7 @@ impl PrimitiveWitness {
                     amount.div_two();
                 }
                 let liquid_utxo = Utxo::new(
-                    generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                    generation_address::GenerationSpendingKey::from_seed(*seed)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
@@ -405,7 +404,7 @@ impl PrimitiveWitness {
                 let mut utxos = vec![liquid_utxo];
                 if let Some(release_date) = timelock_until {
                     let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::derive_from_seed(*seed)
+                        generation_address::GenerationSpendingKey::from_seed(*seed)
                             .to_address()
                             .lock_script(),
                         [
