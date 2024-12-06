@@ -1244,6 +1244,7 @@ mod wallet_tests {
             &alice,
             guesser_fraction,
             block_2_b.header().timestamp + MINIMUM_BLOCK_TIME,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
@@ -1423,6 +1424,7 @@ mod wallet_tests {
             &bob,
             guesser_fraction,
             in_seven_months,
+            TxProvingCapability::SingleProof,
         )
         .await
         .unwrap();
