@@ -556,7 +556,7 @@ mod test {
     fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
         worker::test_keypair_validity(
             GenerationSpendingKey::from_seed(seed).into(),
-            GenerationReceivingAddress::derive_from_seed(seed).into(),
+            GenerationReceivingAddress::from_seed(seed).into(),
         );
     }
 
@@ -569,7 +569,7 @@ mod test {
     /// tests bech32m serialize, deserialize with an asymmetric (generation) key
     #[proptest]
     fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(GenerationReceivingAddress::derive_from_seed(seed).into());
+        worker::test_bech32m_conversion(GenerationReceivingAddress::from_seed(seed).into());
     }
 
     mod worker {
