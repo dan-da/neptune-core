@@ -3,6 +3,7 @@ use std::fmt::Display;
 
 use get_size::GetSize;
 use itertools::Itertools;
+use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
 use num_traits::Zero;
 use proptest::arbitrary::Arbitrary;
@@ -215,7 +216,7 @@ impl PrimitiveWitness {
             .sum::<NeptuneCoins>();
         let total_input_plus_coinbase =
             total_input_amount + coinbase.unwrap_or_else(|| NeptuneCoins::new(0));
-        let mut inflationary = total_output_amount.safe_add(*fee_suggestion).is_none()
+        let mut inflationary = total_output_amount.checked_add(fee_suggestion).is_none()
             || (total_output_amount + *fee_suggestion != total_input_plus_coinbase);
         while inflationary {
             for amount in output_amounts_suggestion.iter_mut() {
@@ -763,6 +764,7 @@ mod test {
     use itertools::izip;
     use itertools::Itertools;
     use num_bigint::BigInt;
+    use num_traits::CheckedAdd;
     use num_traits::Zero;
     use proptest::collection::vec;
     use proptest::prop_assert;
@@ -1216,9 +1218,9 @@ mod test {
         /// (greater than the maximum number of nau).
         pub(crate) fn arbitrary_with_fee(fee: NeptuneCoins) -> BoxedStrategy<Self> {
             let total_amount_strategy = if fee.is_negative() {
-                (-fee).to_nau().try_into().unwrap()..(u128::MAX >> 1)
+                (-fee).to_nau().try_into().unwrap()..(i128::MAX >> 1)
             } else {
-                std::convert::TryInto::<u128>::try_into(fee.to_nau()).unwrap()..(u128::MAX >> 1)
+                std::convert::TryInto::<i128>::try_into(fee.to_nau()).unwrap()..(i128::MAX >> 1)
             };
             let num_outputs = 2;
             (
@@ -1233,7 +1235,7 @@ mod test {
                             timestamp = Timestamp::millis(timestamp.to_millis() >> 1);
                         }
 
-                        let total_amount = NeptuneCoins::from_raw_u128(amount);
+                        let total_amount = NeptuneCoins::from_raw_i128(amount);
                         let (input_utxos, input_lock_scripts_and_witnesses) =
                             Self::transaction_inputs_from_address_seeds_and_amounts(
                                 &[input_address_seed],
@@ -1249,14 +1251,14 @@ mod test {
                             )
                             .with_time_lock(timestamp + COINBASE_TIME_LOCK_PERIOD);
 
-                            let liquid_amount = NeptuneCoins::from_raw_u128(
-                                u128::try_from(total_amount.to_nau())
+                            let liquid_amount = NeptuneCoins::from_raw_i128(
+                                i128::try_from(total_amount.to_nau())
                                     .unwrap()
                                     .checked_sub(
-                                        u128::try_from(timelocked_amount.to_nau()).unwrap(),
+                                        i128::try_from(timelocked_amount.to_nau()).unwrap(),
                                     )
                                     .unwrap()
-                                    .checked_add(u128::try_from((-fee).to_nau()).unwrap())
+                                    .checked_add(i128::try_from((-fee).to_nau()).unwrap())
                                     .unwrap(),
                             );
                             let liquid_output = Utxo::new_native_currency(
@@ -1341,12 +1343,12 @@ mod test {
             &mut fee,
         );
         prop_assert!(
-            total_input_amount.safe_add(coinbase).unwrap()
+            total_input_amount.checked_add(&coinbase).unwrap()
                 == output_amounts
                     .iter()
                     .cloned()
                     .sum::<NeptuneCoins>()
-                    .safe_add(fee)
+                    .checked_add(&fee)
                     .unwrap()
         );
     }
@@ -1369,7 +1371,7 @@ mod test {
                     .iter()
                     .cloned()
                     .sum::<NeptuneCoins>()
-                    .safe_add(fee)
+                    .checked_add(&fee)
                     .unwrap()
         );
     }
