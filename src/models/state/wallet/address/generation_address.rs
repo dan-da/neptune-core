@@ -28,7 +28,6 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
-use twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
 use zeroize::Zeroize;
 
 use super::common;

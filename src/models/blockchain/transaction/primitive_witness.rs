@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
-use get_size::GetSize;
+use get_size2::GetSize;
 use itertools::Itertools;
 use num_traits::CheckedAdd;
 use num_traits::CheckedSub;
@@ -20,8 +20,8 @@ use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::prelude::*;
 use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 use tasm_lib::twenty_first::math::bfield_codec::BFieldCodec;
-use tasm_lib::twenty_first::util_types::algebraic_hasher::AlgebraicHasher;
-use tasm_lib::Digest;
+
+use tasm_lib::prelude::Digest;
 use tracing::debug;
 use tracing::warn;
 
@@ -1260,6 +1260,7 @@ mod test {
                         let total_amount = NeptuneCoins::from_raw_i128(amount);
                         let (input_utxos, input_lock_scripts_and_witnesses) =
                             Self::transaction_inputs_from_address_seeds_and_amounts(
+                                KeyType::Generation,
                                 &[input_address_seed],
                                 &[total_amount],
                             );
