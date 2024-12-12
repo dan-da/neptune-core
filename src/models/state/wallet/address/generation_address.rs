@@ -18,6 +18,7 @@ use aes_gcm::Aes256Gcm;
 use aes_gcm::Nonce;
 use anyhow::bail;
 use anyhow::Result;
+use arbitrary::Arbitrary;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
@@ -40,7 +41,7 @@ use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
 use crate::models::blockchain::transaction::utxo::Utxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
-use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
+use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
 use crate::prelude::twenty_first;
 
 pub(super) const GENERATION_FLAG_U8: u8 = 79;
@@ -97,6 +98,13 @@ impl Zeroize for GenerationSpendingKey {
         self.privacy_preimage = Default::default();
         self.unlock_key = Default::default();
         self.seed = Default::default();
+    }
+}
+
+impl<'a> Arbitrary<'a> for GenerationReceivingAddress {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let seed = Digest::arbitrary(u)?;
+        Ok(Self::from_seed(seed))
     }
 }
 
