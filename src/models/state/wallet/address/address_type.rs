@@ -2,6 +2,7 @@
 
 use anyhow::bail;
 use anyhow::Result;
+use rayon::prelude::IntoParallelIterator;
 use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::triton_vm::prelude::Digest;
@@ -21,7 +22,6 @@ use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
 use crate::BFieldElement;
-use rayon::prelude::IntoParallelIterator;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
 // that we get a compiler verification that values do not conflict.  which is
@@ -495,7 +495,11 @@ impl SpendingKey {
             })
     }
 
-    pub fn into_range_iter(self, first: common::DerivationIndex, last: common::DerivationIndex) -> SpendingKeyRangeIter {
+    pub fn into_range_iter(
+        self,
+        first: common::DerivationIndex,
+        last: common::DerivationIndex,
+    ) -> SpendingKeyRangeIter {
         SpendingKeyRangeIter::new(self, first, last)
     }
 
