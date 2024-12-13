@@ -63,6 +63,7 @@ impl Iterator for SpendingKeyIter {
 // see: https://github.com/rayon-rs/rayon/issues/1053
 impl DoubleEndedIterator for SpendingKeyIter {
     fn next_back(&mut self) -> Option<Self::Item> {
+        println!("curr: {:?}, curr_back: {:?}", self.curr, self.curr_back);
         match (self.curr, self.curr_back) {
             (Some(c), Some(cb)) => {
                 let key = self.parent_key.derive_child(cb);
@@ -191,16 +192,19 @@ mod tests {
         pub fn range_iterator_to_last_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
+            let first = 0;
             let len = 50;
-            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(0, len), len);
+            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(first, first + len), first, len);
         }
 
         #[test]
         pub fn iterator_to_max_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
+            let last = DerivationIndex::MAX;
             let len = 10;
-            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(DerivationIndex::MAX-len, len), len);
+            let first = last - len;
+            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(first, last), first, len);
         }
 
 
@@ -235,10 +239,12 @@ mod tests {
         pub fn double_ended_range_iterator_to_first_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
+            let first = 10;
             let len = 20;
             worker::double_ended_iterator_to_first_elem(
                 parent_key,
-                parent_key.into_range_iter(10, len),
+                parent_key.into_range_iter(first, first+len),
+                first,
                 len,
             );
         }
@@ -247,10 +253,12 @@ mod tests {
         pub fn double_ended_range_iterator_to_zero_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
+            let first = 0;
             let len = 20;
             worker::double_ended_iterator_to_first_elem(
                 parent_key,
-                parent_key.into_range_iter(0, len),
+                parent_key.into_range_iter(first, len),
+                first,
                 len,
             );
         }
@@ -278,14 +286,15 @@ mod tests {
             pub fn iterator_to_last_elem(
                 parent_key: SpendingKey,
                 mut iter: impl Iterator<Item = SpendingKey>,
+                start: DerivationIndex,
                 len: DerivationIndex,
             ) {
                 assert_eq!(
-                    Some(parent_key.derive_child(len - 1)),
+                    Some(parent_key.derive_child(start + len - 1)),
                     iter.nth((len - 1) as usize)
                 );
 
-                assert_eq!(Some(parent_key.derive_child(len)), iter.next());
+                assert_eq!(Some(parent_key.derive_child(start + len)), iter.next());
                 assert_eq!(None, iter.next());
             }
 
@@ -326,15 +335,15 @@ mod tests {
             pub fn double_ended_iterator_to_first_elem(
                 parent_key: SpendingKey,
                 mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
+                first: DerivationIndex,
                 len: DerivationIndex,
             ) {
                 assert_eq!(
-                    Some(parent_key.derive_child(1)),
+                    Some(parent_key.derive_child(first + 1)),
                     iter.nth_back((len - 1) as usize)
                 );
 
-                assert_eq!(Some(parent_key.derive_child(0)), iter.next_back());
-
+                assert_eq!(Some(parent_key.derive_child(first)), iter.next_back());
                 assert_eq!(None, iter.next_back());
             }
         }
