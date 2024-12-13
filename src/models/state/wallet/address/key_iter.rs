@@ -8,13 +8,15 @@ use super::SpendingKey;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpendingKeyIter {
     parent_key: SpendingKey,
-    curr: Option<DerivationIndex>,
+    curr: DerivationIndex,
+    curr_back: DerivationIndex,
 }
 impl SpendingKeyIter {
     pub fn new(parent_key: SpendingKey) -> Self {
         Self {
             parent_key,
-            curr: Some(0),
+            curr: 0,
+            curr_back: DerivationIndex::MAX,
         }
     }
 }
@@ -23,16 +25,12 @@ impl Iterator for SpendingKeyIter {
     type Item = SpendingKey;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.curr {
-            Some(curr) => {
-                let key = self.parent_key.derive_child(curr);
-                self.curr = Some(curr + 1);
-                Some(key)
-            }
-            None => {
-                self.curr = Some(1);
-                Some(self.parent_key.derive_child(0))
-            }
+        if self.curr < DerivationIndex::MAX {
+            let key = self.parent_key.derive_child(self.curr);
+            self.curr += 1;
+            Some(key)
+        } else {
+            None
         }
     }
 
@@ -46,18 +44,12 @@ impl Iterator for SpendingKeyIter {
 
 impl DoubleEndedIterator for SpendingKeyIter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self.curr {
-            Some(curr) if curr == 0 => {
-                let key = self.parent_key.derive_child(curr);
-                self.curr = None;
-                Some(key)
-            }
-            Some(curr) if curr > 0 => {
-                let key = self.parent_key.derive_child(curr);
-                self.curr = Some(curr - 1);
-                Some(key)
-            }
-            _ => None,
+        if self.curr_back > 0 {
+            let key = self.parent_key.derive_child(self.curr_back);
+            self.curr_back -= 1;
+            Some(key)
+        } else {
+            None
         }
     }
 }
@@ -71,17 +63,20 @@ pub struct SpendingKeyRangeIter {
     parent_key: SpendingKey,
     first: DerivationIndex,
     last: DerivationIndex,
-    curr: Option<DerivationIndex>,
+    curr: DerivationIndex,
+    curr_back: DerivationIndex,
 }
 
 impl SpendingKeyRangeIter {
     pub fn new(parent_key: SpendingKey, first: DerivationIndex, last: DerivationIndex) -> Self {
-        let curr = Some(first);
+        let curr = first;
+        let curr_back = last;
         Self {
             parent_key,
             first,
             last,
             curr,
+            curr_back,
         }
     }
 
@@ -94,14 +89,11 @@ impl Iterator for SpendingKeyRangeIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.curr {
-            Some(curr) if curr <= self.last => {
+            curr if curr == DerivationIndex::MAX => None,
+            curr if curr <= self.last => {
                 let key = self.parent_key.derive_child(curr);
-                self.curr = Some(curr + 1);
+                self.curr += 1;
                 Some(key)
-            }
-            None => {
-                self.curr = Some(self.first + 1);
-                Some(self.parent_key.derive_child(self.first))
             }
             _ => None,
         }
@@ -117,15 +109,11 @@ impl Iterator for SpendingKeyRangeIter {
 
 impl DoubleEndedIterator for SpendingKeyRangeIter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self.curr {
-            Some(curr) if curr == 0 => {
+        match self.curr_back {
+            curr if curr == 0 => None,
+            curr if curr >= self.first => {
                 let key = self.parent_key.derive_child(curr);
-                self.curr = None;
-                Some(key)
-            }
-            Some(curr) if curr >= self.first => {
-                let key = self.parent_key.derive_child(curr);
-                self.curr = Some(curr - 1);
+                self.curr -= 1;
                 Some(key)
             }
             _ => None,
@@ -189,11 +177,13 @@ mod rayon {
 
                 let left = SpendingKeyIter {
                     parent_key: iter.parent_key,
-                    curr: Some((index - 1) as DerivationIndex),
+                    curr: 0,
+                    curr_back: (index-1) as DerivationIndex,
                 };
                 let right = SpendingKeyIter {
                     parent_key: iter.parent_key,
-                    curr: Some(index as DerivationIndex),
+                    curr: index as DerivationIndex,
+                    curr_back: DerivationIndex::MAX,
                 };
                 (Self(left), Self(right))
             }
