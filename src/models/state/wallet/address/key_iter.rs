@@ -113,7 +113,7 @@ impl DoubleEndedIterator for SpendingKeyRangeIter {
             curr if curr == 0 => None,
             curr if curr >= self.first => {
                 let key = self.parent_key.derive_child(curr);
-                self.curr -= 1;
+                self.curr_back -= 1;
                 Some(key)
             }
             _ => None,
@@ -289,7 +289,7 @@ mod tests {
         pub fn double_ended_iterator() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
-            worker::double_ended_iterator(parent_key, parent_key.into_iter(), usize::MAX as DerivationIndex);
+            worker::double_ended_iterator(parent_key, parent_key.into_iter(), DerivationIndex::MAX);
         }
 
         #[test]
@@ -319,7 +319,7 @@ mod tests {
                         iter.next()
                     );
                 }
-                for n in (len-5..len).rev() {
+                for n in (len-5..=len).rev() {
                     assert_eq!(
                         Some(parent_key.derive_child(n)),
                         iter.next_back()
