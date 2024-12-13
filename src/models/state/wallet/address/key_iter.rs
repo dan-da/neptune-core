@@ -282,17 +282,32 @@ mod tests {
         use crate::models::state::wallet::symmetric_key::SymmetricKey;
 
         #[test]
-        pub fn spending_key_iterator() {
+        pub fn iterator() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
             worker::iterator(parent_key, parent_key.into_iter());
         }
 
         #[test]
-        pub fn spending_key_range_iterator() {
+        pub fn range_iterator() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
             worker::iterator(parent_key, parent_key.into_range_iter(0, 50));
+        }
+
+        #[test]
+        pub fn double_ended_iterator() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            worker::double_ended_iterator(parent_key, parent_key.into_iter(), usize::MAX as DerivationIndex);
+        }
+
+        #[test]
+        pub fn double_ended_range_iterator() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            let len = 50;
+            worker::double_ended_iterator(parent_key, parent_key.into_range_iter(0, len), len);
         }
 
         mod worker {
