@@ -102,20 +102,14 @@ impl Iterator for SpendingKeyRangeIter {
     type Item = SpendingKey;
 
     fn next(&mut self) -> Option<Self::Item> {
+
         match (self.curr, self.curr_back) {
-            (Some(c), cbo) if c <= self.last => match cbo {
-                Some(cb) if c >= cb => None,
-                _ => {
-                    let key = self.parent_key.derive_child(c);
-                    self.curr = if c == DerivationIndex::MAX {
-                        None
-                    } else {
-                        Some(c + 1)
-                    };
-                    Some(key)
-                }
-            },
-            _ => None,
+            (Some(c), Some(cb)) => {
+                let key = self.parent_key.derive_child(c);
+                self.curr = if c >= cb { None } else { Some(c + 1) };
+                Some(key)
+            }
+            _ => None
         }
     }
 
@@ -132,16 +126,13 @@ impl Iterator for SpendingKeyRangeIter {
 impl DoubleEndedIterator for SpendingKeyRangeIter {
     fn next_back(&mut self) -> Option<Self::Item> {
         match (self.curr, self.curr_back) {
-            (co, Some(cb)) if cb >= self.first => match co {
-                Some(c) if cb <= c => None,
-                _ => {
-                    let key = self.parent_key.derive_child(cb);
-                    self.curr_back = if cb == 0 { None } else { Some(cb - 1) };
-                    Some(key)
-                }
-            },
-            _ => None,
-        }
+            (Some(c), Some(cb)) => {
+                let key = self.parent_key.derive_child(cb);
+                self.curr_back = if cb <= c { None } else { Some(cb - 1) };
+                Some(key)
+            }
+            _ => None
+        }        
     }
 }
 
@@ -403,11 +394,11 @@ mod tests {
                 len: DerivationIndex,
             ) {
                 assert_eq!(
-                    Some(parent_key.derive_child(len - 2)),
+                    Some(parent_key.derive_child(len - 1)),
                     iter.nth((len - 1) as usize)
                 );
 
-                assert_eq!(Some(parent_key.derive_child(0)), iter.next());
+                assert_eq!(Some(parent_key.derive_child(len)), iter.next());
                 assert_eq!(None, iter.next());
             }
 
@@ -432,15 +423,17 @@ mod tests {
                 for n in 0..5 {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next());
                 }
-
+// 0,1,2,3,4  curr = 5
                 assert_eq!(
                     Some(parent_key.derive_child(10)),
                     iter.nth_back((len - 10) as usize)
                 );
+//10
 
                 for n in (5..10).rev() {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next_back());
                 }
+//9,8,7,6,5  curr_back = 4
 
                 assert_eq!(None, iter.next_back());
                 assert_eq!(None, iter.next());
