@@ -196,6 +196,15 @@ mod tests {
         }
 
         #[test]
+        pub fn iterator_to_max_elem() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            let len = 10;
+            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(DerivationIndex::MAX-len, len), len);
+        }
+
+
+        #[test]
         pub fn double_ended_iterator() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
@@ -209,13 +218,6 @@ mod tests {
             let len = 50;
             worker::double_ended_iterator(parent_key, parent_key.into_range_iter(0, len), len);
         }
-
-        // #[test]
-        // pub fn double_ended_iterator_meet_middle() {
-        //     let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
-        //     worker::double_ended_iterator_meet_middle(parent_key, parent_key.into_iter(), DerivationIndex::MAX);
-        // }
 
         #[test]
         pub fn double_ended_range_iterator_meet_middle() {
@@ -233,13 +235,26 @@ mod tests {
         pub fn double_ended_range_iterator_to_first_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
-            let len = 50;
+            let len = 20;
+            worker::double_ended_iterator_to_first_elem(
+                parent_key,
+                parent_key.into_range_iter(10, len),
+                len,
+            );
+        }
+
+        #[test]
+        pub fn double_ended_range_iterator_to_zero_elem() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            let len = 20;
             worker::double_ended_iterator_to_first_elem(
                 parent_key,
                 parent_key.into_range_iter(0, len),
                 len,
             );
         }
+
 
         mod worker {
             use super::*;
