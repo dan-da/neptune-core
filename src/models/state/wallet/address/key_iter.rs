@@ -160,72 +160,91 @@ mod tests {
         use super::*;
         use crate::models::state::wallet::symmetric_key::SymmetricKey;
 
+        // tests that ::derive_nth() matches ::next()
+        #[test]
+        pub fn derive_nth_matches_iter() {
+            worker::derive_nth_matches_iter();
+        }
+
+        // tests basic iteration, comparing with SpendingKey::derive_child()
         #[test]
         pub fn iterator() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
+            let parent_key = helper::make_parent_key();
             worker::iterator(parent_key, parent_key.into_iter());
         }
 
+        // tests basic iteration over a range, comparing with SpendingKey::derive_child()
         #[test]
         pub fn range_iterator() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
+            let parent_key = helper::make_parent_key();
             worker::iterator(parent_key, parent_key.into_range_iter(0, 50));
         }
 
+        // tests Iterator::nth() method, comparing with SpendingKey::derive_child()
         #[test]
         pub fn iterator_nth() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
+            let parent_key = helper::make_parent_key();
             worker::iterator_nth(parent_key, parent_key.into_iter());
         }
 
+        // tests Iterator::nth() method for a range, comparing with SpendingKey::derive_child()
         #[test]
         pub fn range_iterator_nth() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
+            let parent_key = helper::make_parent_key();
             worker::iterator_nth(parent_key, parent_key.into_range_iter(0, 50));
         }
 
+        // tests that a range iterator reaches last elem and after returns None
         #[test]
         pub fn range_iterator_to_last_elem() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+            let parent_key = helper::make_parent_key();
 
             let first = 0;
             let len = 50;
-            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(first, first + len), first, len);
+            worker::iterator_to_last_elem(
+                parent_key,
+                parent_key.into_range_iter(first, first + len),
+                first,
+                len,
+            );
         }
 
+        // tests that iterator can reach DerivationIndex::MAX and after returns None
         #[test]
         pub fn iterator_to_max_elem() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+            let parent_key = helper::make_parent_key();
 
             let last = DerivationIndex::MAX;
             let len = 10;
             let first = last - len;
-            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(first, last), first, len);
+            worker::iterator_to_last_elem(
+                parent_key,
+                parent_key.into_range_iter(first, last),
+                first,
+                len,
+            );
         }
 
-
+        // tests that iterator operates in reverse
         #[test]
         pub fn double_ended_iterator() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
+            let parent_key = helper::make_parent_key();
             worker::double_ended_iterator(parent_key, parent_key.into_iter(), DerivationIndex::MAX);
         }
 
+        // tests that range iterator operates in reverse
         #[test]
         pub fn double_ended_range_iterator() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
-
+            let parent_key = helper::make_parent_key();
             let len = 50;
             worker::double_ended_iterator(parent_key, parent_key.into_range_iter(0, len), len);
         }
 
+        // tests that forward and reverse iteration meets in the middle and do
+        // not pass eachother.
         #[test]
-        pub fn double_ended_range_iterator_meet_middle() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+        pub fn double_ended_iterator_meet_middle() {
+            let parent_key = helper::make_parent_key();
 
             let len = 50;
             worker::double_ended_iterator_meet_middle(
@@ -235,22 +254,24 @@ mod tests {
             );
         }
 
+        // tests that reverse iteration does not go past first elem in range
         #[test]
-        pub fn double_ended_range_iterator_to_first_elem() {
+        pub fn double_ended_iterator_to_first_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
             let first = 10;
             let len = 20;
             worker::double_ended_iterator_to_first_elem(
                 parent_key,
-                parent_key.into_range_iter(first, first+len),
+                parent_key.into_range_iter(first, first + len),
                 first,
                 len,
             );
         }
 
+        // tests that reverse iteration can reach 0 elem, and stops after
         #[test]
-        pub fn double_ended_range_iterator_to_zero_elem() {
+        pub fn double_ended_iterator_to_zero_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
             let first = 0;
@@ -263,9 +284,32 @@ mod tests {
             );
         }
 
+        mod helper {
+            use super::*;
+
+            pub fn make_parent_key() -> SpendingKey {
+                SymmetricKey::from_seed(rand::random()).into()
+            }
+
+            pub fn make_iter() -> SpendingKeyIter {
+                SpendingKeyIter::new(make_parent_key())
+            }
+
+            // pub fn make_range_iter(start: DerivationIndex, end: DerivationIndex) -> SpendingKeyIter {
+            //     SpendingKeyIter::new_range(make_parent_key(), start, end)
+            // }
+        }
 
         mod worker {
             use super::*;
+
+            pub fn derive_nth_matches_iter() {
+                let mut iter = helper::make_iter();
+
+                for n in 0..5 {
+                    assert_eq!(Some(iter.derive_nth(n)), iter.next());
+                }
+            }
 
             pub fn iterator(parent_key: SpendingKey, mut iter: impl Iterator<Item = SpendingKey>) {
                 for n in 0..5 {
