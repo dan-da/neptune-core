@@ -85,7 +85,7 @@ impl SpendingKeyRangeIter {
         }
     }
 
-    pub fn nth(&self, index: DerivationIndex) -> SpendingKey {
+    pub fn derive_nth(&self, index: DerivationIndex) -> SpendingKey {
         self.parent_key.derive_child(index)
     }
 }
@@ -270,5 +270,62 @@ mod rayon {
                 Self(range_iter)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod iter {
+        use super::*;
+        use crate::models::state::wallet::symmetric_key::SymmetricKey;
+
+        #[test]
+        pub fn spending_key_iterator() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            worker::iterator(parent_key, parent_key.into_iter());
+        }
+
+        #[test]
+        pub fn spending_key_range_iterator() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            worker::iterator(parent_key, parent_key.into_range_iter(0, 50));
+        }
+
+        mod worker {
+            use super::*;
+
+            pub fn iterator(parent_key: SpendingKey, mut iter: impl Iterator<Item=SpendingKey>) {
+                for n in 0..5 {
+                    assert_eq!(
+                        Some(parent_key.derive_child(n)),
+                        iter.next()
+                    );
+                }
+            }
+
+            pub fn double_ended_iterator(parent_key: SpendingKey, mut iter: impl DoubleEndedIterator<Item=SpendingKey>, len: DerivationIndex) {
+                for n in 0..5 {
+                    assert_eq!(
+                        Some(parent_key.derive_child(n)),
+                        iter.next()
+                    );
+                }
+                for n in (len-5..len).rev() {
+                    assert_eq!(
+                        Some(parent_key.derive_child(n)),
+                        iter.next_back()
+                    );
+                }
+            }
+
+        }
+    }
+
+    mod par_iter {
+
     }
 }
