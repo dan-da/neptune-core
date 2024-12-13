@@ -11,6 +11,7 @@ use super::common;
 use super::generation_address;
 use super::symmetric_key;
 use super::SpendingKeyIter;
+use super::SpendingKeyRangeIter;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -20,6 +21,7 @@ use crate::models::blockchain::transaction::AnnouncedUtxo;
 use crate::models::blockchain::transaction::PublicAnnouncement;
 use crate::models::state::wallet::transaction_output::UtxoNotificationPayload;
 use crate::BFieldElement;
+use rayon::prelude::IntoParallelIterator;
 
 // note: assigning the flags to `KeyType` variants as discriminants has bonus
 // that we get a compiler verification that values do not conflict.  which is
@@ -372,6 +374,15 @@ impl IntoIterator for SpendingKey {
     }
 }
 
+impl IntoParallelIterator for SpendingKey {
+    type Iter = SpendingKeyIter;
+    type Item = Self;
+
+    fn into_par_iter(self) -> Self::Iter {
+        SpendingKeyIter::new(self)
+    }
+}
+
 impl From<generation_address::GenerationSpendingKey> for SpendingKey {
     fn from(key: generation_address::GenerationSpendingKey) -> Self {
         Self::Generation(key)
@@ -482,6 +493,10 @@ impl SpendingKey {
                     receiver_preimage,
                 }
             })
+    }
+
+    pub fn into_range_iter(self, first: common::DerivationIndex, last: common::DerivationIndex) -> SpendingKeyRangeIter {
+        SpendingKeyRangeIter::new(self, first, last)
     }
 
     /// converts a result into an Option and logs a warning on any error
