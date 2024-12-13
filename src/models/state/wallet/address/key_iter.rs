@@ -92,7 +92,7 @@ impl Iterator for SpendingKeyRangeIter {
     fn next(&mut self) -> Option<Self::Item> {
         match self.curr {
             curr if curr == DerivationIndex::MAX => None,
-            curr if curr <= self.last => {
+            curr if curr <= self.last && curr < self.curr_back => {
                 let key = self.parent_key.derive_child(curr);
                 self.curr += 1;
                 Some(key)
@@ -115,7 +115,7 @@ impl DoubleEndedIterator for SpendingKeyRangeIter {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self.curr_back {
             curr if curr == 0 => None,
-            curr if curr >= self.first => {
+            curr if curr >= self.first && curr > self.curr => {
                 let key = self.parent_key.derive_child(curr);
                 self.curr_back -= 1;
                 Some(key)
