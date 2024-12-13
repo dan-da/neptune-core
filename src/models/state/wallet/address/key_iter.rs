@@ -7,12 +7,15 @@ use super::SpendingKey;
 // an endless iterator over spending keys
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpendingKeyIter {
-    key: SpendingKey,
+    parent_key: SpendingKey,
     curr: Option<DerivationIndex>,
 }
 impl SpendingKeyIter {
-    pub fn new(key: SpendingKey) -> Self {
-        Self { key, curr: Some(0) }
+    pub fn new(parent_key: SpendingKey) -> Self {
+        Self {
+            parent_key,
+            curr: Some(0),
+        }
     }
 }
 
@@ -21,16 +24,15 @@ impl Iterator for SpendingKeyIter {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.curr {
-            Some(curr) if curr == 0 => {
-                self.curr = Some(curr+1);
-                Some(self.key)
-            }
             Some(curr) => {
-                let key = self.key.derive_child(curr-1);
-                self.curr = Some(curr+1);
+                let key = self.parent_key.derive_child(curr);
+                self.curr = Some(curr + 1);
                 Some(key)
             }
-            None => None
+            None => {
+                self.curr = Some(1);
+                Some(self.parent_key.derive_child(0))
+            }
         }
     }
 
@@ -43,18 +45,19 @@ impl Iterator for SpendingKeyIter {
 }
 
 impl DoubleEndedIterator for SpendingKeyIter {
-     fn next_back(&mut self) -> Option<Self::Item> {
+    fn next_back(&mut self) -> Option<Self::Item> {
         match self.curr {
             Some(curr) if curr == 0 => {
+                let key = self.parent_key.derive_child(curr);
                 self.curr = None;
-                Some(self.key)
-            }
-            Some(curr) => {
-                let key = self.key.derive_child(curr-1);
-                self.curr = Some(curr-1);
                 Some(key)
             }
-            None => None
+            Some(curr) if curr > 0 => {
+                let key = self.parent_key.derive_child(curr);
+                self.curr = Some(curr - 1);
+                Some(key)
+            }
+            _ => None,
         }
     }
 }
@@ -62,21 +65,20 @@ impl DoubleEndedIterator for SpendingKeyIter {
 // note: Iterator::size_hint() must return exact size
 impl ExactSizeIterator for SpendingKeyIter {}
 
-
 // an iterator over a range of spending keys
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpendingKeyRangeIter {
-    master: SpendingKey,
+    parent_key: SpendingKey,
     first: DerivationIndex,
     last: DerivationIndex,
-    curr: DerivationIndex,
+    curr: Option<DerivationIndex>,
 }
 
 impl SpendingKeyRangeIter {
-    pub fn new(master: SpendingKey, first: DerivationIndex, last: DerivationIndex) -> Self {
-        let curr = first;
+    pub fn new(parent_key: SpendingKey, first: DerivationIndex, last: DerivationIndex) -> Self {
+        let curr = Some(first);
         Self {
-            master,
+            parent_key,
             first,
             last,
             curr,
@@ -84,19 +86,24 @@ impl SpendingKeyRangeIter {
     }
 
     pub fn nth(&self, index: DerivationIndex) -> SpendingKey {
-        self.master.derive_child(index)
+        self.parent_key.derive_child(index)
     }
 }
 impl Iterator for SpendingKeyRangeIter {
     type Item = SpendingKey;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr <= self.last {
-            let key = self.master.derive_child(self.curr);
-            self.curr += 1;
-            Some(key)
-        } else {
-            None
+        match self.curr {
+            Some(curr) if curr <= self.last => {
+                let key = self.parent_key.derive_child(curr);
+                self.curr = Some(curr + 1);
+                Some(key)
+            }
+            None => {
+                self.curr = Some(self.first + 1);
+                Some(self.parent_key.derive_child(self.first))
+            }
+            _ => None,
         }
     }
 
@@ -109,15 +116,21 @@ impl Iterator for SpendingKeyRangeIter {
 }
 
 impl DoubleEndedIterator for SpendingKeyRangeIter {
-     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.curr >= self.first {
-            let key = self.master.derive_child(self.curr);
-            self.curr -= 1;
-            Some(key)
-        } else {
-            None
+    fn next_back(&mut self) -> Option<Self::Item> {
+        match self.curr {
+            Some(curr) if curr == 0 => {
+                let key = self.parent_key.derive_child(curr);
+                self.curr = None;
+                Some(key)
+            }
+            Some(curr) if curr >= self.first => {
+                let key = self.parent_key.derive_child(curr);
+                self.curr = Some(curr - 1);
+                Some(key)
+            }
+            _ => None,
         }
-     }
+    }
 }
 
 // note: Iterator::size_hint() must return exact size
@@ -125,13 +138,13 @@ impl ExactSizeIterator for SpendingKeyRangeIter {}
 
 mod rayon {
     use super::*;
+    use ::rayon::iter::plumbing::bridge;
     use ::rayon::iter::plumbing::Consumer;
+    use ::rayon::iter::plumbing::Producer;
     use ::rayon::iter::plumbing::ProducerCallback;
     use ::rayon::iter::plumbing::UnindexedConsumer;
-    use ::rayon::iter::ParallelIterator;
-    use ::rayon::iter::plumbing::bridge;
+    use ::rayon::prelude::ParallelIterator;
     use ::rayon::prelude::IndexedParallelIterator;
-    use ::rayon::iter::plumbing::Producer;
 
     mod iter {
         use super::*;
@@ -161,9 +174,7 @@ mod rayon {
             }
         }
 
-        struct SpendingKeyProducer(
-            SpendingKeyIter,
-        );
+        struct SpendingKeyProducer(SpendingKeyIter);
 
         impl Producer for SpendingKeyProducer {
             type Item = SpendingKey;
@@ -177,11 +188,11 @@ mod rayon {
                 let iter = self.0;
 
                 let left = SpendingKeyIter {
-                    key: iter.key,
+                    parent_key: iter.parent_key,
                     curr: Some((index - 1) as DerivationIndex),
                 };
                 let right = SpendingKeyIter {
-                    key: iter.key,
+                    parent_key: iter.parent_key,
                     curr: Some(index as DerivationIndex),
                 };
                 (Self(left), Self(right))
@@ -190,10 +201,9 @@ mod rayon {
 
         impl From<SpendingKeyIter> for SpendingKeyProducer {
             fn from(iter: SpendingKeyIter) -> Self {
-                Self (iter)
+                Self(iter)
             }
         }
-
     }
 
     mod range_iter {
@@ -228,9 +238,7 @@ mod rayon {
             }
         }
 
-        struct SpendingKeyRangeProducer(
-            SpendingKeyRangeIter,
-        );
+        struct SpendingKeyRangeProducer(SpendingKeyRangeIter);
 
         impl Producer for SpendingKeyRangeProducer {
             type Item = SpendingKey;
@@ -244,12 +252,12 @@ mod rayon {
                 let range_iter = self.0;
 
                 let left = SpendingKeyRangeIter::new(
-                    range_iter.master,
+                    range_iter.parent_key,
                     range_iter.first,
                     (index - 1) as DerivationIndex,
                 );
                 let right = SpendingKeyRangeIter::new(
-                    range_iter.master,
+                    range_iter.parent_key,
                     index as DerivationIndex,
                     range_iter.last,
                 );
@@ -259,7 +267,7 @@ mod rayon {
 
         impl From<SpendingKeyRangeIter> for SpendingKeyRangeProducer {
             fn from(range_iter: SpendingKeyRangeIter) -> Self {
-                Self (range_iter)
+                Self(range_iter)
             }
         }
     }
