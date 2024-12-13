@@ -12,7 +12,6 @@ use super::common;
 use super::generation_address;
 use super::symmetric_key;
 use super::SpendingKeyIter;
-use super::SpendingKeyRangeIter;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -499,8 +498,8 @@ impl SpendingKey {
         self,
         first: common::DerivationIndex,
         last: common::DerivationIndex,
-    ) -> SpendingKeyRangeIter {
-        SpendingKeyRangeIter::new(self, first, last)
+    ) -> SpendingKeyIter {
+        SpendingKeyIter::new_range(self, first, last)
     }
 
     /// converts a result into an Option and logs a warning on any error

@@ -51,7 +51,7 @@ use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::address::SpendingKeyRangeIter;
+use crate::models::state::wallet::address::SpendingKeyIter;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -218,10 +218,10 @@ pub trait RPC {
     async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
 
     /// Return all known keys, for every [KeyType]
-    async fn known_keys() -> Vec<SpendingKeyRangeIter>;
+    async fn known_keys() -> Vec<SpendingKeyIter>;
 
     /// Return known keys for the provided [KeyType]
-    async fn known_keys_by_keytype(key_type: KeyType) -> SpendingKeyRangeIter;
+    async fn known_keys_by_keytype(key_type: KeyType) -> SpendingKeyIter;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -1035,7 +1035,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKeyRangeIter> {
+    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKeyIter> {
         log_slow_scope!(fn_name!());
 
         self.state
@@ -1052,7 +1052,7 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         key_type: KeyType,
-    ) -> SpendingKeyRangeIter {
+    ) -> SpendingKeyIter {
         log_slow_scope!(fn_name!());
 
         self.state
