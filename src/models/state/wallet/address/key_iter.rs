@@ -8,15 +8,15 @@ use super::SpendingKey;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpendingKeyIter {
     parent_key: SpendingKey,
-    curr: DerivationIndex,
-    curr_back: DerivationIndex,
+    curr: Option<DerivationIndex>,
+    curr_back: Option<DerivationIndex>,
 }
 impl SpendingKeyIter {
     pub fn new(parent_key: SpendingKey) -> Self {
         Self {
             parent_key,
-            curr: 0,
-            curr_back: DerivationIndex::MAX,
+            curr: Some(0),
+            curr_back: Some(DerivationIndex::MAX),
         }
     }
 }
@@ -25,12 +25,20 @@ impl Iterator for SpendingKeyIter {
     type Item = SpendingKey;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr < DerivationIndex::MAX && self.curr < self.curr_back {
-            let key = self.parent_key.derive_child(self.curr);
-            self.curr += 1;
-            Some(key)
-        } else {
-            None
+        match (self.curr, self.curr_back) {
+            (Some(c), cbo) => match cbo {
+                Some(cb) if c >= cb => None,
+                _ => {
+                    let key = self.parent_key.derive_child(c);
+                    self.curr = if c == DerivationIndex::MAX {
+                        None
+                    } else {
+                        Some(c + 1)
+                    };
+                    Some(key)
+                }
+            },
+            _ => None,
         }
     }
 
@@ -46,12 +54,16 @@ impl Iterator for SpendingKeyIter {
 // see: https://github.com/rayon-rs/rayon/issues/1053
 impl DoubleEndedIterator for SpendingKeyIter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.curr_back > 0 && self.curr_back > self.curr {
-            let key = self.parent_key.derive_child(self.curr_back);
-            self.curr_back -= 1;
-            Some(key)
-        } else {
-            None
+        match (self.curr, self.curr_back) {
+            (co, Some(cb)) => match co {
+                Some(c) if cb <= c => None,
+                _ => {
+                    let key = self.parent_key.derive_child(cb);
+                    self.curr_back = if cb == 0 { None } else { Some(cb - 1) };
+                    Some(key)
+                }
+            },
+            _ => None,
         }
     }
 }
@@ -65,14 +77,14 @@ pub struct SpendingKeyRangeIter {
     parent_key: SpendingKey,
     first: DerivationIndex,
     last: DerivationIndex,
-    curr: DerivationIndex,
-    curr_back: DerivationIndex,
+    curr: Option<DerivationIndex>,
+    curr_back: Option<DerivationIndex>,
 }
 
 impl SpendingKeyRangeIter {
     pub fn new(parent_key: SpendingKey, first: DerivationIndex, last: DerivationIndex) -> Self {
-        let curr = first;
-        let curr_back = last;
+        let curr = Some(first);
+        let curr_back = Some(last);
         Self {
             parent_key,
             first,
@@ -90,13 +102,19 @@ impl Iterator for SpendingKeyRangeIter {
     type Item = SpendingKey;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.curr {
-            curr if curr == DerivationIndex::MAX => None,
-            curr if curr <= self.last && curr < self.curr_back => {
-                let key = self.parent_key.derive_child(curr);
-                self.curr += 1;
-                Some(key)
-            }
+        match (self.curr, self.curr_back) {
+            (Some(c), cbo) if c <= self.last => match cbo {
+                Some(cb) if c >= cb => None,
+                _ => {
+                    let key = self.parent_key.derive_child(c);
+                    self.curr = if c == DerivationIndex::MAX {
+                        None
+                    } else {
+                        Some(c + 1)
+                    };
+                    Some(key)
+                }
+            },
             _ => None,
         }
     }
@@ -113,13 +131,15 @@ impl Iterator for SpendingKeyRangeIter {
 // see: https://github.com/rayon-rs/rayon/issues/1053
 impl DoubleEndedIterator for SpendingKeyRangeIter {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self.curr_back {
-            curr if curr == 0 => None,
-            curr if curr >= self.first && curr > self.curr => {
-                let key = self.parent_key.derive_child(curr);
-                self.curr_back -= 1;
-                Some(key)
-            }
+        match (self.curr, self.curr_back) {
+            (co, Some(cb)) if cb >= self.first => match co {
+                Some(c) if cb <= c => None,
+                _ => {
+                    let key = self.parent_key.derive_child(cb);
+                    self.curr_back = if cb == 0 { None } else { Some(cb - 1) };
+                    Some(key)
+                }
+            },
             _ => None,
         }
     }
@@ -128,7 +148,7 @@ impl DoubleEndedIterator for SpendingKeyRangeIter {
 // note: Iterator::size_hint() must return exact size
 impl ExactSizeIterator for SpendingKeyRangeIter {}
 
-mod rayon {
+mod par_iter {
     use rayon::iter::plumbing::bridge;
     use rayon::iter::plumbing::Consumer;
     use rayon::iter::plumbing::Producer;
@@ -182,13 +202,13 @@ mod rayon {
 
                 let left = SpendingKeyIter {
                     parent_key: iter.parent_key,
-                    curr: 0,
-                    curr_back: (index - 1) as DerivationIndex,
+                    curr: Some(0),
+                    curr_back: Some((index - 1) as DerivationIndex),
                 };
                 let right = SpendingKeyIter {
                     parent_key: iter.parent_key,
-                    curr: index as DerivationIndex,
-                    curr_back: DerivationIndex::MAX,
+                    curr: Some(index as DerivationIndex),
+                    curr_back: Some(DerivationIndex::MAX),
                 };
                 (Self(left), Self(right))
             }
@@ -291,6 +311,28 @@ mod tests {
         }
 
         #[test]
+        pub fn iterator_nth() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            worker::iterator_nth(parent_key, parent_key.into_iter());
+        }
+
+        #[test]
+        pub fn range_iterator_nth() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            worker::iterator_nth(parent_key, parent_key.into_range_iter(0, 50));
+        }
+
+        #[test]
+        pub fn range_iterator_to_last_elem() {
+            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+
+            let len = 50;
+            worker::iterator_to_last_elem(parent_key, parent_key.into_range_iter(0, len), len);
+        }
+
+        #[test]
         pub fn double_ended_iterator() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
@@ -343,6 +385,30 @@ mod tests {
                 for n in 0..5 {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next());
                 }
+            }
+
+            pub fn iterator_nth(
+                parent_key: SpendingKey,
+                mut iter: impl Iterator<Item = SpendingKey>,
+            ) {
+                assert_eq!(Some(parent_key.derive_child(5)), iter.nth(5));
+
+                // verify that nth() does not rewind iterator.
+                assert_eq!(Some(parent_key.derive_child(6)), iter.nth(0));
+            }
+
+            pub fn iterator_to_last_elem(
+                parent_key: SpendingKey,
+                mut iter: impl Iterator<Item = SpendingKey>,
+                len: DerivationIndex,
+            ) {
+                assert_eq!(
+                    Some(parent_key.derive_child(len - 2)),
+                    iter.nth((len - 1) as usize)
+                );
+
+                assert_eq!(Some(parent_key.derive_child(0)), iter.next());
+                assert_eq!(None, iter.next());
             }
 
             pub fn double_ended_iterator(
