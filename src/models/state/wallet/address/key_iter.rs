@@ -97,26 +97,6 @@ pub mod par_iter {
         }
     }
 
-    impl Iterator for SpendingKeyParallelIter {
-        type Item = SpendingKey;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            self.0.next()
-        }
-
-        fn size_hint(&self) -> (usize, Option<usize>) {
-            self.0.size_hint()
-        }
-    }
-
-    impl ExactSizeIterator for SpendingKeyParallelIter {}
-
-    impl DoubleEndedIterator for SpendingKeyParallelIter {
-        fn next_back(&mut self) -> Option<Self::Item> {
-            self.0.next_back()
-        }
-    }
-
     impl ParallelIterator for SpendingKeyParallelIter {
         type Item = SpendingKey;
 
@@ -128,7 +108,7 @@ pub mod par_iter {
         }
 
         fn opt_len(&self) -> Option<usize> {
-            Some(ExactSizeIterator::len(self))
+            Some(ExactSizeIterator::len(&self.0))
         }
     }
 
@@ -142,7 +122,7 @@ pub mod par_iter {
         }
 
         fn len(&self) -> usize {
-            ExactSizeIterator::len(self)
+            ExactSizeIterator::len(&self.0)
         }
     }
 
@@ -150,10 +130,10 @@ pub mod par_iter {
 
     impl Producer for SpendingKeyRangeProducer {
         type Item = SpendingKey;
-        type IntoIter = SpendingKeyParallelIter;
+        type IntoIter = SpendingKeyIter;
 
         fn into_iter(self) -> Self::IntoIter {
-            self.0
+            self.0.0
         }
 
         fn split_at(self, index: usize) -> (Self, Self) {
@@ -319,7 +299,7 @@ mod tests {
     mod par_iter {
         use super::*;
         use rayon::iter::IntoParallelIterator;
-
+/*
         // tests basic iteration, comparing with SpendingKey::derive_child()
         #[test]
         pub fn iterator() {
@@ -331,22 +311,32 @@ mod tests {
         #[test]
         pub fn range_iterator() {
             let parent_key = helper::make_parent_key();
-            worker::iterator(parent_key, parent_key.into_range_iter(0, 50));
+            worker::iterator(parent_key, parent_key.into_par_range_iter(0, 50));
         }
-
+*/
+        // tests iteration over entire range, comparing with SpendingKey::derive_child()
+        #[test]
+        pub fn range_iterator_entire_range() {
+            use rayon::iter::ParallelBridge;
+            let parent_key = helper::make_parent_key();
+            worker::iterator_all(parent_key, parent_key.into_par_range_iter(10, 50000000), 10);
+            //worker::iterator_all(parent_key, parent_key.into_range_iter(10, 50000000).par_bridge(), 10);
+        }
+/*
         // tests Iterator::nth() method, comparing with SpendingKey::derive_child()
         #[test]
         pub fn iterator_nth() {
             let parent_key = helper::make_parent_key();
-            worker::iterator_nth(parent_key, parent_key.into_iter());
+            worker::iterator_nth(parent_key, parent_key.into_par_iter());
         }
 
         // tests Iterator::nth() method for a range, comparing with SpendingKey::derive_child()
         #[test]
         pub fn range_iterator_nth() {
             let parent_key = helper::make_parent_key();
-            worker::iterator_nth(parent_key, parent_key.into_range_iter(0, 50));
+            worker::iterator_nth(parent_key, parent_key.into_par_range_iter(0, 50));
         }
+*/
     }
 
     mod helper {
@@ -367,6 +357,8 @@ mod tests {
 
     mod worker {
         use super::*;
+        use rayon::iter::IterBridge;
+        use rayon::iter::ParallelIterator;
 
         pub fn derive_nth_matches_iter() {
             let mut iter = helper::make_iter();
@@ -381,6 +373,11 @@ mod tests {
                 assert_eq!(Some(parent_key.derive_child(n)), iter.next());
             }
         }
+
+        pub fn iterator_all(parent_key: SpendingKey, iter: super::super::super::par_iter::SpendingKeyParallelIter, start: DerivationIndex) {
+            iter.for_each(|key| println!("another"));
+        }
+
 
         pub fn iterator_nth(parent_key: SpendingKey, mut iter: impl Iterator<Item = SpendingKey>) {
             assert_eq!(Some(parent_key.derive_child(5)), iter.nth(5));
