@@ -12,6 +12,7 @@ use super::common;
 use super::generation_address;
 use super::symmetric_key;
 use super::SpendingKeyIter;
+use super::par_iter::SpendingKeyParallelIter;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -374,11 +375,11 @@ impl IntoIterator for SpendingKey {
 }
 
 impl IntoParallelIterator for SpendingKey {
-    type Iter = SpendingKeyIter;
+    type Iter = SpendingKeyParallelIter;
     type Item = Self;
 
     fn into_par_iter(self) -> Self::Iter {
-        SpendingKeyIter::new(self)
+        SpendingKeyParallelIter::from(self.into_iter())
     }
 }
 
@@ -500,6 +501,14 @@ impl SpendingKey {
         last: common::DerivationIndex,
     ) -> SpendingKeyIter {
         SpendingKeyIter::new_range(self, first, last)
+    }
+
+    pub fn into_par_range_iter(
+        self,
+        first: common::DerivationIndex,
+        last: common::DerivationIndex,
+    ) -> SpendingKeyParallelIter {
+        SpendingKeyParallelIter::from(SpendingKeyIter::new_range(self, first, last))
     }
 
     /// converts a result into an Option and logs a warning on any error
