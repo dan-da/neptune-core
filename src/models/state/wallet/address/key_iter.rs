@@ -78,7 +78,7 @@ impl DoubleEndedIterator for SpendingKeyIter {
 // note: Iterator::size_hint() must return exact size
 impl ExactSizeIterator for SpendingKeyIter {}
 
-mod par_iter {
+pub mod par_iter {
     use rayon::iter::plumbing::bridge;
     use rayon::iter::plumbing::Consumer;
     use rayon::iter::plumbing::Producer;
@@ -89,7 +89,35 @@ mod par_iter {
 
     use super::*;
 
-    impl ParallelIterator for SpendingKeyIter {
+    pub struct SpendingKeyParallelIter(SpendingKeyIter);
+
+    impl From<SpendingKeyIter> for SpendingKeyParallelIter {
+        fn from(iter: SpendingKeyIter) -> Self {
+            Self(iter)
+        }
+    }
+
+    impl Iterator for SpendingKeyParallelIter {
+        type Item = SpendingKey;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            self.0.next()
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.0.size_hint()
+        }
+    }
+
+    impl ExactSizeIterator for SpendingKeyParallelIter {}
+
+    impl DoubleEndedIterator for SpendingKeyParallelIter {
+        fn next_back(&mut self) -> Option<Self::Item> {
+            self.0.next_back()
+        }
+    }
+
+    impl ParallelIterator for SpendingKeyParallelIter {
         type Item = SpendingKey;
 
         fn drive_unindexed<C>(self, consumer: C) -> C::Result
@@ -104,7 +132,7 @@ mod par_iter {
         }
     }
 
-    impl IndexedParallelIterator for SpendingKeyIter {
+    impl IndexedParallelIterator for SpendingKeyParallelIter {
         fn with_producer<CB: ProducerCallback<Self::Item>>(self, callback: CB) -> CB::Output {
             callback.callback(SpendingKeyRangeProducer::from(self))
         }
@@ -118,18 +146,18 @@ mod par_iter {
         }
     }
 
-    struct SpendingKeyRangeProducer(SpendingKeyIter);
+    struct SpendingKeyRangeProducer(SpendingKeyParallelIter);
 
     impl Producer for SpendingKeyRangeProducer {
         type Item = SpendingKey;
-        type IntoIter = SpendingKeyIter;
+        type IntoIter = SpendingKeyParallelIter;
 
         fn into_iter(self) -> Self::IntoIter {
             self.0
         }
 
         fn split_at(self, index: usize) -> (Self, Self) {
-            let range_iter = self.0;
+            let range_iter = self.0.0;
 
             let left = SpendingKeyIter::new_range(
                 range_iter.parent_key,
@@ -141,12 +169,15 @@ mod par_iter {
                 index as DerivationIndex,
                 range_iter.last,
             );
-            (Self(left), Self(right))
+            (
+                Self(SpendingKeyParallelIter(left)),
+                Self(SpendingKeyParallelIter(right)),
+            )
         }
     }
 
-    impl From<SpendingKeyIter> for SpendingKeyRangeProducer {
-        fn from(range_iter: SpendingKeyIter) -> Self {
+    impl From<SpendingKeyParallelIter> for SpendingKeyRangeProducer {
+        fn from(range_iter: SpendingKeyParallelIter) -> Self {
             Self(range_iter)
         }
     }
@@ -155,10 +186,10 @@ mod par_iter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::state::wallet::symmetric_key::SymmetricKey;
 
     mod iter {
         use super::*;
-        use crate::models::state::wallet::symmetric_key::SymmetricKey;
 
         // tests that ::derive_nth() matches ::next()
         #[test]
@@ -283,115 +314,143 @@ mod tests {
                 len,
             );
         }
+    }
 
-        mod helper {
-            use super::*;
+    mod par_iter {
+        use super::*;
+        use rayon::iter::IntoParallelIterator;
 
-            pub fn make_parent_key() -> SpendingKey {
-                SymmetricKey::from_seed(rand::random()).into()
-            }
-
-            pub fn make_iter() -> SpendingKeyIter {
-                SpendingKeyIter::new(make_parent_key())
-            }
-
-            // pub fn make_range_iter(start: DerivationIndex, end: DerivationIndex) -> SpendingKeyIter {
-            //     SpendingKeyIter::new_range(make_parent_key(), start, end)
-            // }
+        // tests basic iteration, comparing with SpendingKey::derive_child()
+        #[test]
+        pub fn iterator() {
+            let parent_key = helper::make_parent_key();
+            worker::iterator(parent_key, parent_key.into_par_iter());
         }
 
-        mod worker {
-            use super::*;
+        // tests basic iteration over a range, comparing with SpendingKey::derive_child()
+        #[test]
+        pub fn range_iterator() {
+            let parent_key = helper::make_parent_key();
+            worker::iterator(parent_key, parent_key.into_range_iter(0, 50));
+        }
 
-            pub fn derive_nth_matches_iter() {
-                let mut iter = helper::make_iter();
+        // tests Iterator::nth() method, comparing with SpendingKey::derive_child()
+        #[test]
+        pub fn iterator_nth() {
+            let parent_key = helper::make_parent_key();
+            worker::iterator_nth(parent_key, parent_key.into_iter());
+        }
 
-                for n in 0..5 {
-                    assert_eq!(Some(iter.derive_nth(n)), iter.next());
-                }
-            }
-
-            pub fn iterator(parent_key: SpendingKey, mut iter: impl Iterator<Item = SpendingKey>) {
-                for n in 0..5 {
-                    assert_eq!(Some(parent_key.derive_child(n)), iter.next());
-                }
-            }
-
-            pub fn iterator_nth(
-                parent_key: SpendingKey,
-                mut iter: impl Iterator<Item = SpendingKey>,
-            ) {
-                assert_eq!(Some(parent_key.derive_child(5)), iter.nth(5));
-
-                // verify that nth() does not rewind iterator.
-                assert_eq!(Some(parent_key.derive_child(6)), iter.nth(0));
-            }
-
-            pub fn iterator_to_last_elem(
-                parent_key: SpendingKey,
-                mut iter: impl Iterator<Item = SpendingKey>,
-                start: DerivationIndex,
-                len: DerivationIndex,
-            ) {
-                assert_eq!(
-                    Some(parent_key.derive_child(start + len - 1)),
-                    iter.nth((len - 1) as usize)
-                );
-
-                assert_eq!(Some(parent_key.derive_child(start + len)), iter.next());
-                assert_eq!(None, iter.next());
-            }
-
-            pub fn double_ended_iterator(
-                parent_key: SpendingKey,
-                mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
-                len: DerivationIndex,
-            ) {
-                for n in 0..5 {
-                    assert_eq!(Some(parent_key.derive_child(n)), iter.next());
-                }
-                for n in (len - 5..=len).rev() {
-                    assert_eq!(Some(parent_key.derive_child(n)), iter.next_back());
-                }
-            }
-
-            pub fn double_ended_iterator_meet_middle(
-                parent_key: SpendingKey,
-                mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
-                len: DerivationIndex,
-            ) {
-                for n in 0..5 {
-                    assert_eq!(Some(parent_key.derive_child(n)), iter.next());
-                }
-                assert_eq!(
-                    Some(parent_key.derive_child(10)),
-                    iter.nth_back((len - 10) as usize)
-                );
-
-                for n in (5..10).rev() {
-                    assert_eq!(Some(parent_key.derive_child(n)), iter.next_back());
-                }
-
-                assert_eq!(None, iter.next_back());
-                assert_eq!(None, iter.next());
-            }
-
-            pub fn double_ended_iterator_to_first_elem(
-                parent_key: SpendingKey,
-                mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
-                first: DerivationIndex,
-                len: DerivationIndex,
-            ) {
-                assert_eq!(
-                    Some(parent_key.derive_child(first + 1)),
-                    iter.nth_back((len - 1) as usize)
-                );
-
-                assert_eq!(Some(parent_key.derive_child(first)), iter.next_back());
-                assert_eq!(None, iter.next_back());
-            }
+        // tests Iterator::nth() method for a range, comparing with SpendingKey::derive_child()
+        #[test]
+        pub fn range_iterator_nth() {
+            let parent_key = helper::make_parent_key();
+            worker::iterator_nth(parent_key, parent_key.into_range_iter(0, 50));
         }
     }
 
-    mod par_iter {}
+    mod helper {
+        use super::*;
+
+        pub fn make_parent_key() -> SpendingKey {
+            SymmetricKey::from_seed(rand::random()).into()
+        }
+
+        pub fn make_iter() -> SpendingKeyIter {
+            make_parent_key().into_iter()
+        }
+
+        // pub fn make_range_iter(start: DerivationIndex, end: DerivationIndex) -> SpendingKeyIter {
+        //     SpendingKeyIter::new_range(make_parent_key(), start, end)
+        // }
+    }
+
+    mod worker {
+        use super::*;
+
+        pub fn derive_nth_matches_iter() {
+            let mut iter = helper::make_iter();
+
+            for n in 0..5 {
+                assert_eq!(Some(iter.derive_nth(n)), iter.next());
+            }
+        }
+
+        pub fn iterator(parent_key: SpendingKey, mut iter: impl Iterator<Item = SpendingKey>) {
+            for n in 0..5 {
+                assert_eq!(Some(parent_key.derive_child(n)), iter.next());
+            }
+        }
+
+        pub fn iterator_nth(parent_key: SpendingKey, mut iter: impl Iterator<Item = SpendingKey>) {
+            assert_eq!(Some(parent_key.derive_child(5)), iter.nth(5));
+
+            // verify that nth() does not rewind iterator.
+            assert_eq!(Some(parent_key.derive_child(6)), iter.nth(0));
+        }
+
+        pub fn iterator_to_last_elem(
+            parent_key: SpendingKey,
+            mut iter: impl Iterator<Item = SpendingKey>,
+            start: DerivationIndex,
+            len: DerivationIndex,
+        ) {
+            assert_eq!(
+                Some(parent_key.derive_child(start + len - 1)),
+                iter.nth((len - 1) as usize)
+            );
+
+            assert_eq!(Some(parent_key.derive_child(start + len)), iter.next());
+            assert_eq!(None, iter.next());
+        }
+
+        pub fn double_ended_iterator(
+            parent_key: SpendingKey,
+            mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
+            len: DerivationIndex,
+        ) {
+            for n in 0..5 {
+                assert_eq!(Some(parent_key.derive_child(n)), iter.next());
+            }
+            for n in (len - 5..=len).rev() {
+                assert_eq!(Some(parent_key.derive_child(n)), iter.next_back());
+            }
+        }
+
+        pub fn double_ended_iterator_meet_middle(
+            parent_key: SpendingKey,
+            mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
+            len: DerivationIndex,
+        ) {
+            for n in 0..5 {
+                assert_eq!(Some(parent_key.derive_child(n)), iter.next());
+            }
+            assert_eq!(
+                Some(parent_key.derive_child(10)),
+                iter.nth_back((len - 10) as usize)
+            );
+
+            for n in (5..10).rev() {
+                assert_eq!(Some(parent_key.derive_child(n)), iter.next_back());
+            }
+
+            assert_eq!(None, iter.next_back());
+            assert_eq!(None, iter.next());
+        }
+
+        pub fn double_ended_iterator_to_first_elem(
+            parent_key: SpendingKey,
+            mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
+            first: DerivationIndex,
+            len: DerivationIndex,
+        ) {
+            assert_eq!(
+                Some(parent_key.derive_child(first + 1)),
+                iter.nth_back((len - 1) as usize)
+            );
+
+            assert_eq!(Some(parent_key.derive_child(first)), iter.next_back());
+            assert_eq!(None, iter.next_back());
+        }
+    }
 }
