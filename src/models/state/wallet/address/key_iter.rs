@@ -16,7 +16,7 @@ pub struct SpendingKeyIter {
 
 impl SpendingKeyIter {
     pub fn new(parent_key: SpendingKey) -> Self {
-        Self::new_range(parent_key, 0, DerivationIndex::MAX)
+        Self::new_range(parent_key, 0, usize::MAX as DerivationIndex)
     }
 
     pub fn new_range(
@@ -24,12 +24,16 @@ impl SpendingKeyIter {
         first: DerivationIndex,
         last: DerivationIndex,
     ) -> Self {
+        assert!(last >= first);
+        assert!(last > 0);
+        assert!(last - first <= usize::MAX as DerivationIndex);
+
         Self {
             parent_key,
             first,
             last,
             curr: Some(first),
-            curr_back: Some(last),
+            curr_back: Some(last - 1),
         }
     }
 
@@ -53,6 +57,9 @@ impl Iterator for SpendingKeyIter {
 
     // returns a tuple where the first element is the lower bound, and the
     // second element is the upper bound
+    //
+    // note: the cast to usize should always succeed because we already
+    // assert that range len is <= usize::MAX when iterator is created.
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len: usize = (self.last - self.first) as usize;
         (len, Some(len))
@@ -311,7 +318,10 @@ mod tests {
                 }
             }
 
-            pub fn iterator_nth(parent_key: SpendingKey, mut iter: impl Iterator<Item = SpendingKey>) {
+            pub fn iterator_nth(
+                parent_key: SpendingKey,
+                mut iter: impl Iterator<Item = SpendingKey>,
+            ) {
                 assert_eq!(Some(parent_key.derive_child(5)), iter.nth(5));
 
                 // verify that nth() does not rewind iterator.
@@ -394,15 +404,14 @@ mod tests {
         }
 
         mod worker {
-            use super::*;
-            use rayon::iter::ParallelIterator;
-            use rayon::iter::IndexedParallelIterator;
             use std::collections::HashSet;
 
-            pub fn iterator_all_in_range(
-                start: DerivationIndex,
-                end: DerivationIndex,
-            ) {
+            use rayon::iter::IndexedParallelIterator;
+            use rayon::iter::ParallelIterator;
+
+            use super::*;
+
+            pub fn iterator_all_in_range(start: DerivationIndex, end: DerivationIndex) {
                 let parent_key = helper::make_parent_key();
                 let set: HashSet<SpendingKey> = parent_key.into_range_iter(start, end).collect();
                 let par_iter = parent_key.into_par_range_iter(start, end);
@@ -424,5 +433,4 @@ mod tests {
             make_parent_key().into_iter()
         }
     }
-
 }

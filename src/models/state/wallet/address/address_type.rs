@@ -10,9 +10,9 @@ use tracing::warn;
 
 use super::common;
 use super::generation_address;
+use super::par_iter::SpendingKeyParallelIter;
 use super::symmetric_key;
 use super::SpendingKeyIter;
-use super::par_iter::SpendingKeyParallelIter;
 use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::lock_script::LockScript;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
