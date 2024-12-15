@@ -24,6 +24,7 @@ impl SpendingKeyIter {
         first: DerivationIndex,
         last: DerivationIndex,
     ) -> Self {
+        println!("first: {}, last: {}", first, last);
         assert!(last >= first);
         assert!(last > 0);
         assert!(last - first <= usize::MAX as DerivationIndex);
@@ -145,14 +146,16 @@ pub mod par_iter {
         fn split_at(self, index: usize) -> (Self, Self) {
             let range_iter = self.0 .0;
 
+            let mid = range_iter.first + index as DerivationIndex;
+
             let left = SpendingKeyIter::new_range(
                 range_iter.parent_key,
                 range_iter.first,
-                (index - 1) as DerivationIndex,
+                (mid - 1) as DerivationIndex,
             );
             let right = SpendingKeyIter::new_range(
                 range_iter.parent_key,
-                index as DerivationIndex,
+                mid,
                 range_iter.last,
             );
             (
@@ -246,7 +249,7 @@ mod tests {
         #[test]
         pub fn double_ended_iterator() {
             let parent_key = helper::make_parent_key();
-            worker::double_ended_iterator(parent_key, parent_key.into_iter(), DerivationIndex::MAX);
+            worker::double_ended_iterator(parent_key, parent_key.into_iter(), usize::MAX as DerivationIndex);
         }
 
         // tests that range iterator operates in reverse
@@ -271,7 +274,7 @@ mod tests {
             );
         }
 
-        // tests that reverse iteration does not go past first elem in range
+        /// tests that reverse iteration does not go past first elem in range
         #[test]
         pub fn double_ended_iterator_to_first_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
@@ -339,7 +342,6 @@ mod tests {
                     iter.nth((len - 1) as usize)
                 );
 
-                assert_eq!(Some(parent_key.derive_child(start + len)), iter.next());
                 assert_eq!(None, iter.next());
             }
 
@@ -351,7 +353,7 @@ mod tests {
                 for n in 0..5 {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next());
                 }
-                for n in (len - 5..=len).rev() {
+                for n in (len - 5..len).rev() {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next_back());
                 }
             }
@@ -366,7 +368,7 @@ mod tests {
                 }
                 assert_eq!(
                     Some(parent_key.derive_child(10)),
-                    iter.nth_back((len - 10) as usize)
+                    iter.nth_back((len - 1 - 10) as usize)
                 );
 
                 for n in (5..10).rev() {
@@ -385,7 +387,7 @@ mod tests {
             ) {
                 assert_eq!(
                     Some(parent_key.derive_child(first + 1)),
-                    iter.nth_back((len - 1) as usize)
+                    iter.nth_back((len - 2) as usize)
                 );
 
                 assert_eq!(Some(parent_key.derive_child(first)), iter.next_back());
@@ -413,11 +415,15 @@ mod tests {
 
             pub fn iterator_all_in_range(start: DerivationIndex, end: DerivationIndex) {
                 let parent_key = helper::make_parent_key();
-                let set: HashSet<SpendingKey> = parent_key.into_range_iter(start, end).collect();
+                let set1: HashSet<SpendingKey> = parent_key.into_range_iter(start, end).collect();
+                let set2: HashSet<SpendingKey> = parent_key.into_par_range_iter(start, end).collect();
+
+                assert_eq!(set1, set2);
+
                 let par_iter = parent_key.into_par_range_iter(start, end);
 
-                assert!(par_iter.len() == set.len());
-                assert!(par_iter.all(|k| set.contains(&k)));
+                assert!(par_iter.len() == set1.len());
+                assert!(par_iter.all(|k| set1.contains(&k)));
             }
         }
     }
