@@ -51,21 +51,24 @@ impl SpendingKeyIter {
             Bound::Excluded(n) => *n + 1,
         };
         let end = match range.end_bound() {
-            Bound::Unbounded => start + usize::MAX as DerivationIndex,
+            Bound::Unbounded => usize::MAX as DerivationIndex,
             Bound::Included(n) => *n,
             Bound::Excluded(n) => *n - 1,
         };
 
         let range = start..=end;
 
+        println!("start: {}, end: {}", range.start(), range.end());
+
         assert!(range.end() >= range.start());
-        assert!(*range.end() > 0);
         assert!(range.end() - range.start() <= usize::MAX as DerivationIndex);
+
+        let curr_back = if *range.end() == 0 {0} else {*range.end() - 1};
 
         Self {
             parent_key,
             curr: Some(*range.start()),
-            curr_back: Some(*range.end() - 1),
+            curr_back: Some(curr_back),
             range,
         }
     }
@@ -459,6 +462,9 @@ mod tests {
         #[test]
         pub fn range_iterator_entire_range() {
             worker::iterator_all_in_range(10..=500);
+            worker::iterator_all_in_range(10..500);
+            worker::iterator_all_in_range(..500);
+            worker::iterator_all_in_range(usize::MAX as DerivationIndex - 500 ..);            
         }
 
         mod worker {
@@ -470,7 +476,7 @@ mod tests {
             use super::*;
 
             // compares parallel range iter results to non-parallel range iter results.
-            pub fn iterator_all_in_range(range: RangeInclusive<DerivationIndex>) {
+            pub fn iterator_all_in_range(range: impl RangeBounds<DerivationIndex> + Clone) {
                 let parent_key = helper::make_parent_key();
                 let set1: HashSet<SpendingKey> = parent_key.into_range_iter(range.clone()).collect();
 
@@ -478,7 +484,6 @@ mod tests {
                 let set2: HashSet<SpendingKey> =
                     parent_key.into_par_range_iter(range.clone()).collect();
                 assert_eq!(set1, set2);
-                return;
 
                 // test without collect(), by comparing len, and ensuring all elems are in the set.
                 let par_iter = parent_key.into_par_range_iter(range);
