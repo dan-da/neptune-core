@@ -75,7 +75,9 @@ impl SpendingKeyIter {
         self.parent_key.derive_child(index)
     }
 
-    fn range_bounds_to_inclusive(range: impl RangeBounds<DerivationIndex>) -> RangeInclusive<DerivationIndex> {
+    fn range_bounds_to_inclusive(
+        range: impl RangeBounds<DerivationIndex>,
+    ) -> RangeInclusive<DerivationIndex> {
         let start = match range.start_bound() {
             Bound::Unbounded => 0 as DerivationIndex,
             Bound::Included(n) => *n,
@@ -535,13 +537,15 @@ mod tests {
         }
 
         mod worker {
-            use super::*;
             use std::ops;
+
+            use super::*;
 
             pub fn validate_range(r: ops::Range<DerivationIndex>) {
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                let end = if r.end == 0 { 0 } else { r.end - 1 };
                 assert_eq!(r.start, *ri.start());
-                assert_eq!(r.end + 1, *ri.end());
+                assert_eq!(end, *ri.end());
             }
 
             pub fn validate_range_from(r: ops::RangeFrom<DerivationIndex>) {
@@ -552,8 +556,9 @@ mod tests {
 
             pub fn validate_range_to(r: ops::RangeTo<DerivationIndex>) {
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                let end = if r.end == 0 { 0 } else { r.end - 1 };
                 assert_eq!(0, *ri.start());
-                assert_eq!(r.end + 1, *ri.end());
+                assert_eq!(end, *ri.end());
             }
 
             pub fn validate_range_full(r: ops::RangeFull) {
