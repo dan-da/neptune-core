@@ -1,3 +1,7 @@
+use std::ops::Bound;
+use std::ops::RangeBounds;
+use std::ops::RangeInclusive;
+
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -19,7 +23,7 @@ use super::SpendingKey;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpendingKeyIter {
     parent_key: SpendingKey,
-    range: std::ops::Range<DerivationIndex>,
+    range: RangeInclusive<DerivationIndex>,
     curr: Option<DerivationIndex>,
     curr_back: Option<DerivationIndex>,
 }
@@ -40,15 +44,28 @@ impl SpendingKeyIter {
     ///   range.end >= range.start
     ///   range.end > 0
     ///   range.end - range.start <= usize::MAX
-    pub fn new_range(parent_key: SpendingKey, range: std::ops::Range<DerivationIndex>) -> Self {
-        assert!(range.end >= range.start);
-        assert!(range.end > 0);
-        assert!(range.end - range.start <= usize::MAX as DerivationIndex);
+    pub fn new_range(parent_key: SpendingKey, range: impl RangeBounds<DerivationIndex>) -> Self {
+        let start = match range.start_bound() {
+            Bound::Unbounded => 0 as DerivationIndex,
+            Bound::Included(n) => *n,
+            Bound::Excluded(n) => *n + 1,
+        };
+        let end = match range.end_bound() {
+            Bound::Unbounded => start + usize::MAX as DerivationIndex,
+            Bound::Included(n) => *n,
+            Bound::Excluded(n) => *n - 1,
+        };
+
+        let range = start..=end;
+
+        assert!(range.end() >= range.start());
+        assert!(*range.end() > 0);
+        assert!(range.end() - range.start() <= usize::MAX as DerivationIndex);
 
         Self {
             parent_key,
-            curr: Some(range.start),
-            curr_back: Some(range.end - 1),
+            curr: Some(*range.start()),
+            curr_back: Some(*range.end() - 1),
             range,
         }
     }
@@ -84,7 +101,7 @@ impl Iterator for SpendingKeyIter {
     // note: the cast to usize should always succeed because we already
     // assert that range len is <= usize::MAX when iterator is created.
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = (self.range.end - self.range.start) as usize;
+        let len = (self.range.end() - self.range.start()) as usize;
         (len, Some(len))
     }
 }
@@ -168,14 +185,14 @@ pub mod par_iter {
         fn split_at(self, index: usize) -> (Self, Self) {
             let range_iter = self.0 .0;
 
-            let mid = range_iter.range.start + index as DerivationIndex;
+            let mid = *range_iter.range.start() + index as DerivationIndex;
 
             let left = SpendingKeyIter::new_range(
                 range_iter.parent_key,
-                range_iter.range.start..(mid - 1) as DerivationIndex,
+                *range_iter.range.start()..(mid - 1) as DerivationIndex,
             );
             let right =
-                SpendingKeyIter::new_range(range_iter.parent_key, mid..range_iter.range.end);
+                SpendingKeyIter::new_range(range_iter.parent_key, mid..*range_iter.range.end());
             (
                 Self(SpendingKeyParallelIter(left)),
                 Self(SpendingKeyParallelIter(right)),
@@ -237,13 +254,11 @@ mod tests {
         pub fn range_iterator_to_last_elem() {
             let parent_key = helper::make_parent_key();
 
-            let first = 0;
-            let len = 50;
+            let range = 0..=50;
             worker::iterator_to_last_elem(
                 parent_key,
-                parent_key.into_range_iter(first..first + len),
-                first,
-                len,
+                parent_key.into_range_iter(range.clone()),
+                range,
             );
         }
 
@@ -252,14 +267,11 @@ mod tests {
         pub fn iterator_to_max_elem() {
             let parent_key = helper::make_parent_key();
 
-            let last = DerivationIndex::MAX;
-            let len = 10;
-            let first = last - len;
+            let range = DerivationIndex::MAX - 10..=DerivationIndex::MAX;
             worker::iterator_to_last_elem(
                 parent_key,
-                parent_key.into_range_iter(first..last),
-                first,
-                len,
+                parent_key.into_range_iter(range.clone()),
+                range,
             );
         }
 
@@ -270,7 +282,7 @@ mod tests {
             worker::double_ended_iterator(
                 parent_key,
                 parent_key.into_iter(),
-                usize::MAX as DerivationIndex,
+                0..usize::MAX as DerivationIndex,
             );
         }
 
@@ -278,8 +290,12 @@ mod tests {
         #[test]
         pub fn double_ended_range_iterator() {
             let parent_key = helper::make_parent_key();
-            let len = 50;
-            worker::double_ended_iterator(parent_key, parent_key.into_range_iter(0..len), len);
+            let range = 0..50;
+            worker::double_ended_iterator(
+                parent_key,
+                parent_key.into_range_iter(range.clone()),
+                range,
+            );
         }
 
         // tests that forward and reverse iteration meets in the middle and do
@@ -288,11 +304,11 @@ mod tests {
         pub fn double_ended_iterator_meet_middle() {
             let parent_key = helper::make_parent_key();
 
-            let len = 50;
+            let range = 0..50;
             worker::double_ended_iterator_meet_middle(
                 parent_key,
-                parent_key.into_range_iter(0..len),
-                len,
+                parent_key.into_range_iter(range.clone()),
+                range,
             );
         }
 
@@ -301,13 +317,11 @@ mod tests {
         pub fn double_ended_iterator_to_first_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
-            let first = 10;
-            let len = 20;
+            let range = 10..20;
             worker::double_ended_iterator_to_first_elem(
                 parent_key,
-                parent_key.into_range_iter(first..first + len),
-                first,
-                len,
+                parent_key.into_range_iter(range.clone()),
+                range,
             );
         }
 
@@ -316,17 +330,17 @@ mod tests {
         pub fn double_ended_iterator_to_zero_elem() {
             let parent_key = SymmetricKey::from_seed(rand::random()).into();
 
-            let first = 0;
-            let len = 20;
+            let range = 0..20;
             worker::double_ended_iterator_to_first_elem(
                 parent_key,
-                parent_key.into_range_iter(first..len),
-                first,
-                len,
+                parent_key.into_range_iter(range.clone()),
+                range,
             );
         }
 
         mod worker {
+            use std::ops::Range;
+
             use super::*;
 
             // derives 5 keys and verifies that:
@@ -362,11 +376,11 @@ mod tests {
             pub fn iterator_to_last_elem(
                 parent_key: SpendingKey,
                 mut iter: impl Iterator<Item = SpendingKey>,
-                start: DerivationIndex,
-                len: DerivationIndex,
+                range: RangeInclusive<DerivationIndex>,
             ) {
+                let len = range.end() - range.start();
                 assert_eq!(
-                    Some(parent_key.derive_child(start + len - 1)),
+                    Some(parent_key.derive_child(range.start() + len - 1)),
                     iter.nth((len - 1) as usize)
                 );
 
@@ -377,8 +391,11 @@ mod tests {
             pub fn double_ended_iterator(
                 parent_key: SpendingKey,
                 mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
-                len: DerivationIndex,
+                range: Range<DerivationIndex>,
             ) {
+                assert_eq!(range.start, 0);
+                let len = range.end - range.start;
+
                 for n in 0..5 {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next());
                 }
@@ -392,8 +409,11 @@ mod tests {
             pub fn double_ended_iterator_meet_middle(
                 parent_key: SpendingKey,
                 mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
-                len: DerivationIndex,
+                range: Range<DerivationIndex>,
             ) {
+                assert_eq!(range.start, 0);
+                let len = range.end - range.start;
+
                 for n in 0..5 {
                     assert_eq!(Some(parent_key.derive_child(n)), iter.next());
                 }
@@ -414,15 +434,17 @@ mod tests {
             pub fn double_ended_iterator_to_first_elem(
                 parent_key: SpendingKey,
                 mut iter: impl DoubleEndedIterator<Item = SpendingKey>,
-                first: DerivationIndex,
-                len: DerivationIndex,
+                range: Range<DerivationIndex>,
             ) {
+                let len = range.end - range.start;
+                assert!(len >= 2);
+
                 assert_eq!(
-                    Some(parent_key.derive_child(first + 1)),
+                    Some(parent_key.derive_child(range.start + 1)),
                     iter.nth_back((len - 2) as usize)
                 );
 
-                assert_eq!(Some(parent_key.derive_child(first)), iter.next_back());
+                assert_eq!(Some(parent_key.derive_child(range.start)), iter.next_back());
                 assert_eq!(None, iter.next_back());
             }
         }

@@ -497,14 +497,14 @@ impl SpendingKey {
 
     pub fn into_range_iter(
         self,
-        range: std::ops::Range<common::DerivationIndex>,
+        range: impl std::ops::RangeBounds<common::DerivationIndex>,
     ) -> SpendingKeyIter {
         SpendingKeyIter::new_range(self, range)
     }
 
     pub fn into_par_range_iter(
         self,
-        range: std::ops::Range<common::DerivationIndex>,
+        range: impl std::ops::RangeBounds<common::DerivationIndex>,
     ) -> SpendingKeyParallelIter {
         SpendingKeyParallelIter::from(SpendingKeyIter::new_range(self, range))
     }
