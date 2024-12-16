@@ -37,33 +37,24 @@ impl From<SpendingKey> for SpendingKeyIter {
 }
 
 impl SpendingKeyIter {
-    /// creates a new iterator over child-keys of parent-key from
-    /// derivation-index first to last.
+    /// creates a new iterator over a range of child-keys of parent-key
+    ///
+    /// the range may be at most
     ///
     /// panics if any of these conditions are not true:
     ///   range.end >= range.start
-    ///   range.end > 0
     ///   range.end - range.start <= usize::MAX
     pub fn new_range(parent_key: SpendingKey, range: impl RangeBounds<DerivationIndex>) -> Self {
-        let start = match range.start_bound() {
-            Bound::Unbounded => 0 as DerivationIndex,
-            Bound::Included(n) => *n,
-            Bound::Excluded(n) => *n + 1,
-        };
-        let end = match range.end_bound() {
-            Bound::Unbounded => usize::MAX as DerivationIndex,
-            Bound::Included(n) => *n,
-            Bound::Excluded(n) => *n - 1,
-        };
-
-        let range = start..=end;
-
-        println!("start: {}, end: {}", range.start(), range.end());
+        let range = Self::range_bounds_to_inclusive(range);
 
         assert!(range.end() >= range.start());
         assert!(range.end() - range.start() <= usize::MAX as DerivationIndex);
 
-        let curr_back = if *range.end() == 0 {0} else {*range.end() - 1};
+        let curr_back = if *range.end() == 0 {
+            0
+        } else {
+            *range.end() - 1
+        };
 
         Self {
             parent_key,
@@ -82,6 +73,23 @@ impl SpendingKeyIter {
     ///    only derives the requested key, so is much faster when index > 0.
     pub fn derive_child(&self, index: DerivationIndex) -> SpendingKey {
         self.parent_key.derive_child(index)
+    }
+
+    fn range_bounds_to_inclusive(range: impl RangeBounds<DerivationIndex>) -> RangeInclusive<DerivationIndex> {
+        let start = match range.start_bound() {
+            Bound::Unbounded => 0 as DerivationIndex,
+            Bound::Included(n) => *n,
+            Bound::Excluded(n) if *n == DerivationIndex::MAX => *n,
+            Bound::Excluded(n) => *n + 1,
+        };
+        let end = match range.end_bound() {
+            Bound::Unbounded => usize::MAX as DerivationIndex,
+            Bound::Included(n) => *n,
+            Bound::Excluded(n) if *n == 0 => 0,
+            Bound::Excluded(n) => *n - 1,
+        };
+
+        start..=end
     }
 }
 impl Iterator for SpendingKeyIter {
@@ -464,7 +472,7 @@ mod tests {
             worker::iterator_all_in_range(10..=500);
             worker::iterator_all_in_range(10..500);
             worker::iterator_all_in_range(..500);
-            worker::iterator_all_in_range(usize::MAX as DerivationIndex - 500 ..);            
+            worker::iterator_all_in_range(usize::MAX as DerivationIndex - 500..);
         }
 
         mod worker {
@@ -478,7 +486,8 @@ mod tests {
             // compares parallel range iter results to non-parallel range iter results.
             pub fn iterator_all_in_range(range: impl RangeBounds<DerivationIndex> + Clone) {
                 let parent_key = helper::make_parent_key();
-                let set1: HashSet<SpendingKey> = parent_key.into_range_iter(range.clone()).collect();
+                let set1: HashSet<SpendingKey> =
+                    parent_key.into_range_iter(range.clone()).collect();
 
                 // test by collect() and set equality.
                 let set2: HashSet<SpendingKey> =
@@ -489,6 +498,68 @@ mod tests {
                 let par_iter = parent_key.into_par_range_iter(range);
                 assert!(par_iter.len() == set1.len());
                 assert!(par_iter.all(|k| set1.contains(&k)));
+            }
+        }
+    }
+
+    mod range_bounds {
+        use super::*;
+
+        #[test]
+        fn range() {
+            worker::validate_range(0..1);
+            worker::validate_range(0..0);
+            worker::validate_range(1..10);
+            worker::validate_range(1..usize::MAX as DerivationIndex);
+            worker::validate_range(1..DerivationIndex::MAX);
+        }
+
+        #[test]
+        fn range_from() {
+            worker::validate_range_from(1..);
+            worker::validate_range_from(0..);
+            worker::validate_range_from(10..);
+        }
+
+        #[test]
+        fn range_to() {
+            worker::validate_range_to(..1);
+            worker::validate_range_to(..0);
+            worker::validate_range_to(..10);
+            worker::validate_range_to(..usize::MAX as DerivationIndex);
+        }
+
+        #[test]
+        fn range_full() {
+            worker::validate_range_full(..);
+        }
+
+        mod worker {
+            use super::*;
+            use std::ops;
+
+            pub fn validate_range(r: ops::Range<DerivationIndex>) {
+                let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                assert_eq!(r.start, *ri.start());
+                assert_eq!(r.end + 1, *ri.end());
+            }
+
+            pub fn validate_range_from(r: ops::RangeFrom<DerivationIndex>) {
+                let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                assert_eq!(r.start, *ri.start());
+                assert_eq!(usize::MAX as DerivationIndex, *ri.end());
+            }
+
+            pub fn validate_range_to(r: ops::RangeTo<DerivationIndex>) {
+                let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                assert_eq!(0, *ri.start());
+                assert_eq!(r.end + 1, *ri.end());
+            }
+
+            pub fn validate_range_full(r: ops::RangeFull) {
+                let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                assert_eq!(0, *ri.start());
+                assert_eq!(usize::MAX as DerivationIndex, *ri.end());
             }
         }
     }
