@@ -371,7 +371,7 @@ impl IntoIterator for SpendingKey {
     type IntoIter = SpendingKeyIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        SpendingKeyIter::new(self)
+        SpendingKeyIter::from(self)
     }
 }
 
@@ -498,18 +498,16 @@ impl SpendingKey {
 
     pub fn into_range_iter(
         self,
-        first: common::DerivationIndex,
-        last: common::DerivationIndex,
+        range: std::ops::Range<common::DerivationIndex>,
     ) -> SpendingKeyIter {
-        SpendingKeyIter::new_range(self, first, last)
+        SpendingKeyIter::new_range(self, range)
     }
 
     pub fn into_par_range_iter(
         self,
-        first: common::DerivationIndex,
-        last: common::DerivationIndex,
+        range: std::ops::Range<common::DerivationIndex>,
     ) -> SpendingKeyParallelIter {
-        SpendingKeyParallelIter::from(SpendingKeyIter::new_range(self, first, last))
+        SpendingKeyParallelIter::from(SpendingKeyIter::new_range(self, range))
     }
 
     /// converts a result into an Option and logs a warning on any error
