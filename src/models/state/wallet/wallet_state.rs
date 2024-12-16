@@ -750,8 +750,7 @@ impl WalletState {
         KeyType::all_types().into_iter().map(move |key_type| {
             SpendingKeyIter::new_range(
                 self.wallet_secret.master_key(key_type),
-                0,
-                counters[&key_type],
+                0..counters[&key_type],
             )
         })
     }
@@ -759,8 +758,7 @@ impl WalletState {
     pub async fn known_spending_keys_by_keytype_iter(&self, key_type: KeyType) -> SpendingKeyIter {
         SpendingKeyIter::new_range(
             self.wallet_secret.master_key(key_type),
-            0,
-            self.spending_key_counter(key_type).await,
+            0..self.spending_key_counter(key_type).await,
         )
     }
 
