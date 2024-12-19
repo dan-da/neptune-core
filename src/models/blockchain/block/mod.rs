@@ -655,9 +655,13 @@ impl Block {
         //      the old mutator set accumulator to the new one.
         //   d) transaction timestamp <= block timestamp
         //   e) transaction coinbase <= miner reward, and not negative.
-        //   f) transaction is valid (internally consistent)
+        //   f) 0 <= transaction fee (also checked in block program).
 
-        // 0.a) Block height is previous plus one
+        // DO NOT add explanations to the individual steps below. *All*
+        // explanations belong in the recipe above and may not be duplicated or
+        // elaborated on below this line.
+
+        // 0.a)
         if previous_block.kernel.header.height.next() != self.kernel.header.height {
             warn!(
                 "Block height ({}) does not match previous height plus one ({})",
@@ -667,13 +671,13 @@ impl Block {
             return false;
         }
 
-        // 0.b) Block header points to previous block
+        // 0.b)
         if previous_block.hash() != self.kernel.header.prev_block_digest {
             warn!("Hash digest does not match previous digest");
             return false;
         }
 
-        // 0.c) Block mmr updated correctly
+        // 0.c)
         let mut mmra = previous_block.kernel.body.block_mmr_accumulator.clone();
         mmra.append(previous_block.hash());
         if mmra != self.kernel.body.block_mmr_accumulator {
@@ -681,8 +685,7 @@ impl Block {
             return false;
         }
 
-        // 0.d) Block timestamp is greater than (or equal to) timestamp of
-        //      previous block plus minimum block time
+        // 0.d)
         let minimum_block_time = minimum_block_time.unwrap_or(MINIMUM_BLOCK_TIME);
         if previous_block.kernel.header.timestamp + minimum_block_time
             > self.kernel.header.timestamp
@@ -699,7 +702,7 @@ impl Block {
             return false;
         }
 
-        // 0.e) Target difficulty and cumulative proof-of-work were updated correctly
+        // 0.e)
         let expected_difficulty = difficulty_control(
             self.header().timestamp,
             previous_block.header().timestamp,
@@ -727,7 +730,7 @@ impl Block {
             return false;
         }
 
-        // 0.f) Block timestamp is less than host-time (utc) + 2 hours.
+        // 0.f)
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::hours(2);
         let future_limit = now + FUTUREDATING_LIMIT;
         if self.kernel.header.timestamp >= future_limit {
@@ -738,7 +741,7 @@ impl Block {
             return false;
         }
 
-        // 1.a) Verify appendix contains required claims
+        // 1.a)
         for required_claim in BlockAppendix::consensus_claims(self.body()) {
             if !self.appendix().contains(&required_claim) {
                 warn!(
@@ -749,7 +752,7 @@ impl Block {
             }
         }
 
-        // 1.b) Block proof is valid
+        // 1.b)
         let BlockProof::SingleProof(block_proof) = &self.proof else {
             warn!("Can only verify block proofs, got {:?}", self.proof);
             return false;
@@ -759,7 +762,7 @@ impl Block {
             return false;
         }
 
-        // 1.c) Max block size is not exceeded
+        // 1.c)
         if self.size() > MAX_BLOCK_SIZE {
             warn!(
                 "Block size exceeds limit.\n\nBlock size: {} bfes\nLimit: {} bfes",
@@ -769,8 +772,7 @@ impl Block {
             return false;
         }
 
-        // 2.a) Verify validity of removal records: That their MMR MPs match the SWBF, and
-        // that at least one of their listed indices is absent.
+        // 2.a)
         for removal_record in self.kernel.body.transaction_kernel.inputs.iter() {
             if !previous_block
                 .kernel
@@ -783,7 +785,7 @@ impl Block {
             }
         }
 
-        // 2.b) Verify that the removal records do not contain duplicate `AbsoluteIndexSet`s
+        // 2.b)
         let mut absolute_index_sets = self
             .kernel
             .body
@@ -799,12 +801,7 @@ impl Block {
             return false;
         }
 
-        // 2.c) Verify that the previous block's mutator set (as presented in
-        //      in the block body), updated with
-        //       i) the previous block's guesser fees as addition records
-        //       ii) the current block's set of transaction outputs and
-        //       iii) the current block's set of transaction inputs,
-        //     gives rise to the current block's mutator set
+        // 2.c)
         let mutator_set_update = MutatorSetUpdate::new(
             self.body().transaction_kernel.inputs.clone(),
             [
@@ -829,7 +826,7 @@ impl Block {
             return false;
         }
 
-        // 2.d) verify that the transaction timestamp is less than or equal to the block's timestamp
+        // 2.d)
         if self.kernel.body.transaction_kernel.timestamp > self.kernel.header.timestamp {
             warn!(
                 "Transaction timestamp ({}) is is larger than that of block ({})",
@@ -838,8 +835,7 @@ impl Block {
             return false;
         }
 
-        // 2.e) Verify that the coinbase claimed by the transaction does not
-        //      exceed the block subsidy, or is negative.
+        // 2.e)
         let block_subsidy = Self::block_subsidy(self.kernel.header.height);
         let coinbase = self.kernel.body.transaction_kernel.coinbase;
         if let Some(coinbase) = coinbase {
@@ -857,6 +853,7 @@ impl Block {
             }
         }
 
+        // 2.f)
         let fee = self.kernel.body.transaction_kernel.fee;
         if fee.is_negative() {
             warn!("Fee may not be negative when transaction is included in block. Got fee: {fee}.");
