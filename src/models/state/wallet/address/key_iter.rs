@@ -73,17 +73,6 @@ impl SpendingKeyIter {
         }
     }
 
-    /// derives the nth child of the parent-key.
-    ///
-    /// This is different from Iterator::nth() because:
-    /// 1. that method is relative to the current iter position rather
-    ///    than the parent-key.
-    /// 2. that method iterates over all elems up to n, whereas this method
-    ///    only derives the requested key, so is much faster when index > 0.
-    pub fn derive_child(&self, index: DerivationIndex) -> SpendingKey {
-        self.parent_key.derive_child(index)
-    }
-
     // converts any type that implements `RangeBounds<DerivationIndex>` to `RangeInclusive<DerivationIndex>`
     //
     // note special handling when the range end is unbounded eg [start..]
@@ -381,7 +370,7 @@ mod tests {
                 let mut iter = helper::make_iter();
 
                 for n in 0..5 {
-                    assert_eq!(Some(iter.derive_child(n)), iter.next());
+                    assert_eq!(Some(iter.parent_key.derive_child(n)), iter.next());
                 }
             }
 
