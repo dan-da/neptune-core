@@ -224,6 +224,10 @@ impl PrimitiveWitness {
         }
     }
 
+    // note: this is used by tests and probably should be inside a #[cfg(test)]
+    // however it is called by an impl Arbitrary that is not #[cfg(test)], so leaving
+    // as-is for now.
+
     /// Generate valid output UTXOs from the amounts and seeds for the addresses
     pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
