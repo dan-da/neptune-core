@@ -50,8 +50,8 @@ use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::encrypted_utxo_notification::EncryptedUtxoNotification;
 use crate::models::state::wallet::address::KeyType;
+use crate::models::state::wallet::address::KnownSpendingKeys;
 use crate::models::state::wallet::address::ReceivingAddress;
-use crate::models::state::wallet::address::SpendingKeyIter;
 use crate::models::state::wallet::coin_with_possible_timelock::CoinWithPossibleTimeLock;
 use crate::models::state::wallet::expected_utxo::UtxoNotifier;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
@@ -218,10 +218,10 @@ pub trait RPC {
     async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
 
     /// Return all known keys, for every [KeyType]
-    async fn known_keys() -> Vec<SpendingKeyIter>;
+    async fn known_keys() -> Vec<KnownSpendingKeys>;
 
     /// Return known keys for the provided [KeyType]
-    async fn known_keys_by_keytype(key_type: KeyType) -> SpendingKeyIter;
+    async fn known_keys_by_keytype(key_type: KeyType) -> KnownSpendingKeys;
 
     /// Return the number of transactions in the mempool
     async fn mempool_tx_count() -> usize;
@@ -1035,14 +1035,14 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKeyIter> {
+    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<KnownSpendingKeys> {
         log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
             .await
             .wallet_state
-            .known_spending_keys_iter()
+            .known_spending_keys()
             .await
             .collect()
     }
@@ -1052,14 +1052,14 @@ impl RPC for NeptuneRPCServer {
         self,
         _context: tarpc::context::Context,
         key_type: KeyType,
-    ) -> SpendingKeyIter {
+    ) -> KnownSpendingKeys {
         log_slow_scope!(fn_name!());
 
         self.state
             .lock_guard()
             .await
             .wallet_state
-            .known_spending_keys_by_keytype_iter(key_type)
+            .known_spending_keys_by_keytype(key_type)
             .await
     }
 
