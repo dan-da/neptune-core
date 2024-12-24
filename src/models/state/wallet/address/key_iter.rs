@@ -230,7 +230,6 @@ pub mod par_iter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::state::wallet::symmetric_key::SymmetricKey;
 
     mod iter_tests {
         use super::*;
@@ -335,7 +334,7 @@ mod tests {
         /// tests that reverse iteration does not go past first elem in range
         #[test]
         pub fn double_ended_iterator_to_first_elem() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+            let parent_key = helper::make_parent_key();
 
             let range = 10..20;
             worker::double_ended_iterator_to_first_elem(
@@ -348,7 +347,7 @@ mod tests {
         // tests that reverse iteration can reach 0 elem, and stops after
         #[test]
         pub fn double_ended_iterator_to_zero_elem() {
-            let parent_key = SymmetricKey::from_seed(rand::random()).into();
+            let parent_key = helper::make_parent_key();
 
             let range = 0..20;
             worker::double_ended_iterator_to_first_elem(
@@ -585,6 +584,7 @@ mod tests {
 
     mod helper {
         use super::*;
+        use crate::models::state::wallet::address::KeyType;
 
         // generates a random SpendingKey.
         //
@@ -592,7 +592,7 @@ mod tests {
         // less memory than GenerationSpendingKey.  For purposes of testing iterator
         // logic, the key-type does not matter.
         pub fn make_parent_key() -> SpendingKey {
-            SymmetricKey::from_seed(rand::random()).into()
+            SpendingKey::from_seed(rand::random(), KeyType::Symmetric)
         }
 
         // generates an iterator for a random SpendingKey::SymmetricKey

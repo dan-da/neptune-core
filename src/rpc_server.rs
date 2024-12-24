@@ -1606,7 +1606,8 @@ mod rpc_server_tests {
     use crate::database::storage::storage_vec::traits::*;
     use crate::models::peer::NegativePeerSanction;
     use crate::models::peer::PeerSanction;
-    use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+    use crate::models::state::wallet::address::KeyType;
+    use crate::models::state::wallet::address::SpendingKey;
     use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
     use crate::models::state::wallet::expected_utxo::UtxoNotifier;
     use crate::models::state::wallet::WalletSecret;
@@ -2300,7 +2301,7 @@ mod rpc_server_tests {
         let network = Network::Main;
         let ctx = context::current();
         let mut rng = thread_rng();
-        let address = GenerationSpendingKey::from_seed(rng.gen()).to_address();
+        let address = SpendingKey::from_seed(rng.gen(), KeyType::Generation).to_address();
         let amount = NeptuneCoins::new(rng.gen_range(0..10));
 
         // set flag on, verify non-initiation
@@ -2316,7 +2317,7 @@ mod rpc_server_tests {
             .send(
                 ctx,
                 amount,
-                address.into(),
+                address.clone(),
                 UtxoNotificationMedium::OffChain,
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::zero()
@@ -2327,7 +2328,7 @@ mod rpc_server_tests {
             .clone()
             .send_to_many(
                 ctx,
-                vec![(address.into(), amount)],
+                vec![(address, amount)],
                 UtxoNotificationMedium::OffChain,
                 UtxoNotificationMedium::OffChain,
                 NeptuneCoins::zero()
@@ -2714,8 +2715,6 @@ mod rpc_server_tests {
 
         mod worker {
             use super::*;
-            use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
-            use crate::models::state::wallet::address::symmetric_key::SymmetricKey;
 
             // sends a tx with two outputs: one self, one external.
             //
@@ -2805,10 +2804,8 @@ mod rpc_server_tests {
                 };
 
                 // --- Setup. generate an output that our wallet cannot claim. ---
-                let external_receiving_address: ReceivingAddress = match recipient_key_type {
-                    KeyType::Generation => GenerationReceivingAddress::from_seed(rng.gen()).into(),
-                    KeyType::Symmetric => SymmetricKey::from_seed(rng.gen()).into(),
-                };
+                let external_receiving_address =
+                    SpendingKey::from_seed(rng.gen(), recipient_key_type).to_address();
                 let output1 = (external_receiving_address.clone(), NeptuneCoins::new(5));
 
                 // --- Setup. generate an output that our wallet can claim. ---
