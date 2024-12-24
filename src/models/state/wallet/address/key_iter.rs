@@ -490,7 +490,7 @@ mod tests {
             worker::iterator_all_in_range(10..=500);
             worker::iterator_all_in_range(10..500);
             worker::iterator_all_in_range(..500);
-            worker::iterator_all_in_range(usize::MAX as DerivationIndex - 500..);
+            worker::iterator_all_in_range(DerivationIndex::MAX - 500..);
         }
 
         mod worker {
@@ -537,7 +537,7 @@ mod tests {
             worker::validate_range_from(1..);
             worker::validate_range_from(0..);
             worker::validate_range_from(10..);
-            worker::validate_range_from(usize::MAX + 5..);
+            worker::validate_range_from(usize::MAX as DerivationIndex + 5..);
         }
 
         #[test]
@@ -559,12 +559,14 @@ mod tests {
             use super::*;
 
             pub fn validate_range(r: ops::Range<DerivationIndex>) {
+                println!("testing {:?}", r);
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
                 assert_eq!(r.start, *ri.start());
-                assert_eq!(r.end + 1, *ri.end());
+                assert_eq!(if r.end == 0 { 0 } else { r.end - 1 }, *ri.end());
             }
 
             pub fn validate_range_from(r: ops::RangeFrom<DerivationIndex>) {
+                println!("testing {:?}", r);
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
                 assert_eq!(r.start, *ri.start());
 
@@ -576,12 +578,14 @@ mod tests {
             }
 
             pub fn validate_range_to(r: ops::RangeTo<DerivationIndex>) {
+                println!("testing {:?}", r);
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
                 assert_eq!(0, *ri.start());
-                assert_eq!(r.end - 1, *ri.end());
+                assert_eq!(if r.end == 0 { 0 } else { r.end - 1 }, *ri.end());
             }
 
             pub fn validate_range_full(r: ops::RangeFull) {
+                println!("testing {:?}", r);
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
                 assert_eq!(0, *ri.start());
                 assert_eq!(usize::MAX as DerivationIndex, *ri.end());
