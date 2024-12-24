@@ -537,6 +537,7 @@ mod tests {
             worker::validate_range_from(1..);
             worker::validate_range_from(0..);
             worker::validate_range_from(10..);
+            worker::validate_range_from(usize::MAX + 5..);
         }
 
         #[test]
@@ -566,7 +567,12 @@ mod tests {
             pub fn validate_range_from(r: ops::RangeFrom<DerivationIndex>) {
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
                 assert_eq!(r.start, *ri.start());
-                assert_eq!(usize::MAX as DerivationIndex, *ri.end());
+
+                let end = match r.start.checked_add(usize::MAX as DerivationIndex) {
+                    Some(v) => v,
+                    None => DerivationIndex::MAX,
+                };
+                assert_eq!(end, *ri.end());
             }
 
             pub fn validate_range_to(r: ops::RangeTo<DerivationIndex>) {
