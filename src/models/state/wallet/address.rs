@@ -1,7 +1,7 @@
 mod address_type;
 mod common;
 mod key_iter;
-mod known_keys;
+mod spending_key_range;
 
 pub mod encrypted_utxo_notification;
 pub mod generation_address;
@@ -19,4 +19,4 @@ pub use address_type::SpendingKey;
 pub use common::DerivationIndex;
 pub use key_iter::*;
 /// spending keys that have been used (derived) by the wallet to date.
-pub use known_keys::KnownSpendingKeys;
+pub use spending_key_range::SpendingKeyRange;

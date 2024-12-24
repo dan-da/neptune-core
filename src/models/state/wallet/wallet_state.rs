@@ -60,7 +60,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::mempool::MempoolEvent;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::wallet::address::DerivationIndex;
-use crate::models::state::wallet::address::KnownSpendingKeys;
+use crate::models::state::wallet::address::SpendingKeyRange;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::prelude::twenty_first;
@@ -742,20 +742,25 @@ impl WalletState {
         self.known_generation_keys.iter().copied()
     }
 
-    pub async fn known_spending_keys(&self) -> impl Iterator<Item = KnownSpendingKeys> + '_ {
+    pub async fn known_spending_keys(&self) -> impl Iterator<Item = SpendingKeyRange> + '_ {
         let mut counters: HashMap<KeyType, DerivationIndex> = Default::default();
         for key_type in KeyType::all_types() {
             counters.insert(key_type, self.spending_key_counter(key_type).await);
         }
 
         KeyType::all_types().into_iter().map(move |key_type| {
-            KnownSpendingKeys::new(self.wallet_secret.master_key(key_type), counters[&key_type])
+            SpendingKeyRange::new(
+                self.wallet_secret.master_key(key_type),
+                0,
+                counters[&key_type],
+            )
         })
     }
 
-    pub async fn known_spending_keys_by_keytype(&self, key_type: KeyType) -> KnownSpendingKeys {
-        KnownSpendingKeys::new(
+    pub async fn known_spending_keys_by_keytype(&self, key_type: KeyType) -> SpendingKeyRange {
+        SpendingKeyRange::new(
             self.wallet_secret.master_key(key_type),
+            0,
             self.spending_key_counter(key_type).await,
         )
     }
