@@ -37,7 +37,8 @@ use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::blockchain::type_scripts::TypeScriptWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::address::generation_address;
+use crate::models::state::wallet::address::KeyType;
+use crate::models::state::wallet::address::SpendingKey;
 use crate::util_types::mutator_set::commit;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
@@ -153,13 +154,17 @@ impl Display for PrimitiveWitness {
 }
 
 impl PrimitiveWitness {
+    // note: this is used by tests and probably should be inside a #[cfg(test)]
+    // however it is called by an impl Arbitrary that is not #[cfg(test)], so leaving
+    // as-is for now.
     pub fn transaction_inputs_from_address_seeds_and_amounts(
+        key_type: KeyType,
         address_seeds: &[Digest],
         input_amounts: &[NeptuneCoins],
     ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
         let input_spending_keys = address_seeds
             .iter()
-            .map(|address_seed| generation_address::GenerationSpendingKey::from_seed(*address_seed))
+            .map(|address_seed| SpendingKey::from_seed(*address_seed, key_type))
             .collect_vec();
 
         let input_lock_scripts_and_witnesses = input_spending_keys
@@ -222,6 +227,7 @@ impl PrimitiveWitness {
     /// Generate valid output UTXOs from the amounts and seeds for the addresses
     pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
+        key_type: KeyType,
         address_seeds: &[Digest],
     ) -> Vec<Utxo> {
         address_seeds
@@ -229,7 +235,7 @@ impl PrimitiveWitness {
             .zip(output_amounts)
             .map(|(seed, amount)| {
                 Utxo::new(
-                    generation_address::GenerationSpendingKey::from_seed(*seed)
+                    SpendingKey::from_seed(*seed, key_type)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
@@ -469,6 +475,7 @@ impl Arbitrary for PrimitiveWitness {
 
                     let (input_utxos, input_lock_scripts_and_witnesses) =
                         Self::transaction_inputs_from_address_seeds_and_amounts(
+                            KeyType::Generation,
                             &input_address_seeds,
                             &input_amounts,
                         );
@@ -480,6 +487,7 @@ impl Arbitrary for PrimitiveWitness {
                     );
                     let output_utxos = Self::valid_tx_outputs_from_amounts_and_address_seeds(
                         &output_amounts,
+                        KeyType::Generation,
                         &output_address_seeds,
                     );
                     Self::arbitrary_primitive_witness_with(
@@ -857,6 +865,7 @@ mod test {
                             .zip_eq(input_address_seedss)
                             .map(|(input_amounts, input_address_seeds)| {
                                 Self::transaction_inputs_from_address_seeds_and_amounts(
+                                    KeyType::Generation,
                                     &input_address_seeds,
                                     input_amounts,
                                 )

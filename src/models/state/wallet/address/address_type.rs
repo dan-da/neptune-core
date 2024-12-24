@@ -396,6 +396,19 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
 }
 
 impl SpendingKey {
+    /// generates a new SpendingKey of requested `key_type` from `seed`
+    pub fn from_seed(seed: Digest, key_type: KeyType) -> Self {
+        match key_type {
+            KeyType::Generation => {
+                generation_address::GenerationSpendingKey::from_seed(seed).into()
+            }
+            KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
+        }
+    }
+
+    /// derives a child key from this key
+    ///
+    /// The first child is at index 0, and so on.
     pub fn derive_child(&self, index: common::DerivationIndex) -> SpendingKey {
         match self {
             Self::Generation(k) => k.derive_child(index).into(),
@@ -551,7 +564,7 @@ mod test {
     /// tests scanning for announced utxos with an asymmetric (generation) key
     #[proptest]
     fn scan_for_announced_utxos_generation(#[strategy(arb())] seed: Digest) {
-        worker::scan_for_announced_utxos(GenerationSpendingKey::from_seed(seed).into())
+        worker::scan_for_announced_utxos(SpendingKey::from_seed(seed, KeyType::Generation))
     }
 
     /// tests encrypting and decrypting with a symmetric key
@@ -579,8 +592,8 @@ mod test {
     #[proptest]
     fn test_keygen_sign_verify_generation(#[strategy(arb())] seed: Digest) {
         worker::test_keypair_validity(
-            GenerationSpendingKey::from_seed(seed).into(),
-            GenerationReceivingAddress::from_seed(seed).into(),
+            SpendingKey::from_seed(seed, KeyType::Generation),
+            SpendingKey::from_seed(seed, KeyType::Generation).to_address(),
         );
     }
 
