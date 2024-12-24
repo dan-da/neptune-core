@@ -393,6 +393,7 @@ mod tests {
             }
 
             // verifies that Iterator::nth() works and does not rewind the iterator
+            #[allow(clippy::iter_nth_zero)]
             pub fn iterator_nth(
                 parent_key: SpendingKey,
                 mut iter: impl Iterator<Item = SpendingKey>,
@@ -579,14 +580,14 @@ mod tests {
 
             pub fn validate_range_to(r: ops::RangeTo<DerivationIndex>) {
                 println!("testing {:?}", r);
-                let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                let ri = SpendingKeyIter::range_bounds_to_inclusive(r);
                 assert_eq!(0, *ri.start());
                 assert_eq!(if r.end == 0 { 0 } else { r.end - 1 }, *ri.end());
             }
 
             pub fn validate_range_full(r: ops::RangeFull) {
                 println!("testing {:?}", r);
-                let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
+                let ri = SpendingKeyIter::range_bounds_to_inclusive(r);
                 assert_eq!(0, *ri.start());
                 assert_eq!(usize::MAX as DerivationIndex, *ri.end());
             }
