@@ -125,6 +125,18 @@ impl GenerationSpendingKey {
         LockScriptAndWitness::hash_lock(self.unlock_key)
     }
 
+    /// creates a GenerationSpendingKey from a seed
+    ///
+    /// security:
+    ///
+    /// It is critical that the seed is generated in a random fashion or itself
+    /// derived from a randomly generated seed.  Failure to do so can result in
+    /// a loss of funds.
+    ///
+    /// perf:
+    ///
+    /// not cheap. performs several hash ops, serialization, and lattice::kem
+    /// key-generation.
     pub fn from_seed(seed: Digest) -> Self {
         let privacy_preimage =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
@@ -142,16 +154,19 @@ impl GenerationSpendingKey {
             seed: seed.to_owned(),
         };
 
-        // Sanity check that spending key's receiver address can be encoded to
-        // bech32m without loss of information.
-        let receiving_address = spending_key.to_address();
-        let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
-        let decoded_address =
-            GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
-        assert_eq!(
-            receiving_address, decoded_address,
-            "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
-        );
+        #[cfg(debug_assertions)]
+        {
+            // Sanity check that spending key's receiver address can be encoded to
+            // bech32m without loss of information.
+            let receiving_address = spending_key.to_address();
+            let encoded_address = receiving_address.to_bech32m(Network::Alpha).unwrap();
+            let decoded_address =
+                GenerationReceivingAddress::from_bech32m(&encoded_address, Network::Alpha).unwrap();
+            assert_eq!(
+                receiving_address, decoded_address,
+                "encoding/decoding from bech32m must succeed. Receiving address was: {receiving_address:#?}"
+            );
+        }
 
         spending_key
     }

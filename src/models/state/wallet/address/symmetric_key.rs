@@ -94,6 +94,16 @@ impl Zeroize for SymmetricKey {
 
 impl SymmetricKey {
     /// instantiate `SymmetricKey` from a random seed
+    ///
+    /// security:
+    ///
+    /// It is critical that the seed is generated in a random fashion or itself
+    /// derived from a randomly generated seed.  Failure to do so can result in
+    /// a loss of funds.
+    ///
+    /// perf:
+    ///
+    /// cheap. only copies the seed.
     pub fn from_seed(seed: Digest) -> Self {
         Self { seed }
     }

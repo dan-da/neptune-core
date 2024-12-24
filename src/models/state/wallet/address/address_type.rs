@@ -398,6 +398,10 @@ impl From<symmetric_key::SymmetricKey> for SpendingKey {
 
 impl SpendingKey {
     /// generates a new SpendingKey of requested `key_type` from `seed`
+    ///
+    /// perf:
+    ///   cheap for KeyType::Symmetric (only copies seed)
+    ///   not cheap for KeyType::Generation (performs several hash ops)
     pub fn from_seed(seed: Digest, key_type: KeyType) -> Self {
         match key_type {
             KeyType::Generation => {

@@ -384,6 +384,10 @@ impl PrimitiveWitness {
         }
     }
 
+    // note: this is used by tests and probably should be inside a #[cfg(test)]
+    // however it is called by an impl Arbitrary that is not #[cfg(test)], so leaving
+    // as-is for now.
+
     /// Generate valid output UTXOs from the amounts and seeds for the
     /// addresses. If some release date is supplied, generate twice as many
     /// UTXOs such that half the total amount is time-locked.
