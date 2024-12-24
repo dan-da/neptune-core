@@ -149,7 +149,7 @@ impl ReceivingAddress {
     /// returns `receiver_identifer`
     pub fn receiver_identifier(&self) -> BFieldElement {
         match self {
-            Self::Generation(a) => a.receiver_identifier,
+            Self::Generation(a) => a.receiver_identifier(),
             Self::Symmetric(a) => a.receiver_identifier(),
         }
     }
@@ -197,16 +197,16 @@ impl ReceivingAddress {
     /// returns the `spending_lock`
     pub fn spending_lock(&self) -> Digest {
         match self {
-            Self::Generation(a) => a.spending_lock,
+            Self::Generation(a) => a.spending_lock(),
             Self::Symmetric(k) => k.spending_lock(),
         }
     }
 
-    /// returns a privacy digest which corresponds to the privacy_preimage
+    /// returns a privacy digest which corresponds to the.privacy_preimage(),
     /// of the matching [SpendingKey]
     pub fn privacy_digest(&self) -> Digest {
         match self {
-            Self::Generation(a) => a.privacy_digest,
+            Self::Generation(a) => a.privacy_digest(),
             Self::Symmetric(k) => k.privacy_digest(),
         }
     }
@@ -445,7 +445,7 @@ impl SpendingKey {
     /// as the privacy_digest
     pub fn privacy_preimage(&self) -> Digest {
         match self {
-            Self::Generation(k) => k.privacy_preimage,
+            Self::Generation(k) => k.privacy_preimage(),
             Self::Symmetric(k) => k.privacy_preimage(),
         }
     }
@@ -453,7 +453,7 @@ impl SpendingKey {
     /// returns the receiver_identifier, a public fingerprint
     pub fn receiver_identifier(&self) -> BFieldElement {
         match self {
-            Self::Generation(k) => k.receiver_identifier,
+            Self::Generation(k) => k.receiver_identifier(),
             Self::Symmetric(k) => k.receiver_identifier(),
         }
     }

@@ -1547,7 +1547,7 @@ mod tests {
                 vec![ExpectedUtxo::new(
                     cb_utxo,
                     cb_sender_randomness,
-                    alice_key.privacy_preimage,
+                    alice_key.privacy_preimage(),
                     UtxoNotifier::OwnMinerComposeBlock,
                 )],
             )
@@ -1589,7 +1589,7 @@ mod tests {
             .add_expected_utxo(ExpectedUtxo::new(
                 cb_utxo,
                 cb_sender_randomness,
-                bob_spending_key.privacy_preimage,
+                bob_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             ))
             .await;
@@ -1734,7 +1734,7 @@ mod tests {
             vec![ExpectedUtxo::new(
                 block_3a_coinbase_utxo,
                 block_3a_coinbase_sender_randomness,
-                bob_spending_key.privacy_preimage,
+                bob_spending_key.privacy_preimage(),
                 UtxoNotifier::OwnMinerComposeBlock,
             )],
         )
