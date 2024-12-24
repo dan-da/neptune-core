@@ -39,11 +39,20 @@ impl From<SpendingKey> for SpendingKeyIter {
 impl SpendingKeyIter {
     /// creates a new iterator over a range of child-keys of parent-key
     ///
-    /// the range may be at most
+    /// the range length may be at most `usize::MAX`, however it can start at
+    /// any value of `DerivationIndex`.
+    ///
+    /// This limit is due to rust's iterator API. Many of its methods accept or
+    /// return `usize`.
+    ///
+    /// An unbounded range eg `[n..]` is treated as `[n..start + usize::MAX]`
+    /// and is capped to `DerivationIndex::MAX`.
     ///
     /// panics if any of these conditions are not true:
+    /// ```text
     ///   range.end >= range.start
     ///   range.end - range.start <= usize::MAX
+    /// ```
     pub fn new_range(parent_key: SpendingKey, range: impl RangeBounds<DerivationIndex>) -> Self {
         let range = Self::range_bounds_to_inclusive(range);
 
@@ -75,6 +84,10 @@ impl SpendingKeyIter {
         self.parent_key.derive_child(index)
     }
 
+    // converts any type that implements `RangeBounds<DerivationIndex>` to `RangeInclusive<DerivationIndex>`
+    //
+    // note special handling when the range end is unbounded eg [start..]
+    // The end of range will be start + usize::MAX, up to DerivationIndex::MAX.
     fn range_bounds_to_inclusive(
         range: impl RangeBounds<DerivationIndex>,
     ) -> RangeInclusive<DerivationIndex> {
@@ -85,7 +98,10 @@ impl SpendingKeyIter {
             Bound::Excluded(n) => *n + 1,
         };
         let end = match range.end_bound() {
-            Bound::Unbounded => usize::MAX as DerivationIndex,
+            Bound::Unbounded => match start.checked_add(usize::MAX as DerivationIndex) {
+                Some(v) => v,
+                None => DerivationIndex::MAX,
+            },
             Bound::Included(n) => *n,
             Bound::Excluded(n) if *n == 0 => 0,
             Bound::Excluded(n) => *n - 1,
@@ -543,9 +559,8 @@ mod tests {
 
             pub fn validate_range(r: ops::Range<DerivationIndex>) {
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
-                let end = if r.end == 0 { 0 } else { r.end - 1 };
                 assert_eq!(r.start, *ri.start());
-                assert_eq!(end, *ri.end());
+                assert_eq!(r.end + 1, *ri.end());
             }
 
             pub fn validate_range_from(r: ops::RangeFrom<DerivationIndex>) {
@@ -556,9 +571,8 @@ mod tests {
 
             pub fn validate_range_to(r: ops::RangeTo<DerivationIndex>) {
                 let ri = SpendingKeyIter::range_bounds_to_inclusive(r.clone());
-                let end = if r.end == 0 { 0 } else { r.end - 1 };
                 assert_eq!(0, *ri.start());
-                assert_eq!(end, *ri.end());
+                assert_eq!(r.end - 1, *ri.end());
             }
 
             pub fn validate_range_full(r: ops::RangeFull) {
