@@ -414,7 +414,7 @@ impl PrimitiveWitness {
                 let mut utxos = vec![liquid_utxo];
                 if let Some(release_date) = timelock_until {
                     let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::from_seed(*seed)
+                        SpendingKey::from_seed(*seed, key_type)
                             .to_address()
                             .lock_script(),
                         [
@@ -647,6 +647,7 @@ impl PrimitiveWitness {
 
                             let (input_utxos, input_lock_scripts_and_witnesses) =
                                 Self::transaction_inputs_from_address_seeds_and_amounts(
+                                    KeyType::Generation,
                                     &input_address_seeds,
                                     &input_amounts,
                                 );
@@ -1431,6 +1432,7 @@ mod test {
 
                         let (input_utxos, input_lock_scripts_and_witnesses) =
                             Self::transaction_inputs_from_address_seeds_and_amounts(
+                                KeyType::Generation,
                                 &[input_address_seed],
                                 &[total_amount],
                             );

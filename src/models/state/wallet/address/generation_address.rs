@@ -89,7 +89,7 @@ pub struct GenerationReceivingAddress {
 impl<'a> Arbitrary<'a> for GenerationReceivingAddress {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let seed = Digest::arbitrary(u)?;
-        Ok(Self::derive_from_seed(seed))
+        Ok(Self::from_seed(seed))
     }
 }
 

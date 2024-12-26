@@ -135,6 +135,7 @@ mod test {
     use crate::models::blockchain::block::TARGET_BLOCK_INTERVAL;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
     use crate::models::proof_abstractions::timestamp::Timestamp;
+    use crate::config_models::network::Network;
 
     #[traced_test]
     #[tokio::test]
@@ -182,7 +183,7 @@ mod test {
         assert!(relative_premine < 0.0198, "Premine may not exceed promise");
 
         // Designated premine is less than or equal to allocation
-        let actual_premine = Block::premine_distribution()
+        let actual_premine = Block::premine_distribution(Network::Main)
             .iter()
             .map(|(_receiving_address, amount)| *amount)
             .sum::<NeptuneCoins>();
