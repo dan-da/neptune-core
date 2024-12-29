@@ -2213,6 +2213,64 @@ mod peer_loop_tests {
 
     #[traced_test]
     #[tokio::test]
+    async fn test_peer_loop_receives_concurrent_blocks() -> Result<()> {
+        // Scenario: client receives same block twice in separate tasks, and processes both concurrently
+
+        let mut jobs = vec![];
+        for _ in 0..5 {
+            let network = Network::Main;
+            let mut rng = StdRng::seed_from_u64(5550001);
+            let (_peer_broadcast_tx, from_main_rx, to_main_tx, _to_main_rx1, state_lock, hsd) =
+                get_test_genesis_setup(network, 0).await?;
+            let peer_address = get_dummy_socket_address(0);
+            let genesis_block: Block = state_lock
+                .lock_guard()
+                .await
+                .chain
+                .archival_state()
+                .get_tip()
+                .await;
+
+            let now = genesis_block.header().timestamp + Timestamp::hours(2);
+            let block_1 = valid_block_for_tests(&state_lock, now, rng.gen(), 0.0).await;
+
+            let mock = Mock::new(vec![
+                Action::Read(PeerMessage::Block(Box::new(
+                    block_1.clone().try_into().unwrap(),
+                ))),
+                Action::Read(PeerMessage::Bye),
+            ]);
+
+            let plh = PeerLoopHandler::with_mocked_time(
+                to_main_tx.clone(),
+                state_lock.clone(),
+                peer_address,
+                hsd.clone(),
+                false,
+                1,
+                block_1.header().timestamp,
+            );
+
+            async fn run_wrapper(
+                mut plh: PeerLoopHandler,
+                mock: crate::tests::shared::Mock<crate::models::peer::PeerMessage>,
+                from_main_rx: tokio::sync::broadcast::Receiver<
+                    crate::models::channel::MainToPeerTask,
+                >,
+            ) {
+                plh.run_wrapper(mock, from_main_rx).await.unwrap()
+            }
+
+            jobs.push(run_wrapper(plh, mock, from_main_rx));
+        }
+
+        futures::future::join_all(jobs).await;
+
+        Ok(())
+    }
+
+    #[traced_test]
+    #[tokio::test]
     async fn prevent_ram_exhaustion_test() -> Result<()> {
         // In this scenario the peer sends more blocks than the client allows to store in the
         // fork-reconciliation field. This should result in abandonment of the fork-reconciliation
