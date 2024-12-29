@@ -2216,11 +2216,11 @@ mod peer_loop_tests {
     async fn test_peer_loop_receives_concurrent_blocks() -> Result<()> {
         // Scenario: client receives same block twice in separate tasks, and processes both concurrently
 
-        let mut jobs = vec![];
+        let mut tasks = vec![];
         for _ in 0..5 {
             let network = Network::Main;
             let mut rng = StdRng::seed_from_u64(5550001);
-            let (_peer_broadcast_tx, from_main_rx, to_main_tx, _to_main_rx1, state_lock, hsd) =
+            let (_peer_broadcast_tx, from_main_rx, to_main_tx, mut to_main_rx, state_lock, hsd) =
                 get_test_genesis_setup(network, 0).await?;
             let peer_address = get_dummy_socket_address(0);
             let genesis_block: Block = state_lock
@@ -2241,7 +2241,7 @@ mod peer_loop_tests {
                 Action::Read(PeerMessage::Bye),
             ]);
 
-            let plh = PeerLoopHandler::with_mocked_time(
+            let mut plh = PeerLoopHandler::with_mocked_time(
                 to_main_tx.clone(),
                 state_lock.clone(),
                 peer_address,
@@ -2251,20 +2251,18 @@ mod peer_loop_tests {
                 block_1.header().timestamp,
             );
 
-            async fn run_wrapper(
-                mut plh: PeerLoopHandler,
-                mock: crate::tests::shared::Mock<crate::models::peer::PeerMessage>,
-                from_main_rx: tokio::sync::broadcast::Receiver<
-                    crate::models::channel::MainToPeerTask,
-                >,
-            ) {
-                plh.run_wrapper(mock, from_main_rx).await.unwrap()
-            }
+            // we need to listen as if we are the main-loop, so the
+            // peer-loop doesn't get a channel closed error.
+            tokio::task::spawn(async move {
+                while let Some(msg) = to_main_rx.recv().await {
+                    debug!("received msg to main: {:?}", msg);
+                }
+            });
 
-            jobs.push(run_wrapper(plh, mock, from_main_rx));
+            tasks.push(async move { plh.run_wrapper(mock, from_main_rx).await.unwrap() });
         }
 
-        futures::future::join_all(jobs).await;
+        futures::future::join_all(tasks).await;
 
         Ok(())
     }
