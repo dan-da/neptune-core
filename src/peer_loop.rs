@@ -2220,7 +2220,7 @@ mod peer_loop_tests {
         for _ in 0..5 {
             let network = Network::Main;
             let mut rng = StdRng::seed_from_u64(5550001);
-            let (_peer_broadcast_tx, from_main_rx, to_main_tx, mut to_main_rx, state_lock, hsd) =
+            let (from_main_tx, from_main_rx, to_main_tx, mut to_main_rx, state_lock, hsd) =
                 get_test_genesis_setup(network, 0).await?;
             let peer_address = get_dummy_socket_address(0);
             let genesis_block: Block = state_lock
@@ -2259,7 +2259,10 @@ mod peer_loop_tests {
                 }
             });
 
-            tasks.push(async move { plh.run_wrapper(mock, from_main_rx).await.unwrap() });
+            tasks.push(async move {
+                plh.run_wrapper(mock, from_main_rx).await.unwrap();
+                drop(from_main_tx);
+            });
         }
 
         futures::future::join_all(tasks).await;
