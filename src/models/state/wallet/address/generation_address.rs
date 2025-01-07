@@ -22,6 +22,7 @@ use arbitrary::Arbitrary;
 use bech32::FromBase32;
 use bech32::ToBase32;
 use bech32::Variant;
+use num_traits::Zero;
 use serde_derive::Deserialize;
 use serde_derive::Serialize;
 use twenty_first::math::b_field_element::BFieldElement;
@@ -29,6 +30,7 @@ use twenty_first::math::bfield_codec::BFieldCodec;
 use twenty_first::math::lattice;
 use twenty_first::math::lattice::kem::CIPHERTEXT_SIZE_IN_BFES;
 use twenty_first::math::tip5::Digest;
+use twenty_first::math::x_field_element::XFieldElement;
 use zeroize::Zeroize;
 
 use super::common;
@@ -51,7 +53,9 @@ pub const GENERATION_FLAG: BFieldElement = BFieldElement::new(GENERATION_FLAG_U8
 // keep the serialized (including bech32m) representation small.
 #[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize)]
 pub struct GenerationSpendingKey {
-    seed: Digest,
+    secret: XFieldElement,
+
+    index: common::DerivationIndex,
 
     #[serde(skip)]
     receiver_identifier: BFieldElement,
@@ -83,7 +87,8 @@ impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
         #[derive(serde::Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
-            Seed,
+            Secret,
+            Index,
         }
 
         struct FieldVisitor;
@@ -99,33 +104,44 @@ impl<'de> serde::de::Deserialize<'de> for GenerationSpendingKey {
             where
                 V: serde::de::SeqAccess<'de>,
             {
-                let seed = seq
+                let secret = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                Ok(GenerationSpendingKey::from_seed(seed))
+                let index = seq
+                    .next_element()?
+                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+                Ok(GenerationSpendingKey::from_seed(secret, index))
             }
 
             fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
             where
                 V: serde::de::MapAccess<'de>,
             {
-                let mut seed = None;
+                let mut secret = None;
+                let mut index = None;
                 while let Some(key) = map.next_key()? {
                     match key {
-                        Field::Seed => {
-                            if seed.is_some() {
-                                return Err(serde::de::Error::duplicate_field("seed"));
+                        Field::Secret => {
+                            if secret.is_some() {
+                                return Err(serde::de::Error::duplicate_field("secret"));
                             }
-                            seed = Some(map.next_value()?);
+                            secret = Some(map.next_value()?);
+                        }
+                        Field::Index => {
+                            if index.is_some() {
+                                return Err(serde::de::Error::duplicate_field("index"));
+                            }
+                            index = Some(map.next_value()?);
                         }
                     }
                 }
-                let seed_digest = seed.ok_or_else(|| serde::de::Error::missing_field("seed"))?;
-                Ok(GenerationSpendingKey::from_seed(seed_digest))
+                let secret_val = secret.ok_or_else(|| serde::de::Error::missing_field("secret"))?;
+                let index_val = index.ok_or_else(|| serde::de::Error::missing_field("index"))?;
+                Ok(GenerationSpendingKey::from_seed(secret_val, index_val))
             }
         }
 
-        const FIELDS: &[&str] = &["seed"];
+        const FIELDS: &[&str] = &["secret", "index"];
         deserializer.deserialize_struct("GenerationSpendingKey", FIELDS, FieldVisitor)
     }
 }
@@ -141,8 +157,9 @@ pub struct GenerationReceivingAddress {
 
 impl<'a> Arbitrary<'a> for GenerationReceivingAddress {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let seed = Digest::arbitrary(u)?;
-        Ok(Self::from_seed(seed))
+        let secret = XFieldElement::arbitrary(u)?;
+        let index = common::DerivationIndex::arbitrary(u)?;
+        Ok(Self::from_seed(secret, index))
     }
 }
 
@@ -157,13 +174,15 @@ impl Zeroize for GenerationSpendingKey {
         self.decryption_key = unsafe { std::mem::zeroed() };
         self.privacy_preimage = Default::default();
         self.unlock_key = Default::default();
-        self.seed = Default::default();
+        self.secret = XFieldElement::zero();
+        self.index = Default::default();
     }
 }
 
 impl GenerationSpendingKey {
     pub fn to_address(&self) -> GenerationReceivingAddress {
-        let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&self.seed).unwrap());
+        let seed = Self::seed(self.secret, self.index);
+        let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&[seed]).unwrap());
         let (_sk, pk) = lattice::kem::keygen(randomness);
         let privacy_digest = self.privacy_preimage.hash();
         GenerationReceivingAddress {
@@ -190,7 +209,9 @@ impl GenerationSpendingKey {
     ///
     /// not cheap. performs several hash ops, serialization, and lattice::kem
     /// key-generation.
-    pub fn from_seed(seed: Digest) -> Self {
+    pub fn from_seed(secret: XFieldElement, index: common::DerivationIndex) -> Self {
+        let seed = Self::seed(secret, index);
+
         let privacy_preimage =
             Hash::hash_varlen(&[seed.values().to_vec(), vec![BFieldElement::new(0)]].concat());
         let unlock_key =
@@ -204,7 +225,8 @@ impl GenerationSpendingKey {
             decryption_key: sk,
             privacy_preimage,
             unlock_key,
-            seed: seed.to_owned(),
+            secret,
+            index,
         };
 
         #[cfg(debug_assertions)]
@@ -224,12 +246,15 @@ impl GenerationSpendingKey {
         spending_key
     }
 
+    fn seed(secret: XFieldElement, index: common::DerivationIndex) -> Digest {
+        Hash::hash_varlen(&[secret.encode(), GENERATION_FLAG.encode(), index.encode()].concat())
+    }
+
     /// derives a child-key at index
     ///
     /// note that index 0 is the first child.
     pub fn derive_child(&self, index: common::DerivationIndex) -> Self {
-        let child_seed = Hash::hash_varlen(&[self.seed.0.encode(), index.encode()].concat());
-        Self::from_seed(child_seed)
+        Self::from_seed(self.secret, self.index + 1 + index)
     }
 
     /// Decrypt a Generation Address ciphertext
@@ -283,22 +308,11 @@ impl GenerationSpendingKey {
 
 impl GenerationReceivingAddress {
     pub fn from_spending_key(spending_key: &GenerationSpendingKey) -> Self {
-        let seed = spending_key.seed;
-        let receiver_identifier = common::derive_receiver_id(seed);
-        let randomness: [u8; 32] = common::shake256::<32>(&bincode::serialize(&seed).unwrap());
-        let (_sk, pk) = lattice::kem::keygen(randomness);
-        let privacy_digest = spending_key.privacy_preimage.hash();
-        Self {
-            receiver_identifier,
-            encryption_key: pk,
-            privacy_digest,
-            spending_lock: spending_key.generate_spending_lock(),
-        }
+        spending_key.to_address()
     }
 
-    pub fn from_seed(seed: Digest) -> Self {
-        let spending_key = GenerationSpendingKey::from_seed(seed);
-        Self::from_spending_key(&spending_key)
+    pub fn from_seed(secret: XFieldElement, index: common::DerivationIndex) -> Self {
+        GenerationSpendingKey::from_seed(secret, index).to_address()
     }
 
     /// Determine whether the given witness unlocks the lock defined by this receiving
@@ -468,7 +482,7 @@ mod test {
             // note: bincode uses sequential access pattern when deserializing.
             #[test]
             pub fn roundtrip_bincode() {
-                let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+                let spending_key = GenerationSpendingKey::from_seed(rand::random(), rand::random());
 
                 let s = bincode::serialize(&spending_key).unwrap();
                 let deserialized_key: GenerationSpendingKey = bincode::deserialize(&s).unwrap();
@@ -479,7 +493,7 @@ mod test {
             // note serde_json uses map access pattern when deserializing.
             #[test]
             pub fn roundtrip_json() {
-                let spending_key = GenerationSpendingKey::derive_from_seed(rand::random());
+                let spending_key = GenerationSpendingKey::from_seed(rand::random(), rand::random());
 
                 let s = serde_json::to_string(&spending_key).unwrap();
                 let deserialized_key: GenerationSpendingKey = serde_json::from_str(&s).unwrap();

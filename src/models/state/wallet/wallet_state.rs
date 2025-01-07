@@ -1967,7 +1967,10 @@ mod tests {
 
                 // generate an output that our wallet cannot claim.
                 let outputs = vec![(
-                    ReceivingAddress::from(GenerationReceivingAddress::from_seed(rng.gen())),
+                    ReceivingAddress::from(GenerationReceivingAddress::from_seed(
+                        rng.gen(),
+                        rng.gen(),
+                    )),
                     send_amt,
                 )];
 

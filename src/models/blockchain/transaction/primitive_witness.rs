@@ -26,12 +26,13 @@ use super::utxo::Utxo;
 use super::TransactionDetails;
 use crate::models::blockchain::type_scripts::known_type_scripts::match_type_script_and_generate_witness;
 use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-use crate::models::blockchain::type_scripts::time_lock::TimeLock;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
+#[cfg(test)]
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::state::wallet::address::generation_address;
+#[cfg(test)]
+use crate::models::state::wallet::address::DerivationIndex;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
@@ -341,21 +342,25 @@ impl PrimitiveWitness {
     /// Generate valid output UTXOs from the amounts and seeds for the
     /// addresses. If some release date is supplied, generate twice as many
     /// UTXOs such that half the total amount is time-locked.
+    #[cfg(test)]
     pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
-        address_seeds: &[Digest],
+        address_seeds: &[(XFieldElement, DerivationIndex)],
         timelock_until: Option<Timestamp>,
     ) -> Vec<Utxo> {
+        use crate::models::blockchain::type_scripts::time_lock::TimeLock;
+        use crate::models::state::wallet::address::generation_address;
+
         address_seeds
             .iter()
             .zip(output_amounts)
-            .flat_map(|(seed, amount)| {
+            .flat_map(|((secret, index), amount)| {
                 let mut amount = *amount;
                 if timelock_until.is_some() {
                     amount.div_two();
                 }
                 let liquid_utxo = Utxo::new(
-                    generation_address::GenerationSpendingKey::from_seed(*seed)
+                    generation_address::GenerationSpendingKey::from_seed(*secret, *index)
                         .to_address()
                         .lock_script(),
                     amount.to_native_coins(),
@@ -363,7 +368,7 @@ impl PrimitiveWitness {
                 let mut utxos = vec![liquid_utxo];
                 if let Some(release_date) = timelock_until {
                     let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::from_seed(*seed)
+                        generation_address::GenerationSpendingKey::from_seed(*secret, *index)
                             .to_address()
                             .lock_script(),
                         [
@@ -534,6 +539,7 @@ pub mod neptune_arbitrary {
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
+    use crate::models::state::wallet::address::generation_address;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
@@ -583,9 +589,9 @@ pub mod neptune_arbitrary {
             //  - timestamp
             (
                 NeptuneCoins::arbitrary_non_negative(),
-                vec(arb::<Digest>(), num_inputs),
+                vec(arb::<(XFieldElement, DerivationIndex)>(), num_inputs),
                 vec(arb::<u64>(), num_inputs),
-                vec(arb::<Digest>(), num_outputs),
+                vec(arb::<(XFieldElement, DerivationIndex)>(), num_outputs),
                 vec(arb::<u64>(), num_outputs),
                 vec(arb::<PublicAnnouncement>(), num_public_announcements),
                 arb::<u64>(),
@@ -900,13 +906,13 @@ pub mod neptune_arbitrary {
 
         // this is only used by arbitrary-impls
         pub(crate) fn transaction_inputs_from_address_seeds_and_amounts(
-            address_seeds: &[Digest],
+            address_seeds: &[(XFieldElement, DerivationIndex)],
             input_amounts: &[NeptuneCoins],
         ) -> (Vec<Utxo>, Vec<LockScriptAndWitness>) {
             let input_spending_keys = address_seeds
                 .iter()
-                .map(|address_seed| {
-                    generation_address::GenerationSpendingKey::from_seed(*address_seed)
+                .map(|(secret, index)| {
+                    generation_address::GenerationSpendingKey::from_seed(*secret, *index)
                 })
                 .collect_vec();
 
@@ -1020,6 +1026,9 @@ mod test {
                 assert!(index < N);
             }
 
+            let nested_vec_strategy_seeds = |counts: [usize; N]| {
+                counts.map(|count| vec(arb::<(XFieldElement, DerivationIndex)>(), count))
+            };
             let nested_vec_strategy_digests =
                 |counts: [usize; N]| counts.map(|count| vec(arb::<Digest>(), count));
             let nested_vec_strategy_pubann =
@@ -1037,7 +1046,7 @@ mod test {
             (
                 (
                     nested_vec_strategy_amounts(input_counts),
-                    nested_vec_strategy_digests(input_counts),
+                    nested_vec_strategy_seeds(input_counts),
                     nested_vec_strategy_utxos(output_counts),
                     nested_vec_strategy_pubann(announcement_counts),
                     vec(NeptuneCoins::arbitrary_non_negative(), N),
@@ -1449,7 +1458,7 @@ mod test {
 
             (
                 total_amount_strategy,
-                arb::<Digest>(),
+                arb::<(XFieldElement, DerivationIndex)>(),
                 vec(arb::<Digest>(), num_outputs),
                 arb::<Timestamp>(),
                 NeptuneCoins::arbitrary_non_negative(),

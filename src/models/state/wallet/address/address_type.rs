@@ -404,9 +404,7 @@ impl SpendingKey {
     ///   not cheap for KeyType::Generation (performs several hash ops)
     pub fn from_seed(seed: Digest, key_type: KeyType) -> Self {
         match key_type {
-            KeyType::Generation => {
-                generation_address::GenerationSpendingKey::from_seed(seed).into()
-            }
+            KeyType::Generation => unimplemented!(),
             KeyType::Symmetric => symmetric_key::SymmetricKey::from_seed(seed).into(),
         }
     }
@@ -558,6 +556,7 @@ mod test {
 
     use super::*;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
+    use crate::models::state::XFieldElement;
     use crate::tests::shared::make_mock_transaction;
 
     /// tests scanning for announced utxos with a symmetric key
@@ -580,8 +579,11 @@ mod test {
 
     /// tests encrypting and decrypting with an asymmetric (generation) key
     #[proptest]
-    fn test_encrypt_decrypt_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_encrypt_decrypt(GenerationSpendingKey::from_seed(seed).into())
+    fn test_encrypt_decrypt_generation(
+        #[strategy(arb())] secret: XFieldElement,
+        index: common::DerivationIndex,
+    ) {
+        worker::test_encrypt_decrypt(GenerationSpendingKey::from_seed(secret, index).into())
     }
 
     /// tests keygen, sign, and verify with a symmetric key
@@ -610,8 +612,13 @@ mod test {
 
     /// tests bech32m serialize, deserialize with an asymmetric (generation) key
     #[proptest]
-    fn test_bech32m_conversion_generation(#[strategy(arb())] seed: Digest) {
-        worker::test_bech32m_conversion(GenerationReceivingAddress::from_seed(seed).into());
+    fn test_bech32m_conversion_generation(
+        #[strategy(arb())] secret: XFieldElement,
+        index: common::DerivationIndex,
+    ) {
+        worker::test_bech32m_conversion(
+            GenerationReceivingAddress::from_seed(secret, index).into(),
+        );
     }
 
     mod worker {

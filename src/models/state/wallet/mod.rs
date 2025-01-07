@@ -200,14 +200,8 @@ impl WalletSecret {
     fn gen_master_generation_key(
         secret_seed: SecretKeyMaterial,
     ) -> generation_address::GenerationSpendingKey {
-        let key_seed = Hash::hash_varlen(
-            &[
-                secret_seed.0.encode(),
-                generation_address::GENERATION_FLAG.encode(),
-            ]
-            .concat(),
-        );
-        generation_address::GenerationSpendingKey::from_seed(key_seed)
+        // master is also the 0th derived key.
+        generation_address::GenerationSpendingKey::from_seed(secret_seed.0, 0)
     }
 
     fn gen_master_symmetric_key(secret_seed: SecretKeyMaterial) -> symmetric_key::SymmetricKey {
@@ -233,7 +227,11 @@ impl WalletSecret {
 
     /// Get the nth derived spending key of a given type.
     pub fn nth_spending_key(&mut self, key_type: KeyType, index: DerivationIndex) -> SpendingKey {
-        self.master_key(key_type).derive_child(index)
+        let master_key = self.master_key(key_type);
+        match key_type {
+            KeyType::Generation if index == 0 => master_key,
+            _ => master_key.derive_child(index),
+        }
     }
 
     /// derives a generation spending key at `index`
@@ -1572,7 +1570,7 @@ mod wallet_tests {
             );
 
             for (index, key) in known_keys {
-                assert_eq!(devnet_wallet.nth_generation_spending_key_worker(index), key);
+                assert_eq!(devnet_wallet.nth_generation_spending_key(index), key);
             }
         }
 
@@ -1599,7 +1597,7 @@ mod wallet_tests {
             for (index, known_addr) in known_addrs {
                 println!("index: {}", index);
                 let derived_addr = devnet_wallet
-                    .nth_generation_spending_key_worker(index)
+                    .nth_generation_spending_key(index)
                     .to_address()
                     .to_bech32m(network)
                     .unwrap();
@@ -1626,7 +1624,7 @@ mod wallet_tests {
 
             let addrs = indexes
                 .into_iter()
-                .map(|i| (i, devnet_wallet.nth_generation_spending_key_worker(i)))
+                .map(|i| (i, devnet_wallet.nth_generation_spending_key(i)))
                 .collect_vec();
 
             println!("{}", serde_json::to_string(&addrs).unwrap());
@@ -1658,7 +1656,7 @@ mod wallet_tests {
                     (
                         i,
                         devnet_wallet
-                            .nth_generation_spending_key_worker(i)
+                            .nth_generation_spending_key(i)
                             .to_address()
                             .to_bech32m(network)
                             .unwrap(),
@@ -1673,7 +1671,7 @@ mod wallet_tests {
             use super::*;
 
             // provides the set of indexes to derive keys at
-            pub fn known_key_indexes() -> [u64; 13] {
+            pub fn known_key_indexes() -> [DerivationIndex; 13] {
                 [
                     0,
                     1,
@@ -1686,14 +1684,14 @@ mod wallet_tests {
                     1024,
                     2048,
                     4096,
-                    (u16::MAX / 2) as u64,
-                    u16::MAX as u64,
+                    (u16::MAX / 2) as DerivationIndex,
+                    u16::MAX as DerivationIndex,
                 ]
             }
 
             // returns a vec of hard-coded bech32m addrs that were generated from alphanet branch,
             // note: Network::Main
-            pub fn known_addrs() -> Vec<(u64, String)> {
+            pub fn known_addrs() -> Vec<(DerivationIndex, String)> {
                 serde_json::from_str(json_serialized_known_addrs()).unwrap()
             }
 
@@ -1706,7 +1704,8 @@ mod wallet_tests {
             }
 
             // returns a vec of hard-coded keys that were generated from alphanet branch.
-            pub fn known_keys() -> Vec<(u64, generation_address::GenerationSpendingKey)> {
+            pub fn known_keys() -> Vec<(DerivationIndex, generation_address::GenerationSpendingKey)>
+            {
                 serde_json::from_str(json_serialized_known_keys()).unwrap()
             }
 
