@@ -227,10 +227,9 @@ impl WalletSecret {
 
     /// Get the nth derived spending key of a given type.
     pub fn nth_spending_key(&mut self, key_type: KeyType, index: DerivationIndex) -> SpendingKey {
-        let master_key = self.master_key(key_type);
         match key_type {
-            KeyType::Generation if index == 0 => master_key,
-            _ => master_key.derive_child(index),
+            KeyType::Generation => self.nth_generation_spending_key(index).into(),
+            KeyType::Symmetric => self.nth_symmetric_key(index).into(),
         }
     }
 
@@ -244,7 +243,10 @@ impl WalletSecret {
         &self,
         index: DerivationIndex,
     ) -> generation_address::GenerationSpendingKey {
-        self.master_generation_key.derive_child(index)
+        match index {
+            0 => self.master_generation_key,
+            _ => self.master_generation_key.derive_child(index-1),
+        }
     }
 
     /// derives a symmetric key at `index`

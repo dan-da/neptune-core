@@ -247,7 +247,13 @@ impl GenerationSpendingKey {
     }
 
     fn seed(secret: XFieldElement, index: common::DerivationIndex) -> Digest {
-        Hash::hash_varlen(&[secret.encode(), GENERATION_FLAG.encode(), index.encode()].concat())
+        Hash::hash_varlen(
+            &[
+                secret.encode(),
+                vec![GENERATION_FLAG, BFieldElement::new(index)],
+            ]
+            .concat(),
+        )
     }
 
     /// derives a child-key at index

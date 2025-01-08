@@ -530,7 +530,7 @@ mod tests {
             worker::validate_range_from(1..);
             worker::validate_range_from(0..);
             worker::validate_range_from(10..);
-            worker::validate_range_from(usize::MAX as DerivationIndex + 5..);
+            worker::validate_range_from(usize::MAX as DerivationIndex..);
         }
 
         #[test]
