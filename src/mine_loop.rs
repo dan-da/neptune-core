@@ -171,6 +171,7 @@ fn guess_worker(
     // see:  https://docs.rs/rayon/latest/rayon/fn.max_num_threads.html
     let block_header_template = block.header().to_owned();
     let (block_body_mast_hash_digest, appendix_digest) = precalculate_mast_leafs(&block);
+    let started = std::time::Instant::now();
     let guess_result = rayon::iter::repeat(0)
         .map_init(
             || {
@@ -180,7 +181,7 @@ fn guess_worker(
                     rand::thread_rng(),
                 )
             },
-            |(prev_header, block_header_templ, rng), _x| {
+            |(prev_header, block_header_templ, rng), x| {
                 guess_nonce_iteration(
                     block_body_mast_hash_digest,
                     appendix_digest,
@@ -193,13 +194,15 @@ fn guess_worker(
                     },
                     sleepy_guessing,
                     rng,
+                    x
                 )
             },
         )
         .find_any(|r| !r.block_not_found())
         .unwrap();
+    let elapsed = started.elapsed();
 
-    let (nonce_preimage, timestamp, difficulty) = match guess_result {
+    let (nonce_preimage, timestamp, difficulty, iteration) = match guess_result {
         GuessNonceResult::Cancelled => {
             info!(
                 "Abandoning mining of current block with height {}",
@@ -211,12 +214,16 @@ fn guess_worker(
             nonce_preimage,
             timestamp,
             difficulty,
-        } => (nonce_preimage, timestamp, difficulty),
+            iteration,
+        } => (nonce_preimage, timestamp, difficulty, iteration),
         _ => unreachable!(),
     };
 
+    let iters_per_sec = iteration / elapsed.as_secs() as u128;
+
     let nonce = nonce_preimage.hash();
     info!("Found valid block with nonce: ({nonce}).");
+    info!("Guesses per second: {}", iters_per_sec);
 
     block.set_header_nonce(nonce);
     block.set_header_timestamp_and_difficulty(timestamp, difficulty);
@@ -269,6 +276,7 @@ enum GuessNonceResult {
         nonce_preimage: Digest,
         timestamp: Timestamp,
         difficulty: Difficulty,
+        iteration: u128,
     },
     BlockNotFound,
 }
@@ -295,6 +303,7 @@ fn guess_nonce_iteration(
     difficulty_info: DifficultyInfo,
     sleepy_guessing: bool,
     rng: &mut rand::rngs::ThreadRng,
+    iteration: u128,
 ) -> GuessNonceResult {
     if sender.is_canceled() {
         info!(
@@ -343,6 +352,7 @@ fn guess_nonce_iteration(
             nonce_preimage,
             timestamp: block_header_template.timestamp,
             difficulty: block_header_template.difficulty,
+            iteration,
         },
     }
 }
