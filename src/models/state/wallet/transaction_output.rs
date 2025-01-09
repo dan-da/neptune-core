@@ -369,9 +369,10 @@ mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
     use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
-    use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
     use crate::models::state::wallet::address::KeyType;
+    use crate::models::state::wallet::address::KeyTypeSeed;
     use crate::models::state::wallet::WalletSecret;
+    use crate::models::state::SpendingKey;
     use crate::tests::shared::mock_genesis_global_state;
 
     #[tokio::test]
@@ -389,7 +390,11 @@ mod tests {
 
         // generate a new receiving address that is not from our wallet.
         let mut rng = rand::thread_rng();
-        let address = GenerationReceivingAddress::from_seed(rng.gen(), rng.gen());
+        let address = SpendingKey::from_seed(KeyTypeSeed::Generation {
+            secret: rng.gen(),
+            index: rng.gen(),
+        })
+        .to_address();
 
         let amount = NeptuneCoins::one();
         let utxo = Utxo::new_native_currency(address.lock_script(), amount);
@@ -405,7 +410,7 @@ mod tests {
         ] {
             let tx_output = TxOutput::auto(
                 &state.wallet_state,
-                address.into(),
+                address.clone(),
                 amount,
                 sender_randomness,
                 owned_utxo_notification_medium, // how to notify utxos sent to myself.

@@ -1894,7 +1894,6 @@ mod tests {
     }
 
     mod wallet_balance {
-        use generation_address::GenerationReceivingAddress;
         use rand::rngs::StdRng;
         use rand::SeedableRng;
 
@@ -1903,7 +1902,7 @@ mod tests {
         use crate::job_queue::triton_vm::TritonVmJobQueue;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::state::tx_proving_capability::TxProvingCapability;
-        use crate::models::state::wallet::address::ReceivingAddress;
+        use crate::models::state::wallet::address::KeyTypeSeed;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationMedium;
         use crate::models::state::TransactionOrigin;
         use crate::tests::shared::mine_block_to_wallet_invalid_block_proof;
@@ -1967,10 +1966,11 @@ mod tests {
 
                 // generate an output that our wallet cannot claim.
                 let outputs = vec![(
-                    ReceivingAddress::from(GenerationReceivingAddress::from_seed(
-                        rng.gen(),
-                        rng.gen(),
-                    )),
+                    SpendingKey::from_seed(KeyTypeSeed::Generation {
+                        secret: rng.gen(),
+                        index: rng.gen(),
+                    })
+                    .to_address(),
                     send_amt,
                 )];
 

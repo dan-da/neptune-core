@@ -29,9 +29,9 @@ use crate::models::blockchain::type_scripts::neptune_coins::NeptuneCoins;
 use crate::models::blockchain::type_scripts::TypeScript;
 use crate::models::blockchain::type_scripts::TypeScriptAndWitness;
 use crate::models::proof_abstractions::mast_hash::MastHash;
-#[cfg(test)]
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use crate::models::proof_abstractions::timestamp::Timestamp;
-#[cfg(test)]
+#[cfg(any(test, feature = "arbitrary-impls"))]
 use crate::models::state::wallet::address::DerivationIndex;
 use crate::models::state::wallet::unlocked_utxo::UnlockedUtxo;
 use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
@@ -342,7 +342,7 @@ impl PrimitiveWitness {
     /// Generate valid output UTXOs from the amounts and seeds for the
     /// addresses. If some release date is supplied, generate twice as many
     /// UTXOs such that half the total amount is time-locked.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "arbitrary-impls"))]
     pub fn valid_tx_outputs_from_amounts_and_address_seeds(
         output_amounts: &[NeptuneCoins],
         address_seeds: &[(XFieldElement, DerivationIndex)],
@@ -360,17 +360,21 @@ impl PrimitiveWitness {
                     amount.div_two();
                 }
                 let liquid_utxo = Utxo::new(
-                    generation_address::GenerationSpendingKey::from_seed(*secret, *index)
-                        .to_address()
-                        .lock_script(),
+                    generation_address::GenerationSpendingKey::from_secret_and_index(
+                        *secret, *index,
+                    )
+                    .to_address()
+                    .lock_script(),
                     amount.to_native_coins(),
                 );
                 let mut utxos = vec![liquid_utxo];
                 if let Some(release_date) = timelock_until {
                     let timelocked_utxo = Utxo::new(
-                        generation_address::GenerationSpendingKey::from_seed(*secret, *index)
-                            .to_address()
-                            .lock_script(),
+                        generation_address::GenerationSpendingKey::from_secret_and_index(
+                            *secret, *index,
+                        )
+                        .to_address()
+                        .lock_script(),
                         [
                             amount.to_native_coins(),
                             vec![TimeLock::until(release_date)],
@@ -539,7 +543,9 @@ pub mod neptune_arbitrary {
     use crate::models::blockchain::type_scripts::native_currency::NativeCurrencyWitness;
     use crate::models::blockchain::type_scripts::time_lock::TimeLockWitness;
     use crate::models::blockchain::type_scripts::TypeScriptWitness;
+    use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::models::state::wallet::address::generation_address;
+    use crate::models::state::wallet::address::DerivationIndex;
     use crate::util_types::mutator_set::commit;
     use crate::util_types::mutator_set::msa_and_records::MsaAndRecords;
 
@@ -912,7 +918,9 @@ pub mod neptune_arbitrary {
             let input_spending_keys = address_seeds
                 .iter()
                 .map(|(secret, index)| {
-                    generation_address::GenerationSpendingKey::from_seed(*secret, *index)
+                    generation_address::GenerationSpendingKey::from_secret_and_index(
+                        *secret, *index,
+                    )
                 })
                 .collect_vec();
 

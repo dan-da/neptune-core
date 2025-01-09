@@ -201,7 +201,7 @@ impl WalletSecret {
         secret_seed: SecretKeyMaterial,
     ) -> generation_address::GenerationSpendingKey {
         // master is also the 0th derived key.
-        generation_address::GenerationSpendingKey::from_seed(secret_seed.0, 0)
+        generation_address::GenerationSpendingKey::from_secret_and_index(secret_seed.0, 0)
     }
 
     fn gen_master_symmetric_key(secret_seed: SecretKeyMaterial) -> symmetric_key::SymmetricKey {
@@ -245,7 +245,7 @@ impl WalletSecret {
     ) -> generation_address::GenerationSpendingKey {
         match index {
             0 => self.master_generation_key,
-            _ => self.master_generation_key.derive_child(index-1),
+            _ => self.master_generation_key.derive_child(index - 1),
         }
     }
 
@@ -270,7 +270,7 @@ impl WalletSecret {
         &self,
         counter: u64,
     ) -> generation_address::GenerationSpendingKey {
-        self.nth_generation_spending_key(counter.into())
+        self.nth_generation_spending_key(counter)
     }
 
     // note: legacy tests were written to call nth_symmetric_key()
@@ -281,7 +281,7 @@ impl WalletSecret {
     // [wallet_state::WalletState::next_unused_symmetric_key()] should be used
     #[cfg(test)]
     pub fn nth_symmetric_key_for_tests(&self, counter: u64) -> symmetric_key::SymmetricKey {
-        self.nth_symmetric_key(counter.into())
+        self.nth_symmetric_key(counter)
     }
 
     /// Return a deterministic seed that can be used to seed an RNG
