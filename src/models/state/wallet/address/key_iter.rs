@@ -589,6 +589,7 @@ mod tests {
     mod helper {
         use super::*;
         use crate::models::state::wallet::address::KeyType;
+        use crate::models::state::wallet::address::KeyTypeSeed;
 
         // generates a random SpendingKey.
         //
@@ -596,7 +597,7 @@ mod tests {
         // less memory than GenerationSpendingKey.  For purposes of testing iterator
         // logic, the key-type does not matter.
         pub fn make_parent_key() -> SpendingKey {
-            SpendingKey::from_seed(rand::random(), KeyType::Symmetric)
+            SpendingKey::from_seed(KeyTypeSeed::random(KeyType::Symmetric))
         }
 
         // generates an iterator for a random SpendingKey::SymmetricKey
