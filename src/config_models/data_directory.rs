@@ -19,6 +19,7 @@ use crate::models::state::wallet::WALLET_DIRECTORY;
 use crate::models::state::wallet::WALLET_OUTPUT_COUNT_DB_NAME;
 
 const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
+const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
 #[derive(Debug, Clone)]
@@ -78,6 +79,13 @@ impl DataDirectory {
     /// The root data directory path
     pub fn root_dir_path(&self) -> PathBuf {
         self.data_dir.clone()
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    ///
+    /// The wallet file path
+    pub fn rpc_cookie_file_path(&self) -> PathBuf {
+        self.data_dir.join(Path::new(RPC_COOKIE_FILE_NAME))
     }
 
     /// The block database directory path

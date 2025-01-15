@@ -120,7 +120,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     info!("Got archival block MMR");
 
     let archival_state = ArchivalState::new(
-        data_dir,
+        data_dir.clone(),
         block_index_db,
         archival_mutator_set,
         archival_block_mmr,
@@ -174,6 +174,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         blockchain_state,
         networking_state,
         cli_args,
+        data_dir,
         mempool,
     );
     let own_handshake_data: HandshakeData = global_state_lock
