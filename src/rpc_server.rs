@@ -64,6 +64,8 @@ use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
 
+pub type RpcResult<T> = Result<T, error::RpcError>;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DashBoardOverviewDataFromClient {
     pub tip_digest: Digest,
@@ -168,7 +170,7 @@ pub trait RPC {
     /// Return the node's instance-ID which is a globally unique random generated number
     /// set at startup used to ensure that the node does not connect to itself, or the
     /// same peer twice.
-    async fn own_instance_id(token: rpc_auth::Token) -> Result<InstanceId, String>;
+    async fn own_instance_id(token: rpc_auth::Token) -> RpcResult<InstanceId>;
 
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
@@ -766,10 +768,10 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn own_instance_id(self, _context: context::Context, token: rpc_auth::Token) -> Result<InstanceId, String> {
+    async fn own_instance_id(self, _context: context::Context, token: rpc_auth::Token) -> RpcResult<InstanceId> {
         log_slow_scope!(fn_name!());
 
-        token.auth(&self.cookie).map_err(|e| e.to_string())?;
+        token.auth(&self.cookie)?;
 
         Ok(self.state.lock_guard().await.net.instance_id)
     }
@@ -1601,6 +1603,21 @@ impl RPC for NeptuneRPCServer {
 
         mempool_transactions
     }
+}
+
+pub mod error {
+    use super::*;
+
+    /// enumerates possible rpc api errors
+    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+    #[non_exhaustive]
+    pub enum RpcError {
+        #[error(transparent)]
+        Auth(#[from] rpc_auth::error::AuthError),
+
+        // 0 or more API specific error variants.
+    }
+
 }
 
 #[cfg(test)]
