@@ -72,10 +72,7 @@ async fn main() {
         DataDirectory::get(args.data_dir.clone(), network).expect("should find data directory");
     let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory) {
         Ok(t) => t,
-        Err(e) => panic!(
-            "Unable to load RPC authentication token. error = {}",
-            e.to_string()
-        ),
+        Err(e) => panic!("Unable to load RPC authentication token. error = {}", e),
     }
     .into();
 

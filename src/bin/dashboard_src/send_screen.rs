@@ -88,6 +88,7 @@ impl SendScreen {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn check_and_pay_sequence(
         rpc_client: Arc<RPCClient>,
         token: rpc_auth::Token,
