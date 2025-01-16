@@ -161,11 +161,11 @@ pub trait RPC {
     /******** READ DATA ********/
     // Place all methods that only read here
     // Return which network the client is running
-    async fn network() -> Network;
+    async fn network(token: rpc_auth::Token) -> RpcResult<Network>;
 
     /// Returns local socket used for incoming peer-connections. Does not show
     /// the public IP address, as the client does not know this.
-    async fn own_listen_address_for_peers() -> Option<SocketAddr>;
+    async fn own_listen_address_for_peers(token: rpc_auth::Token) -> RpcResult<Option<SocketAddr>>;
 
     /// Return the node's instance-ID which is a globally unique random generated number
     /// set at startup used to ensure that the node does not connect to itself, or the
@@ -173,89 +173,126 @@ pub trait RPC {
     async fn own_instance_id(token: rpc_auth::Token) -> RpcResult<InstanceId>;
 
     /// Returns the current block height.
-    async fn block_height() -> BlockHeight;
+    async fn block_height(token: rpc_auth::Token) -> RpcResult<BlockHeight>;
 
     /// Returns the number of blocks (confirmations) since wallet balance last changed.
     ///
     /// returns `Option<BlockHeight>`
     ///
     /// return value will be None if wallet has not received any incoming funds.
-    async fn confirmations() -> Option<BlockHeight>;
+    async fn confirmations(token: rpc_auth::Token) -> RpcResult<Option<BlockHeight>>;
 
     /// Returns info about the peers we are connected to
-    async fn peer_info() -> Vec<PeerInfo>;
+    async fn peer_info(token: rpc_auth::Token) -> RpcResult<Vec<PeerInfo>>;
 
     /// Return info about all peers that have been negatively sanctioned.
-    async fn all_punished_peers() -> HashMap<IpAddr, PeerStanding>;
+    async fn all_punished_peers(token: rpc_auth::Token)
+        -> RpcResult<HashMap<IpAddr, PeerStanding>>;
 
     /// Returns the digest of the latest n blocks
-    async fn latest_tip_digests(n: usize) -> Vec<Digest>;
+    async fn latest_tip_digests(token: rpc_auth::Token, n: usize) -> RpcResult<Vec<Digest>>;
 
     /// Returns information about the specified block if found
-    async fn block_info(block_selector: BlockSelector) -> Option<BlockInfo>;
+    async fn block_info(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<BlockInfo>>;
 
     /// Return the digests of known blocks with specified height.
-    async fn block_digests_by_height(height: BlockHeight) -> Vec<Digest>;
+    async fn block_digests_by_height(
+        token: rpc_auth::Token,
+        height: BlockHeight,
+    ) -> RpcResult<Vec<Digest>>;
 
     /// Return the digest for the specified block if found
-    async fn block_digest(block_selector: BlockSelector) -> Option<Digest>;
+    async fn block_digest(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<Digest>>;
 
     /// Return the digest for the specified UTXO leaf index if found
-    async fn utxo_digest(leaf_index: u64) -> Option<Digest>;
+    async fn utxo_digest(token: rpc_auth::Token, leaf_index: u64) -> RpcResult<Option<Digest>>;
 
     /// Return the block header for the specified block
-    async fn header(block_selector: BlockSelector) -> Option<BlockHeader>;
+    async fn header(
+        token: rpc_auth::Token,
+        block_selector: BlockSelector,
+    ) -> RpcResult<Option<BlockHeader>>;
 
     /// Get sum of unspent UTXOs.
-    async fn synced_balance() -> NeptuneCoins;
+    async fn synced_balance(token: rpc_auth::Token) -> RpcResult<NeptuneCoins>;
 
     /// Get sum of unspent UTXOs including mempool transactions.
-    async fn synced_balance_unconfirmed() -> NeptuneCoins;
+    async fn synced_balance_unconfirmed(token: rpc_auth::Token) -> RpcResult<NeptuneCoins>;
 
     /// Get the client's wallet transaction history
-    async fn history() -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>;
+    async fn history(
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>>;
 
     /// Return information about funds in the wallet
-    async fn wallet_status() -> WalletStatus;
+    async fn wallet_status(token: rpc_auth::Token) -> RpcResult<WalletStatus>;
 
     /// Return the number of expected UTXOs, including already received UTXOs.
-    async fn num_expected_utxos() -> u64;
+    async fn num_expected_utxos(token: rpc_auth::Token) -> RpcResult<u64>;
 
     /// Return an address that this client can receive funds on
-    async fn next_receiving_address(key_type: KeyType) -> ReceivingAddress;
+    async fn next_receiving_address(
+        token: rpc_auth::Token,
+        key_type: KeyType,
+    ) -> RpcResult<ReceivingAddress>;
 
     /// Return all known keys, for every [KeyType]
-    async fn known_keys() -> Vec<SpendingKey>;
+    async fn known_keys(token: rpc_auth::Token) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return known keys for the provided [KeyType]
-    async fn known_keys_by_keytype(key_type: KeyType) -> Vec<SpendingKey>;
+    async fn known_keys_by_keytype(
+        token: rpc_auth::Token,
+        key_type: KeyType,
+    ) -> RpcResult<Vec<SpendingKey>>;
 
     /// Return the number of transactions in the mempool
-    async fn mempool_tx_count() -> usize;
+    async fn mempool_tx_count(token: rpc_auth::Token) -> RpcResult<usize>;
 
     // TODO: Change to return current size and max size
-    async fn mempool_size() -> usize;
+    async fn mempool_size(token: rpc_auth::Token) -> RpcResult<usize>;
 
     /// Return info about the transactions in the mempool
-    async fn mempool_overview(start_index: usize, number: usize) -> Vec<MempoolTransactionInfo>;
+    async fn mempool_overview(
+        token: rpc_auth::Token,
+        start_index: usize,
+        number: usize,
+    ) -> RpcResult<Vec<MempoolTransactionInfo>>;
 
     /// Return the information used on the dashboard's overview tab
-    async fn dashboard_overview_data() -> DashBoardOverviewDataFromClient;
+    async fn dashboard_overview_data(
+        token: rpc_auth::Token,
+    ) -> RpcResult<DashBoardOverviewDataFromClient>;
 
     /// Determine whether the user-supplied string is a valid address
-    async fn validate_address(address: String, network: Network) -> Option<ReceivingAddress>;
+    async fn validate_address(
+        token: rpc_auth::Token,
+        address: String,
+        network: Network,
+    ) -> RpcResult<Option<ReceivingAddress>>;
 
     /// Determine whether the user-supplied string is a valid amount
-    async fn validate_amount(amount: String) -> Option<NeptuneCoins>;
+    async fn validate_amount(
+        token: rpc_auth::Token,
+        amount: String,
+    ) -> RpcResult<Option<NeptuneCoins>>;
 
     /// Determine whether the given amount is less than (or equal to) the balance
-    async fn amount_leq_synced_balance(amount: NeptuneCoins) -> bool;
+    async fn amount_leq_synced_balance(
+        token: rpc_auth::Token,
+        amount: NeptuneCoins,
+    ) -> RpcResult<bool>;
 
     /// Generate a report of all owned and unspent coins, whether time-locked or not.
-    async fn list_own_coins() -> Vec<CoinWithPossibleTimeLock>;
+    async fn list_own_coins(token: rpc_auth::Token) -> RpcResult<Vec<CoinWithPossibleTimeLock>>;
 
     /// Get CPU temperature.
-    async fn cpu_temp() -> Option<f32>;
+    async fn cpu_temp(token: rpc_auth::Token) -> RpcResult<Option<f32>>;
 
     /******** BLOCKCHAIN STATISTICS ********/
     // Place all endpoints that relate to statistics of the blockchain here
@@ -264,35 +301,38 @@ pub trait RPC {
     /// number of milliseconds it took to mine the (canonical) block with the
     /// specified height.
     async fn block_intervals(
+        token: rpc_auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
-    ) -> Option<Vec<(u64, u64)>>;
+    ) -> RpcResult<Option<Vec<(u64, u64)>>>;
 
     /// Return the difficulties of a range of blocks.
     async fn block_difficulties(
+        token: rpc_auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
-    ) -> Vec<(u64, Difficulty)>;
+    ) -> RpcResult<Vec<(u64, Difficulty)>>;
 
     /******** CHANGE THINGS ********/
     // Place all things that change state here
 
     /// Clears standing for all peers, connected or not
-    async fn clear_all_standings();
+    async fn clear_all_standings(token: rpc_auth::Token) -> RpcResult<()>;
 
     /// Clears standing for ip, whether connected or not
-    async fn clear_standing_by_ip(ip: IpAddr);
+    async fn clear_standing_by_ip(token: rpc_auth::Token, ip: IpAddr) -> RpcResult<()>;
 
     /// Send coins to a single recipient.
     ///
     /// See docs for [send_to_many()](Self::send_to_many())
     async fn send(
+        token: rpc_auth::Token,
         amount: NeptuneCoins,
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String>;
+    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
 
     /// Send coins to multiple recipients
     ///
@@ -329,11 +369,12 @@ pub trait RPC {
     /// future work: add `unowned_utxo_notify_medium` param.
     ///   see comment for [TxOutput::auto()](crate::models::blockchain::transaction::TxOutput::auto())
     async fn send_to_many(
+        token: rpc_auth::Token,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notify_medium: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String>;
+    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)>;
 
     /// claim a utxo
     ///
@@ -348,21 +389,22 @@ pub trait RPC {
     ///
     /// Return true if a new expected UTXO was added, otherwise false.
     async fn claim_utxo(
+        token: rpc_auth::Token,
         utxo_transfer_encrypted: String,
         max_search_depth: Option<u64>,
-    ) -> Result<bool, String>;
+    ) -> RpcResult<bool>;
 
     /// Stop miner if running
-    async fn pause_miner();
+    async fn pause_miner(token: rpc_auth::Token) -> RpcResult<()>;
 
     /// Start miner if not running
-    async fn restart_miner();
+    async fn restart_miner(token: rpc_auth::Token) -> RpcResult<()>;
 
     /// mark MUTXOs as abandoned
-    async fn prune_abandoned_monitored_utxos() -> usize;
+    async fn prune_abandoned_monitored_utxos(token: rpc_auth::Token) -> RpcResult<usize>;
 
     /// Gracious shutdown.
-    async fn shutdown() -> bool;
+    async fn shutdown(token: rpc_auth::Token) -> RpcResult<bool>;
 }
 
 #[derive(Clone)]
@@ -754,92 +796,138 @@ impl NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
-    async fn network(self, _: context::Context) -> Network {
+    async fn network(self, _: context::Context, token: rpc_auth::Token) -> RpcResult<Network> {
         log_slow_scope!(fn_name!());
-        self.state.cli().network
+        token.auth(&self.cookie)?;
+
+        Ok(self.state.cli().network)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn own_listen_address_for_peers(self, _context: context::Context) -> Option<SocketAddr> {
+    async fn own_listen_address_for_peers(
+        self,
+        _context: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<SocketAddr>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
+
         let listen_port = self.state.cli().own_listen_port();
         let listen_for_peers_ip = self.state.cli().listen_addr;
-        listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port))
+        Ok(listen_port.map(|port| SocketAddr::new(listen_for_peers_ip, port)))
     }
 
     // documented in trait. do not add doc-comment.
-    async fn own_instance_id(self, _context: context::Context, token: rpc_auth::Token) -> RpcResult<InstanceId> {
+    async fn own_instance_id(
+        self,
+        _context: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<InstanceId> {
         log_slow_scope!(fn_name!());
-
         token.auth(&self.cookie)?;
 
         Ok(self.state.lock_guard().await.net.instance_id)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn block_height(self, _: context::Context) -> BlockHeight {
+    async fn block_height(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<BlockHeight> {
         log_slow_scope!(fn_name!());
-        self.state
+        token.auth(&self.cookie)?;
+
+        Ok(self
+            .state
             .lock_guard()
             .await
             .chain
             .light_state()
             .kernel
             .header
-            .height
+            .height)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn confirmations(self, _: context::Context) -> Option<BlockHeight> {
+    async fn confirmations(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<BlockHeight>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
+
         let guard = self.state.lock_guard().await;
-        self.confirmations_internal(&guard).await
+        Ok(self.confirmations_internal(&guard).await)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn utxo_digest(self, _: context::Context, leaf_index: u64) -> Option<Digest> {
+    async fn utxo_digest(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        leaf_index: u64,
+    ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
+
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
 
-        match leaf_index > 0 && leaf_index < aocl.num_leafs().await {
-            true => Some(aocl.get_leaf_async(leaf_index).await),
-            false => None,
-        }
+        Ok(
+            match leaf_index > 0 && leaf_index < aocl.num_leafs().await {
+                true => Some(aocl.get_leaf_async(leaf_index).await),
+                false => None,
+            },
+        )
     }
 
     // documented in trait. do not add doc-comment.
     async fn block_digest(
         self,
         _: context::Context,
+        token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> Option<Digest> {
+    ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
-        let digest = block_selector.as_digest(&state).await?;
+        let digest = match block_selector.as_digest(&state).await {
+            Some(d) => d,
+            None => return Ok(None),
+        };
         // verify the block actually exists
-        archival_state
+        Ok(archival_state
             .get_block_header(digest)
             .await
-            .map(|_| digest)
+            .map(|_| digest))
     }
 
     // documented in trait. do not add doc-comment.
     async fn block_info(
         self,
         _: context::Context,
+        token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> Option<BlockInfo> {
+    ) -> RpcResult<Option<BlockInfo>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let state = self.state.lock_guard().await;
-        let digest = block_selector.as_digest(&state).await?;
+        let digest = match block_selector.as_digest(&state).await {
+            Some(d) => d,
+            None => return Ok(None),
+        };
         let tip_digest = state.chain.light_state().hash();
         let archival_state = state.chain.archival_state();
 
-        let block = archival_state.get_block(digest).await.unwrap()?;
+        let block = match archival_state.get_block(digest).await.unwrap() {
+            Some(b) => b,
+            None => return Ok(None),
+        };
         let is_canonical = archival_state
             .block_belongs_to_canonical_chain(digest)
             .await;
@@ -852,67 +940,84 @@ impl RPC for NeptuneRPCServer {
             .filter(|d| *d != digest)
             .collect();
 
-        Some(BlockInfo::new(
+        Ok(Some(BlockInfo::new(
             &block,
             archival_state.genesis_block().hash(),
             tip_digest,
             sibling_blocks,
             is_canonical,
-        ))
+        )))
     }
 
     // documented in trait. do not add doc-comment.
     async fn block_digests_by_height(
         self,
         _: context::Context,
+        token: rpc_auth::Token,
         height: BlockHeight,
-    ) -> Vec<Digest> {
+    ) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .chain
             .archival_state()
             .block_height_to_block_digests(height)
-            .await
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn latest_tip_digests(self, _context: tarpc::context::Context, n: usize) -> Vec<Digest> {
+    async fn latest_tip_digests(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+        n: usize,
+    ) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let state = self.state.lock_guard().await;
 
         let latest_block_digest = state.chain.light_state().hash();
 
-        state
+        Ok(state
             .chain
             .archival_state()
             .get_ancestor_block_digests(latest_block_digest, n)
-            .await
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn peer_info(self, _: context::Context) -> Vec<PeerInfo> {
+    async fn peer_info(
+        self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<PeerInfo>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .net
             .peer_map
             .values()
             .cloned()
-            .collect()
+            .collect())
     }
 
     // documented in trait. do not add doc-comment.
     async fn all_punished_peers(
         self,
         _context: tarpc::context::Context,
-    ) -> HashMap<IpAddr, PeerStanding> {
+        token: rpc_auth::Token,
+    ) -> RpcResult<HashMap<IpAddr, PeerStanding>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let mut sanctions_in_memory = HashMap::default();
 
@@ -936,17 +1041,19 @@ impl RPC for NeptuneRPCServer {
             }
         }
 
-        all_sanctions
+        Ok(all_sanctions)
     }
 
     // documented in trait. do not add doc-comment.
     async fn validate_address(
         self,
         _ctx: context::Context,
+        token: rpc_auth::Token,
         address_string: String,
         network: Network,
-    ) -> Option<ReceivingAddress> {
+    ) -> RpcResult<Option<ReceivingAddress>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let ret = if let Ok(address) = ReceivingAddress::from_bech32m(&address_string, network) {
             Some(address)
@@ -957,31 +1064,36 @@ impl RPC for NeptuneRPCServer {
             "Responding to address validation request of {address_string}: {}",
             ret.is_some()
         );
-        ret
+        Ok(ret)
     }
 
     // documented in trait. do not add doc-comment.
     async fn validate_amount(
         self,
         _ctx: context::Context,
+        token: rpc_auth::Token,
         amount_string: String,
-    ) -> Option<NeptuneCoins> {
+    ) -> RpcResult<Option<NeptuneCoins>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         // parse string
-        let amount = if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
-            amt
+        if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
+            Ok(Some(amt))
         } else {
-            return None;
-        };
-
-        // return amount
-        Some(amount)
+            Ok(None)
+        }
     }
 
     // documented in trait. do not add doc-comment.
-    async fn amount_leq_synced_balance(self, _ctx: context::Context, amount: NeptuneCoins) -> bool {
+    async fn amount_leq_synced_balance(
+        self,
+        _ctx: context::Context,
+        token: rpc_auth::Token,
+        amount: NeptuneCoins,
+    ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let now = Timestamp::now();
         // test inequality
@@ -991,12 +1103,17 @@ impl RPC for NeptuneRPCServer {
             .await
             .get_wallet_status_for_tip()
             .await;
-        amount <= wallet_status.synced_unspent_liquid_amount(now)
+        Ok(amount <= wallet_status.synced_unspent_liquid_amount(now))
     }
 
     // documented in trait. do not add doc-comment.
-    async fn synced_balance(self, _context: tarpc::context::Context) -> NeptuneCoins {
+    async fn synced_balance(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<NeptuneCoins> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let now = Timestamp::now();
         let wallet_status = self
@@ -1005,57 +1122,80 @@ impl RPC for NeptuneRPCServer {
             .await
             .get_wallet_status_for_tip()
             .await;
-        wallet_status.synced_unspent_liquid_amount(now)
+        Ok(wallet_status.synced_unspent_liquid_amount(now))
     }
 
     // documented in trait. do not add doc-comment.
-    async fn synced_balance_unconfirmed(self, _context: tarpc::context::Context) -> NeptuneCoins {
+    async fn synced_balance_unconfirmed(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<NeptuneCoins> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let gs = self.state.lock_guard().await;
 
-        gs.wallet_state
+        Ok(gs
+            .wallet_state
             .unconfirmed_balance(gs.chain.light_state().hash(), Timestamp::now())
-            .await
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn wallet_status(self, _context: tarpc::context::Context) -> WalletStatus {
+    async fn wallet_status(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<WalletStatus> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .get_wallet_status_for_tip()
-            .await
+            .await)
     }
 
-    async fn num_expected_utxos(self, _context: tarpc::context::Context) -> u64 {
+    async fn num_expected_utxos(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<u64> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .wallet_state
             .num_expected_utxos()
-            .await
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
     async fn header(
         self,
         _context: tarpc::context::Context,
+        token: rpc_auth::Token,
         block_selector: BlockSelector,
-    ) -> Option<BlockHeader> {
+    ) -> RpcResult<Option<BlockHeader>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let state = self.state.lock_guard().await;
-        let block_digest = block_selector.as_digest(&state).await?;
-        state
+        let block_digest = match block_selector.as_digest(&state).await {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+        Ok(state
             .chain
             .archival_state()
             .get_block_header(block_digest)
-            .await
+            .await)
     }
 
     // future: this should perhaps take a param indicating what type
@@ -1066,9 +1206,11 @@ impl RPC for NeptuneRPCServer {
     async fn next_receiving_address(
         mut self,
         _context: tarpc::context::Context,
+        token: rpc_auth::Token,
         key_type: KeyType,
-    ) -> ReceivingAddress {
+    ) -> RpcResult<ReceivingAddress> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
 
@@ -1081,57 +1223,78 @@ impl RPC for NeptuneRPCServer {
         // persist wallet state to disk
         global_state_mut.persist_wallet().await.expect("flushed");
 
-        address
+        Ok(address)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn known_keys(self, _context: tarpc::context::Context) -> Vec<SpendingKey> {
+    async fn known_keys(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .wallet_state
             .get_all_known_spending_keys()
-            .collect()
+            .collect())
     }
 
     // documented in trait. do not add doc-comment.
     async fn known_keys_by_keytype(
         self,
         _context: tarpc::context::Context,
+        token: rpc_auth::Token,
         key_type: KeyType,
-    ) -> Vec<SpendingKey> {
+    ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .wallet_state
             .get_known_spending_keys(key_type)
-            .collect()
+            .collect())
     }
 
     // documented in trait. do not add doc-comment.
-    async fn mempool_tx_count(self, _context: tarpc::context::Context) -> usize {
+    async fn mempool_tx_count(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state.lock_guard().await.mempool.len()
+        Ok(self.state.lock_guard().await.mempool.len())
     }
 
     // documented in trait. do not add doc-comment.
-    async fn mempool_size(self, _context: tarpc::context::Context) -> usize {
+    async fn mempool_size(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state.lock_guard().await.mempool.get_size()
+        Ok(self.state.lock_guard().await.mempool.get_size())
     }
 
     // documented in trait. do not add doc-comment.
     async fn history(
         self,
         _context: tarpc::context::Context,
-    ) -> Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)> {
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let history = self.state.lock_guard().await.get_balance_history().await;
 
@@ -1143,15 +1306,17 @@ impl RPC for NeptuneRPCServer {
         display_history.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
         // return
-        display_history
+        Ok(display_history)
     }
 
     // documented in trait. do not add doc-comment.
     async fn dashboard_overview_data(
         self,
         _context: tarpc::context::Context,
-    ) -> DashBoardOverviewDataFromClient {
+        token: rpc_auth::Token,
+    ) -> RpcResult<DashBoardOverviewDataFromClient> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
@@ -1208,7 +1373,7 @@ impl RPC for NeptuneRPCServer {
             wallet_status.synced_unspent_timelocked_amount(now)
         };
 
-        DashBoardOverviewDataFromClient {
+        Ok(DashBoardOverviewDataFromClient {
             tip_digest,
             tip_header,
             syncing,
@@ -1224,7 +1389,7 @@ impl RPC for NeptuneRPCServer {
             proving_capability,
             confirmations,
             cpu_temp,
-        }
+        })
     }
 
     /******** CHANGE THINGS ********/
@@ -1232,8 +1397,13 @@ impl RPC for NeptuneRPCServer {
     //   * acquires `global_state_lock` for write
     //
     // documented in trait. do not add doc-comment.
-    async fn clear_all_standings(mut self, _: context::Context) {
+    async fn clear_all_standings(
+        mut self,
+        _: context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -1247,18 +1417,21 @@ impl RPC for NeptuneRPCServer {
         // iterates and modifies standing field for all connected peers
         global_state_mut.net.clear_all_standings_in_database().await;
 
-        global_state_mut
-            .flush_databases()
-            .await
-            .expect("flushed DBs");
+        Ok(global_state_mut.flush_databases().await.map_err(|e| e.to_string())?)
     }
 
     // Locking:
     //   * acquires `global_state_lock` for write
     //
     // documented in trait. do not add doc-comment.
-    async fn clear_standing_by_ip(mut self, _: context::Context, ip: IpAddr) {
+    async fn clear_standing_by_ip(
+        mut self,
+        _: context::Context,
+        token: rpc_auth::Token,
+        ip: IpAddr,
+    ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -1274,26 +1447,27 @@ impl RPC for NeptuneRPCServer {
         //Also clears this IP's standing in database, whether it is connected or not.
         global_state_mut.net.clear_ip_standing_in_database(ip).await;
 
-        global_state_mut
-            .flush_databases()
-            .await
-            .expect("flushed DBs");
+        Ok(global_state_mut.flush_databases().await.map_err(|e| e.to_string())?)
     }
 
     // documented in trait. do not add doc-comment.
     async fn send(
         self,
         ctx: context::Context,
+        token: rpc_auth::Token,
         amount: NeptuneCoins,
         address: ReceivingAddress,
         owned_utxo_notify_method: UtxoNotificationMedium,
         unowned_utxo_notify_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String> {
+    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
+
+        // note: we do not call token.auth() because send_to_many() does it.
 
         self.send_to_many(
             ctx,
+            token,
             vec![(address, amount)],
             owned_utxo_notify_method,
             unowned_utxo_notify_medium,
@@ -1311,47 +1485,51 @@ impl RPC for NeptuneRPCServer {
     async fn send_to_many(
         self,
         ctx: context::Context,
+        token: rpc_auth::Token,
         outputs: Vec<(ReceivingAddress, NeptuneCoins)>,
         owned_utxo_notification_medium: UtxoNotificationMedium,
         unowned_utxo_notification_medium: UtxoNotificationMedium,
         fee: NeptuneCoins,
-    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), String> {
+    ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         tracing::debug!("stm: entered fn");
 
         if self.state.cli().no_transaction_initiation {
             warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
-            return Err("send() is not supported by this node".to_string());
+            return Err("send() is not supported by this node".to_string().into())
         }
 
         // The proving capability is set to the lowest possible value here,
         // since we don't want the client (CLI or dashboard) to hang. Instead,
         // we let (a task started by) main loop handle the proving.
         let tx_proving_capability = TxProvingCapability::PrimitiveWitness;
-        self.send_to_many_inner(
-            ctx,
-            outputs,
-            (
-                owned_utxo_notification_medium,
-                unowned_utxo_notification_medium,
-            ),
-            fee,
-            Timestamp::now(),
-            tx_proving_capability,
-        )
-        .await
-        .map_err(|e| e.to_string())
+        Ok(self
+            .send_to_many_inner(
+                ctx,
+                outputs,
+                (
+                    owned_utxo_notification_medium,
+                    unowned_utxo_notification_medium,
+                ),
+                fee,
+                Timestamp::now(),
+                tx_proving_capability,
+            )
+            .await.map_err(|e| e.to_string())?)
     }
 
     // // documented in trait. do not add doc-comment.
     async fn claim_utxo(
         mut self,
         _ctx: context::Context,
+        token: rpc_auth::Token,
         encrypted_utxo_notification: String,
         max_search_depth: Option<u64>,
-    ) -> Result<bool, String> {
+    ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let claim_data = self
             .claim_utxo_inner(encrypted_utxo_notification, max_search_depth)
@@ -1370,15 +1548,15 @@ impl RPC for NeptuneRPCServer {
             .await
             .wallet_state
             .claim_utxo(claim_data)
-            .await
-            .map_err(|x| x.to_string())?;
+            .await.map_err(|e| e.to_string())?;
 
         Ok(expected_utxo_was_new)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn shutdown(self, _: context::Context) -> bool {
+    async fn shutdown(self, _: context::Context, token: rpc_auth::Token) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         // 1. Send shutdown message to main
         let response = self
@@ -1387,12 +1565,17 @@ impl RPC for NeptuneRPCServer {
             .await;
 
         // 2. Send acknowledgement to client.
-        response.is_ok()
+        Ok(response.is_ok())
     }
 
     // documented in trait. do not add doc-comment.
-    async fn pause_miner(self, _context: tarpc::context::Context) {
+    async fn pause_miner(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         if self.state.cli().mine() {
             let _ = self
@@ -1402,11 +1585,17 @@ impl RPC for NeptuneRPCServer {
         } else {
             info!("Cannot pause miner since it was never started");
         }
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
-    async fn restart_miner(self, _context: tarpc::context::Context) {
+    async fn restart_miner(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         if self.state.cli().mine() {
             let _ = self
@@ -1416,11 +1605,17 @@ impl RPC for NeptuneRPCServer {
         } else {
             info!("Cannot restart miner since it was never started");
         }
+        Ok(())
     }
 
     // documented in trait. do not add doc-comment.
-    async fn prune_abandoned_monitored_utxos(mut self, _context: tarpc::context::Context) -> usize {
+    async fn prune_abandoned_monitored_utxos(
+        mut self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
@@ -1437,11 +1632,11 @@ impl RPC for NeptuneRPCServer {
         match prune_count_res {
             Ok(prune_count) => {
                 info!("Marked {prune_count} monitored UTXOs as abandoned");
-                prune_count
+                Ok(prune_count)
             }
             Err(err) => {
                 error!("Pruning monitored UTXOs failed with error: {err}");
-                0
+                Ok(0)
             }
         }
     }
@@ -1450,35 +1645,48 @@ impl RPC for NeptuneRPCServer {
     async fn list_own_coins(
         self,
         _context: ::tarpc::context::Context,
-    ) -> Vec<CoinWithPossibleTimeLock> {
+        token: rpc_auth::Token,
+    ) -> RpcResult<Vec<CoinWithPossibleTimeLock>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        self.state
+        Ok(self
+            .state
             .lock_guard()
             .await
             .wallet_state
             .get_all_own_coins_with_possible_timelocks()
-            .await
+            .await)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn cpu_temp(self, _context: tarpc::context::Context) -> Option<f32> {
+    async fn cpu_temp(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<Option<f32>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
-        Self::cpu_temp_inner()
+        Ok(Self::cpu_temp_inner())
     }
 
     // documented in trait. do not add doc-comment.
     async fn block_intervals(
         self,
         _context: tarpc::context::Context,
+        token: rpc_auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
-    ) -> Option<Vec<(u64, u64)>> {
+    ) -> RpcResult<Option<Vec<(u64, u64)>>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let state = self.state.lock_guard().await;
-        let last_block = last_block.as_digest(&state).await?;
+        let last_block = match last_block.as_digest(&state).await {
+            Some(d) => d,
+            None => return Ok(None),
+        };
         let mut intervals = vec![];
         let mut current = state
             .chain
@@ -1504,21 +1712,23 @@ impl RPC for NeptuneRPCServer {
                 .await;
         }
 
-        Some(intervals)
+        Ok(Some(intervals))
     }
 
     async fn block_difficulties(
         self,
         _context: tarpc::context::Context,
+        token: rpc_auth::Token,
         last_block: BlockSelector,
         max_num_blocks: Option<usize>,
-    ) -> Vec<(u64, Difficulty)> {
+    ) -> RpcResult<Vec<(u64, Difficulty)>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let state = self.state.lock_guard().await;
         let last_block = last_block.as_digest(&state).await;
         let Some(last_block) = last_block else {
-            return vec![];
+            return Ok(vec![]);
         };
 
         let mut difficulties = vec![];
@@ -1541,17 +1751,19 @@ impl RPC for NeptuneRPCServer {
                 .await;
         }
 
-        difficulties
+        Ok(difficulties)
     }
 
     // documented in trait. do not add doc-comment.
     async fn mempool_overview(
         self,
         _context: ::tarpc::context::Context,
+        token: rpc_auth::Token,
         start_index: usize,
         number: usize,
-    ) -> Vec<MempoolTransactionInfo> {
+    ) -> RpcResult<Vec<MempoolTransactionInfo>> {
         log_slow_scope!(fn_name!());
+        token.auth(&self.cookie)?;
 
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
@@ -1601,7 +1813,7 @@ impl RPC for NeptuneRPCServer {
             })
             .collect_vec();
 
-        mempool_transactions
+        Ok(mempool_transactions)
     }
 }
 
@@ -1614,11 +1826,19 @@ pub mod error {
     pub enum RpcError {
         #[error(transparent)]
         Auth(#[from] rpc_auth::error::AuthError),
-
         // 0 or more API specific error variants.
+
+        #[error("error message")]
+        Message(String),
     }
 
+    impl From<String> for RpcError {
+        fn from(s: String) -> Self {
+            Self::Message(s)
+        }
+    }
 }
+
 
 #[cfg(test)]
 mod rpc_server_tests {
