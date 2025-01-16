@@ -450,7 +450,7 @@ impl NeptuneRPCServer {
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
         mocked_invalid_proof: Option<TransactionProof>,
-    ) -> anyhow::Result<(Transaction, Vec<PrivateNotificationData>)> {
+    ) -> Result<(Transaction, Vec<PrivateNotificationData>), error::SendError> {
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
 
@@ -503,7 +503,7 @@ impl NeptuneRPCServer {
             Ok(tx) => tx,
             Err(e) => {
                 tracing::error!("Could not create transaction: {}", e);
-                return Err(e);
+                return Err(e.into());
             }
         };
         drop(state);
@@ -561,6 +561,7 @@ impl NeptuneRPCServer {
 
         if let Err(e) = response {
             tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
+            return Err(error::SendError::NotBroadcast);
         };
 
         tracing::debug!("stmi: step 8. all done with send_to_many_inner().");
@@ -585,7 +586,7 @@ impl NeptuneRPCServer {
         fee: NeptuneCoins,
         now: Timestamp,
         tx_proving_capability: TxProvingCapability,
-    ) -> anyhow::Result<(TransactionKernelId, Vec<PrivateNotificationData>)> {
+    ) -> Result<(TransactionKernelId, Vec<PrivateNotificationData>), error::SendError> {
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
         let ret = self
@@ -1498,7 +1499,7 @@ impl RPC for NeptuneRPCServer {
 
         if self.state.cli().no_transaction_initiation {
             warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
-            return Err("send() is not supported by this node".to_string().into())
+            return Err(error::SendError::Unsupported.into())
         }
 
         // The proving capability is set to the lowest possible value here,
@@ -1517,7 +1518,7 @@ impl RPC for NeptuneRPCServer {
                 Timestamp::now(),
                 tx_proving_capability,
             )
-            .await.map_err(|e| e.to_string())?)
+            .await?)
     }
 
     // // documented in trait. do not add doc-comment.
@@ -1828,6 +1829,9 @@ pub mod error {
         Auth(#[from] rpc_auth::error::AuthError),
         // 0 or more API specific error variants.
 
+        #[error(transparent)]
+        SendError(#[from] SendError),
+
         #[error("error message")]
         Message(String),
     }
@@ -1835,6 +1839,26 @@ pub mod error {
     impl From<String> for RpcError {
         fn from(s: String) -> Self {
             Self::Message(s)
+        }
+    }
+
+    /// enumerates possible transaction send errors
+    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+    #[non_exhaustive]
+    pub enum SendError {
+        #[error("send() is not supported by this node")]
+        Unsupported,
+
+        #[error("transaction could not be created")]
+        CreateTxFailed(String),
+
+        #[error("transaction could not be broadcast.")]
+        NotBroadcast,
+    }
+
+    impl From<anyhow::Error> for SendError {
+        fn from(e: anyhow::Error) -> Self {
+            Self::CreateTxFailed(e.to_string())
         }
     }
 }
