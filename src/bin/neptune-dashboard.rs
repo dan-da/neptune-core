@@ -1,9 +1,12 @@
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::process;
 
 use clap::Parser;
 use dashboard_src::dashboard_app::DashboardApp;
+use neptune_cash::config_models::data_directory::DataDirectory;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use tarpc::client;
 use tarpc::context;
@@ -17,6 +20,10 @@ pub struct Config {
     /// Sets the server address to connect to.
     #[clap(long, default_value = "9799", value_name = "PORT")]
     port: u16,
+
+    /// neptune-core data directory containing wallet and blockchain state
+    #[clap(long)]
+    data_dir: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -38,9 +45,19 @@ async fn main() {
     };
     let client = RPCClient::new(client::Config::default(), transport).spawn();
 
+    // note: the network RPC API does not require any auth, to support this usage.
+
     // Read what network the client is running and ensure that client is up and running
     let network = match client.network(context::current()).await {
-        Ok(nw) => nw,
+        Ok(Ok(nw)) => nw,
+        Ok(Err(err)) => {
+            eprintln!("{err}");
+            eprintln!(
+                "Could not ping neptune-core. Do configurations match? Or is the client still \
+                starting up?"
+            );
+            process::exit(1);
+        }
         Err(err) => {
             eprintln!("{err}");
             eprintln!(
@@ -51,11 +68,27 @@ async fn main() {
         }
     };
 
+    let data_directory =
+        DataDirectory::get(args.data_dir.clone(), network).expect("should find data directory");
+    let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory) {
+        Ok(t) => t,
+        Err(e) => panic!(
+            "Unable to load RPC authentication token. error = {}",
+            e.to_string()
+        ),
+    }
+    .into();
+
     let listen_addr_for_peers = match client
-        .own_listen_address_for_peers(context::current())
+        .own_listen_address_for_peers(context::current(), token)
         .await
     {
-        Ok(la) => la,
+        Ok(Ok(la)) => la,
+        Ok(Err(err)) => {
+            eprintln!("{err}");
+            eprintln!("Could not get listen address from client.");
+            process::exit(1);
+        }
         Err(err) => {
             eprintln!("{err}");
             eprintln!("Could not get listen address from client.");
@@ -64,7 +97,7 @@ async fn main() {
     };
 
     // run app until quit
-    let res = DashboardApp::run(client, network, listen_addr_for_peers).await;
+    let res = DashboardApp::run(client, network, token, listen_addr_for_peers).await;
 
     match res {
         Err(err) => {

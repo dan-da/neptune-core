@@ -490,10 +490,7 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Command::NthReceivingAddress {
-            network,
-            index,
-        } => {
+        Command::NthReceivingAddress { network, index } => {
             return get_nth_receiving_address(*network, args.data_dir.clone(), *index);
         }
         Command::PremineReceivingAddress { network } => {
@@ -517,8 +514,12 @@ async fn main() -> Result<()> {
     let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
     let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory) {
         Ok(t) => t,
-        Err(e) => panic!("Unable to load RPC authentication token. error = {}", e.to_string()),
-    }.into();
+        Err(e) => panic!(
+            "Unable to load RPC authentication token. error = {}",
+            e.to_string()
+        ),
+    }
+    .into();
 
     match args.command {
         Command::Completions
@@ -563,7 +564,9 @@ async fn main() -> Result<()> {
             }
         }
         Command::BlockDigestsByHeight { height } => {
-            let digests = client.block_digests_by_height(ctx, token, height.into()).await??;
+            let digests = client
+                .block_digests_by_height(ctx, token, height.into())
+                .await??;
             println!("{}", digests.iter().join("\n"));
         }
         Command::Confirmations => {
