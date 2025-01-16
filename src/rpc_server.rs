@@ -11,7 +11,6 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use anyhow::bail;
 use anyhow::Result;
 use get_size2::GetSize;
 use itertools::Itertools;
@@ -646,7 +645,7 @@ impl NeptuneRPCServer {
         &self,
         encrypted_utxo_notification: String,
         max_search_depth: Option<u64>,
-    ) -> anyhow::Result<Option<ClaimUtxoData>> {
+    ) -> Result<Option<ClaimUtxoData>, error::ClaimError> {
         let span = tracing::debug_span!("Claim UTXO inner");
         let _enter = span.enter();
 
@@ -665,7 +664,7 @@ impl NeptuneRPCServer {
             .find_known_spending_key_for_receiver_identifier(
                 utxo_transfer_encrypted.receiver_identifier,
             )
-            .ok_or(anyhow!("utxo does not match any known wallet key"))?;
+            .ok_or(error::ClaimError::UtxoUnknown)?;
 
         // decrypt utxo_transfer_encrypted into UtxoTransfer
         let utxo_notification = utxo_transfer_encrypted.decrypt_with_spending_key(&spending_key)?;
@@ -692,9 +691,9 @@ impl NeptuneRPCServer {
 
         // Check if we can satisfy typescripts
         if !announced_utxo.utxo.all_type_script_states_are_valid() {
-            let msg = "Attempting to claim UTXO with malformed type script.";
-            warn!(msg);
-            bail!(msg);
+            let err = error::ClaimError::InvalidTypeScript;
+            warn!("{}", err.to_string());
+            return Err(err);
         }
 
         // check if wallet is already expecting this utxo.
@@ -1418,7 +1417,7 @@ impl RPC for NeptuneRPCServer {
         // iterates and modifies standing field for all connected peers
         global_state_mut.net.clear_all_standings_in_database().await;
 
-        Ok(global_state_mut.flush_databases().await.map_err(|e| e.to_string())?)
+        Ok(global_state_mut.flush_databases().await?)
     }
 
     // Locking:
@@ -1448,7 +1447,7 @@ impl RPC for NeptuneRPCServer {
         //Also clears this IP's standing in database, whether it is connected or not.
         global_state_mut.net.clear_ip_standing_in_database(ip).await;
 
-        Ok(global_state_mut.flush_databases().await.map_err(|e| e.to_string())?)
+        Ok(global_state_mut.flush_databases().await?)
     }
 
     // documented in trait. do not add doc-comment.
@@ -1499,7 +1498,7 @@ impl RPC for NeptuneRPCServer {
 
         if self.state.cli().no_transaction_initiation {
             warn!("Cannot initiate transaction because `--no-transaction-initiation` flag is set.");
-            return Err(error::SendError::Unsupported.into())
+            return Err(error::SendError::Unsupported.into());
         }
 
         // The proving capability is set to the lowest possible value here,
@@ -1534,8 +1533,7 @@ impl RPC for NeptuneRPCServer {
 
         let claim_data = self
             .claim_utxo_inner(encrypted_utxo_notification, max_search_depth)
-            .await
-            .map_err(|x| x.to_string())?;
+            .await?;
 
         let Some(claim_data) = claim_data else {
             // UTXO has already been claimed by wallet
@@ -1549,7 +1547,8 @@ impl RPC for NeptuneRPCServer {
             .await
             .wallet_state
             .claim_utxo(claim_data)
-            .await.map_err(|e| e.to_string())?;
+            .await
+            .map_err(error::ClaimError::from)?;
 
         Ok(expected_utxo_was_new)
     }
@@ -1825,20 +1824,27 @@ pub mod error {
     #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
     #[non_exhaustive]
     pub enum RpcError {
+        // auth error
         #[error(transparent)]
         Auth(#[from] rpc_auth::error::AuthError),
-        // 0 or more API specific error variants.
 
+        // catch-all error, eg for anyhow errors
+        #[error("rpc call failed")]
+        Failed(String),
+
+        // API specific error variants.
         #[error(transparent)]
         SendError(#[from] SendError),
 
-        #[error("error message")]
-        Message(String),
+        #[error(transparent)]
+        ClaimError(#[from] ClaimError),
     }
 
-    impl From<String> for RpcError {
-        fn from(s: String) -> Self {
-            Self::Message(s)
+    // convert anyhow::Error to an RpcError::Failed.
+    // note that anyhow Error is not serializable.
+    impl From<anyhow::Error> for RpcError {
+        fn from(e: anyhow::Error) -> Self {
+            Self::Failed(e.to_string())
         }
     }
 
@@ -1849,20 +1855,45 @@ pub mod error {
         #[error("send() is not supported by this node")]
         Unsupported,
 
-        #[error("transaction could not be created")]
-        CreateTxFailed(String),
-
         #[error("transaction could not be broadcast.")]
         NotBroadcast,
+
+        // catch-all error, eg for anyhow errors
+        #[error("transaction could not be sent")]
+        Failed(String),
     }
 
+    // convert anyhow::Error to a SendError::Failed.
+    // note that anyhow Error is not serializable.
     impl From<anyhow::Error> for SendError {
         fn from(e: anyhow::Error) -> Self {
-            Self::CreateTxFailed(e.to_string())
+            Self::Failed(e.to_string())
+        }
+    }
+
+    /// enumerates possible transaction send errors
+    #[derive(Debug, Clone, thiserror::Error, Serialize, Deserialize)]
+    #[non_exhaustive]
+    pub enum ClaimError {
+        #[error("utxo does not match any known wallet key")]
+        UtxoUnknown,
+
+        #[error("invalid type script in claim utxo")]
+        InvalidTypeScript,
+
+        // catch-all error, eg for anyhow errors
+        #[error("claim unsuccessful")]
+        Failed(String),
+    }
+
+    // convert anyhow::Error to a ClaimError::Failed.
+    // note that anyhow Error is not serializable.
+    impl From<anyhow::Error> for ClaimError {
+        fn from(e: anyhow::Error) -> Self {
+            Self::Failed(e.to_string())
         }
     }
 }
-
 
 #[cfg(test)]
 mod rpc_server_tests {
