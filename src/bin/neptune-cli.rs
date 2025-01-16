@@ -8,7 +8,6 @@ use std::str::FromStr;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 use clap::CommandFactory;
@@ -28,6 +27,7 @@ use neptune_cash::models::state::wallet::utxo_notification::PrivateNotificationD
 use neptune_cash::models::state::wallet::utxo_notification::UtxoNotificationMedium;
 use neptune_cash::models::state::wallet::wallet_status::WalletStatus;
 use neptune_cash::models::state::wallet::WalletSecret;
+use neptune_cash::rpc_auth;
 use neptune_cash::rpc_server::RPCClient;
 use serde::Deserialize;
 use serde::Serialize;
@@ -197,10 +197,6 @@ enum Command {
 
         #[clap(long, default_value_t)]
         network: Network,
-
-        /// neptune-core data directory containing wallet and blockchain state
-        #[clap(long)]
-        data_dir: Option<PathBuf>,
     },
 
     /// Get a static generation receiving address, for premine recipients.
@@ -210,10 +206,6 @@ enum Command {
     PremineReceivingAddress {
         #[clap(long, default_value_t)]
         network: Network,
-
-        /// neptune-core data directory containing wallet and blockchain state
-        #[clap(long)]
-        data_dir: Option<PathBuf>,
     },
 
     /// list known coins
@@ -323,40 +315,24 @@ enum Command {
     GenerateWallet {
         #[clap(long, default_value_t)]
         network: Network,
-
-        /// neptune-core data directory containing wallet and blockchain state
-        #[clap(long)]
-        data_dir: Option<PathBuf>,
     },
 
     /// displays path to wallet secrets file
     WhichWallet {
         #[clap(long, default_value_t)]
         network: Network,
-
-        /// neptune-core data directory containing wallet and blockchain state
-        #[clap(long)]
-        data_dir: Option<PathBuf>,
     },
 
     /// export mnemonic seed phrase
     ExportSeedPhrase {
         #[clap(long, default_value_t)]
         network: Network,
-
-        /// neptune-core data directory containing wallet and blockchain state
-        #[clap(long)]
-        data_dir: Option<PathBuf>,
     },
 
     /// import mnemonic seed phrase
     ImportSeedPhrase {
         #[clap(long, default_value_t)]
         network: Network,
-
-        /// neptune-core data directory containing wallet and blockchain state
-        #[clap(long)]
-        data_dir: Option<PathBuf>,
     },
 }
 
@@ -367,6 +343,10 @@ struct Config {
     /// Sets the server address to connect to.
     #[clap(long, default_value = "127.0.0.1:9799")]
     server_addr: SocketAddr,
+
+    /// neptune-core data directory containing wallet and blockchain state
+    #[clap(long)]
+    data_dir: Option<PathBuf>,
 
     #[clap(subcommand)]
     command: Command,
@@ -386,9 +366,9 @@ async fn main() -> Result<()> {
                 bail!("Unknown shell.  Shell completions not available.")
             }
         }
-        Command::WhichWallet { network, data_dir } => {
+        Command::WhichWallet { network } => {
             let wallet_dir =
-                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
+                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
@@ -399,9 +379,9 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         }
-        Command::GenerateWallet { network, data_dir } => {
+        Command::GenerateWallet { network } => {
             let wallet_dir =
-                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
+                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             DataDirectory::create_dir_if_not_exists(&wallet_dir).await?;
@@ -420,9 +400,9 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ImportSeedPhrase { network, data_dir } => {
+        Command::ImportSeedPhrase { network } => {
             let wallet_dir =
-                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
+                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
 
             // if the wallet file already exists,
@@ -481,10 +461,10 @@ async fn main() -> Result<()> {
 
             return Ok(());
         }
-        Command::ExportSeedPhrase { network, data_dir } => {
+        Command::ExportSeedPhrase { network } => {
             // The root path is where both the wallet and all databases are stored
             let wallet_dir =
-                DataDirectory::get(data_dir.clone(), *network)?.wallet_directory_path();
+                DataDirectory::get(args.data_dir.clone(), *network)?.wallet_directory_path();
 
             // Get wallet object, create various wallet secret files
             let wallet_file = WalletSecret::wallet_secret_path(&wallet_dir);
@@ -512,13 +492,12 @@ async fn main() -> Result<()> {
         }
         Command::NthReceivingAddress {
             network,
-            data_dir,
             index,
         } => {
-            return get_nth_receiving_address(*network, data_dir.clone(), *index);
+            return get_nth_receiving_address(*network, args.data_dir.clone(), *index);
         }
-        Command::PremineReceivingAddress { network, data_dir } => {
-            return get_nth_receiving_address(*network, data_dir.clone(), 0);
+        Command::PremineReceivingAddress { network } => {
+            return get_nth_receiving_address(*network, args.data_dir.clone(), 0);
         }
         _ => {}
     }
@@ -531,6 +510,15 @@ async fn main() -> Result<()> {
     };
     let client = RPCClient::new(client::Config::default(), transport).spawn();
     let ctx = context::current();
+
+    // note: the network RPC API does not require any auth, to support this usage.
+    let network = client.network(ctx).await??;
+
+    let data_directory = DataDirectory::get(args.data_dir.clone(), network)?;
+    let token: rpc_auth::Token = match rpc_auth::Cookie::try_load(&data_directory) {
+        Ok(t) => t,
+        Err(e) => panic!("Unable to load RPC authentication token. error = {}", e.to_string()),
+    }.into();
 
     match args.command {
         Command::Completions
@@ -545,53 +533,53 @@ async fn main() -> Result<()> {
 
         /******** READ STATE ********/
         Command::ListCoins => {
-            let list = client.list_own_coins(ctx).await?;
+            let list = client.list_own_coins(ctx, token).await??;
             println!("{}", CoinWithPossibleTimeLock::report(&list));
         }
         Command::Network => {
-            let network = client.network(ctx).await?;
+            // we already queries the network above.
             println!("{network}")
         }
         Command::OwnListenAddressForPeers => {
-            let own_listen_addres = client.own_listen_address_for_peers(ctx).await?;
+            let own_listen_addres = client.own_listen_address_for_peers(ctx, token).await??;
             match own_listen_addres {
                 Some(addr) => println!("{addr}"),
                 None => println!("No listen address configured"),
             }
         }
         Command::OwnInstanceId => {
-            let val = client.own_instance_id(ctx).await?;
+            let val = client.own_instance_id(ctx, token).await??;
             println!("{val}")
         }
         Command::BlockHeight => {
-            let block_height = client.block_height(ctx).await?;
+            let block_height = client.block_height(ctx, token).await??;
             println!("Block height: {}", block_height)
         }
         Command::BlockInfo { block_selector } => {
-            let data = client.block_info(ctx, block_selector).await?;
+            let data = client.block_info(ctx, token, block_selector).await??;
             match data {
                 Some(block_info) => println!("{}", block_info),
                 None => println!("Not found"),
             }
         }
         Command::BlockDigestsByHeight { height } => {
-            let digests = client.block_digests_by_height(ctx, height.into()).await?;
+            let digests = client.block_digests_by_height(ctx, token, height.into()).await??;
             println!("{}", digests.iter().join("\n"));
         }
         Command::Confirmations => {
-            let val = client.confirmations(ctx).await?;
+            let val = client.confirmations(ctx, token).await??;
             match val {
                 Some(confs) => println!("{confs}"),
                 None => println!("Wallet has not received any ingoing transactions yet"),
             }
         }
         Command::PeerInfo => {
-            let peers = client.peer_info(ctx).await?;
+            let peers = client.peer_info(ctx, token).await??;
             println!("{} connected peers", peers.len());
             println!("{}", serde_json::to_string(&peers)?);
         }
         Command::AllPunishedPeers => {
-            let peer_sanctions = client.all_punished_peers(ctx).await?;
+            let peer_sanctions = client.all_punished_peers(ctx, token).await??;
             for (ip, sanction) in peer_sanctions {
                 let standing = sanction.standing;
                 let latest_sanction_str = match sanction.latest_punishment {
@@ -606,26 +594,26 @@ async fn main() -> Result<()> {
         }
         Command::TipDigest => {
             let head_hash = client
-                .block_digest(ctx, BlockSelector::Tip)
-                .await?
+                .block_digest(ctx, token, BlockSelector::Tip)
+                .await??
                 .unwrap_or_default();
             println!("{}", head_hash);
         }
         Command::LatestTipDigests { n } => {
-            let head_hashes = client.latest_tip_digests(ctx, n).await?;
+            let head_hashes = client.latest_tip_digests(ctx, token, n).await??;
             for hash in head_hashes {
                 println!("{hash}");
             }
         }
         Command::TipHeader => {
             let val = client
-                .header(ctx, BlockSelector::Tip)
-                .await?
+                .header(ctx, token, BlockSelector::Tip)
+                .await??
                 .expect("Tip header should be found");
             println!("{val}")
         }
         Command::Header { block_selector } => {
-            let res = client.header(ctx, block_selector).await?;
+            let res = client.header(ctx, token, block_selector).await??;
             if res.is_none() {
                 println!("Block did not exist in database.");
             } else {
@@ -633,34 +621,33 @@ async fn main() -> Result<()> {
             }
         }
         Command::SyncedBalance => {
-            let val = client.synced_balance(ctx).await?;
+            let val = client.synced_balance(ctx, token).await??;
             println!("{val}");
         }
         Command::SyncedBalanceUnconfirmed => {
-            let val = client.synced_balance_unconfirmed(ctx).await?;
+            let val = client.synced_balance_unconfirmed(ctx, token).await??;
             println!("{val}");
         }
         Command::WalletStatus => {
-            let wallet_status: WalletStatus = client.wallet_status(ctx).await?;
+            let wallet_status: WalletStatus = client.wallet_status(ctx, token).await??;
             println!("{}", serde_json::to_string_pretty(&wallet_status)?);
         }
         Command::NumExpectedUtxos => {
-            let num = client.num_expected_utxos(ctx).await?;
+            let num = client.num_expected_utxos(ctx, token).await??;
             println!("Found a total of {num} expected UTXOs in the database");
         }
         Command::NextReceivingAddress => {
-            let network = client.network(ctx).await?;
             let rec_addr = client
-                .next_receiving_address(ctx, KeyType::Generation)
-                .await?;
+                .next_receiving_address(ctx, token, KeyType::Generation)
+                .await??;
             println!("{}", rec_addr.to_display_bech32m(network).unwrap())
         }
         Command::MempoolTxCount => {
-            let count: usize = client.mempool_tx_count(ctx).await?;
+            let count: usize = client.mempool_tx_count(ctx, token).await??;
             println!("{}", count);
         }
         Command::MempoolSize => {
-            let size_in_bytes: usize = client.mempool_size(ctx).await?;
+            let size_in_bytes: usize = client.mempool_size(ctx, token).await??;
             println!("{} bytes", size_in_bytes);
         }
 
@@ -670,8 +657,8 @@ async fn main() -> Result<()> {
             max_num_blocks,
         } => {
             let data = client
-                .block_intervals(ctx, last_block, max_num_blocks)
-                .await?;
+                .block_intervals(ctx, token, last_block, max_num_blocks)
+                .await??;
             match data {
                 Some(intervals) => {
                     println!(
@@ -691,8 +678,8 @@ async fn main() -> Result<()> {
             max_num_blocks,
         } => {
             let intervals = client
-                .block_intervals(ctx, last_block, max_num_blocks)
-                .await?;
+                .block_intervals(ctx, token, last_block, max_num_blocks)
+                .await??;
             if intervals.as_ref().is_none_or(|x| x.is_empty()) {
                 println!("Not found");
                 return Ok(());
@@ -721,8 +708,8 @@ async fn main() -> Result<()> {
             max_num_blocks,
         } => {
             let intervals = client
-                .block_intervals(ctx, last_block, max_num_blocks)
-                .await?;
+                .block_intervals(ctx, token, last_block, max_num_blocks)
+                .await??;
             if intervals.as_ref().is_none_or(|x| x.is_empty()) {
                 println!("Not found");
                 return Ok(());
@@ -742,8 +729,8 @@ async fn main() -> Result<()> {
             max_num_blocks,
         } => {
             let intervals = client
-                .block_intervals(ctx, last_block, max_num_blocks)
-                .await?;
+                .block_intervals(ctx, token, last_block, max_num_blocks)
+                .await??;
             if intervals.as_ref().is_none_or(|x| x.is_empty()) {
                 println!("Not found");
                 return Ok(());
@@ -763,8 +750,8 @@ async fn main() -> Result<()> {
             max_num_blocks,
         } => {
             let difficulties = client
-                .block_difficulties(ctx, last_block, max_num_blocks)
-                .await?;
+                .block_difficulties(ctx, token, last_block, max_num_blocks)
+                .await??;
 
             println!(
                 "{}",
@@ -780,8 +767,8 @@ async fn main() -> Result<()> {
             max_num_blocks,
         } => {
             let difficulties = client
-                .block_difficulties(ctx, last_block, max_num_blocks)
-                .await?;
+                .block_difficulties(ctx, token, last_block, max_num_blocks)
+                .await??;
             if difficulties.is_empty() {
                 println!("Not found");
                 return Ok(());
@@ -800,15 +787,15 @@ async fn main() -> Result<()> {
         /******** CHANGE STATE ********/
         Command::Shutdown => {
             println!("Sending shutdown-command.");
-            client.shutdown(ctx).await?;
+            client.shutdown(ctx, token).await??;
             println!("Shutdown-command completed successfully.");
         }
         Command::ClearAllStandings => {
-            client.clear_all_standings(ctx).await?;
+            client.clear_all_standings(ctx, token).await??;
             println!("Cleared all standings.");
         }
         Command::ClearStandingByIp { ip } => {
-            client.clear_standing_by_ip(ctx, ip).await?;
+            client.clear_standing_by_ip(ctx, token, ip).await??;
             println!("Cleared standing of {}", ip);
         }
         Command::ClaimUtxo {
@@ -825,9 +812,8 @@ async fn main() -> Result<()> {
             };
 
             let claim_was_new = client
-                .claim_utxo(ctx, ciphertext, max_search_depth)
-                .await?
-                .map_err(|s| anyhow!(s))?;
+                .claim_utxo(ctx, token, ciphertext, max_search_depth)
+                .await??;
 
             if claim_was_new {
                 println!("Success.  1 Utxo Transfer was imported.");
@@ -844,13 +830,12 @@ async fn main() -> Result<()> {
             notify_other,
         } => {
             // Parse on client
-            let network = client.network(ctx).await?;
             let receiving_address = ReceivingAddress::from_bech32m(&address, network)?;
-            let root_dir = DataDirectory::get(None, network)?;
 
             let resp = client
                 .send(
                     ctx,
+                    token,
                     amount,
                     receiving_address,
                     notify_self,
@@ -869,14 +854,13 @@ async fn main() -> Result<()> {
             println!("Successfully created transaction: {txid}");
 
             process_utxo_notifications(
-                &root_dir,
+                &data_directory,
                 network,
                 private_notifications,
                 Some(receiver_tag),
             )?
         }
         Command::SendToMany { outputs, fee } => {
-            let network = client.network(ctx).await?;
             let parsed_outputs = outputs
                 .into_iter()
                 .map(|o| o.to_receiving_address_amount_tuple(network))
@@ -885,6 +869,7 @@ async fn main() -> Result<()> {
             let res = client
                 .send_to_many(
                     ctx,
+                    token,
                     parsed_outputs,
                     UtxoNotificationMedium::OnChain,
                     UtxoNotificationMedium::OnChain,
@@ -900,17 +885,17 @@ async fn main() -> Result<()> {
         }
         Command::PauseMiner => {
             println!("Sending command to pause miner.");
-            client.pause_miner(ctx).await?;
+            client.pause_miner(ctx, token).await??;
             println!("Command completed successfully");
         }
         Command::RestartMiner => {
             println!("Sending command to restart miner.");
-            client.restart_miner(ctx).await?;
+            client.restart_miner(ctx, token).await??;
             println!("Command completed successfully");
         }
 
         Command::PruneAbandonedMonitoredUtxos => {
-            let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx).await?;
+            let prunt_res_count = client.prune_abandoned_monitored_utxos(ctx, token).await??;
             println!("{prunt_res_count} monitored UTXOs marked as abandoned");
         }
     }

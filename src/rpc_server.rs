@@ -159,8 +159,13 @@ impl MempoolTransactionInfo {
 pub trait RPC {
     /******** READ DATA ********/
     // Place all methods that only read here
-    // Return which network the client is running
-    async fn network(token: rpc_auth::Token) -> RpcResult<Network>;
+
+    /// Return which network the client is running
+    ///
+    /// this method does not require authentication because local clients must
+    /// know the server's network in order to locate auth cookie file, which is
+    /// required for Cookie based authentication.
+    async fn network() -> RpcResult<Network>;
 
     /// Returns local socket used for incoming peer-connections. Does not show
     /// the public IP address, as the client does not know this.
@@ -796,9 +801,8 @@ impl NeptuneRPCServer {
 
 impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
-    async fn network(self, _: context::Context, token: rpc_auth::Token) -> RpcResult<Network> {
+    async fn network(self, _: context::Context) -> RpcResult<Network> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
 
         Ok(self.state.cli().network)
     }
