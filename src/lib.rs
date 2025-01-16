@@ -19,6 +19,7 @@ pub mod mine_loop;
 pub mod models;
 pub mod peer_loop;
 pub mod prelude;
+pub mod rpc_auth;
 pub mod rpc_server;
 pub mod util_types;
 
@@ -254,6 +255,9 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
         tokio::spawn(fut);
     }
 
+    // each time we start neptune-core a new RPC cookie is generated.
+    let cookie = crate::rpc_auth::Cookie::try_new(global_state_lock.data_dir())?;
+
     let rpc_join_handle = tokio::spawn(async move {
         rpc_listener
             // Ignore accept errors.
@@ -266,6 +270,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
             .map(move |channel| {
                 let server = rpc_server::NeptuneRPCServer {
                     state: rpc_state_lock.clone(),
+                    cookie,
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };
 

@@ -61,6 +61,7 @@ use crate::models::state::wallet::wallet_status::WalletStatus;
 use crate::models::state::GlobalState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -167,7 +168,7 @@ pub trait RPC {
     /// Return the node's instance-ID which is a globally unique random generated number
     /// set at startup used to ensure that the node does not connect to itself, or the
     /// same peer twice.
-    async fn own_instance_id() -> InstanceId;
+    async fn own_instance_id(token: rpc_auth::Token) -> Result<InstanceId, String>;
 
     /// Returns the current block height.
     async fn block_height() -> BlockHeight;
@@ -365,6 +366,7 @@ pub trait RPC {
 #[derive(Clone)]
 pub(crate) struct NeptuneRPCServer {
     pub(crate) state: GlobalStateLock,
+    pub(crate) cookie: rpc_auth::Cookie,
     pub(crate) rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
@@ -764,9 +766,12 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn own_instance_id(self, _context: context::Context) -> InstanceId {
+    async fn own_instance_id(self, _context: context::Context, token: rpc_auth::Token) -> Result<InstanceId, String> {
         log_slow_scope!(fn_name!());
-        self.state.lock_guard().await.net.instance_id
+
+        token.auth(&self.cookie).map_err(|e| e.to_string())?;
+
+        Ok(self.state.lock_guard().await.net.instance_id)
     }
 
     // documented in trait. do not add doc-comment.
@@ -1641,8 +1646,11 @@ mod rpc_server_tests {
             }
         });
 
+        let cookie = rpc_auth::Cookie::try_new(global_state_lock.data_dir()).unwrap();
+
         NeptuneRPCServer {
             state: global_state_lock,
+            cookie,
             rpc_server_to_main_tx: dummy_tx,
         }
     }
