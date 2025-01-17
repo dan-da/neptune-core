@@ -136,7 +136,7 @@ impl Cookie {
             .open(&path_tmp)
             .await
             .map_err(|e| error::CookieFileError {
-                path: path.clone(),
+                path: path_tmp.clone(),
                 error: e,
             })?;
 
@@ -144,9 +144,25 @@ impl Cookie {
         file.write_all(&secret)
             .await
             .map_err(|e| error::CookieFileError {
-                path: path.clone(),
+                path: path_tmp.clone(),
                 error: e,
             })?;
+
+        // unlink old path if existing.
+        if tokio::fs::try_exists(&path)
+            .await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?
+        {
+            tokio::fs::remove_file(&path)
+                .await
+                .map_err(|e| error::CookieFileError {
+                    path: path.clone(),
+                    error: e,
+                })?;
+        }
 
         // rename temp file.  rename is an atomic operation in most filesystems.
         tokio::fs::rename(&path_tmp, &path)
