@@ -102,16 +102,20 @@ impl Cookie {
     }
 
     /// try creating a new cookie file
+    ///
+    /// note: will create missing directories in path if necessary.
     pub async fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let secret = Self::gen_secret();
         let path = Self::cookie_file_path(data_dir);
 
-        tokio::fs::create_dir_all(&data_dir.root_dir_path())
-            .await
-            .map_err(|e| error::CookieFileError {
-                path: path.clone(),
-                error: e,
-            })?;
+        if let Some(parent_dir) = path.parent() {
+            tokio::fs::create_dir_all(&parent_dir)
+                .await
+                .map_err(|e| error::CookieFileError {
+                    path: path.clone(),
+                    error: e,
+                })?;
+        }
 
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
@@ -129,6 +133,12 @@ impl Cookie {
             .map_err(|e| error::CookieFileError { path, error: e })?;
 
         Ok(Self(secret))
+    }
+
+    // creates a cookie that exists in mem only, no .cookie file written to disk.
+    #[cfg(test)]
+    pub fn new_in_mem() -> Self {
+        Self(Self::gen_secret())
     }
 
     /// authenticate against a known valid cookie
@@ -176,5 +186,80 @@ pub mod error {
 
         #[source]
         pub error: tokio::io::Error,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::tests::shared::unit_test_data_directory;
+
+    /// test token authentication, cookie variant.
+    ///
+    /// tests:
+    ///  1. Token::auth() succeeds for valid token
+    ///  2. Token::auth() returns AuthError::InvalidCookie for invalid token
+    #[tokio::test]
+    pub async fn token_cookie_auth() -> anyhow::Result<()> {
+        let data_dir = unit_test_data_directory(Network::Main)?;
+
+        let valid_tokens: Vec<Token> = vec![Cookie::try_new(&data_dir).await?.into()];
+        let valid_token_loaded: Token = Cookie::try_load(&data_dir).await?.into();
+        let invalid_token: Token = Cookie::new_in_mem().into();
+
+        // verify that auth fails for invalid token.
+        let result = invalid_token.auth(&valid_tokens);
+        assert(matches!(result, AuthError::InvalidCookie));
+
+        // verify that auth succeeds for valid cookie.
+        assert!(valid_token_loaded.auth(&valid_tokens).is_ok());
+    }
+
+    /// tests cookies are unique
+    ///
+    /// invokes Cookie::try_new() 50 times and stores in HashSet.
+    ///
+    /// tests:
+    ///  1. Verify that HashSet contains 50 items.
+    #[tokio::test]
+    pub async fn cookie_try_new_unique() -> anyhow::Result<()> {
+        let data_dir = unit_test_data_directory(Network::RegTest)?;
+        const NUM_COOKIES: u8 = 50;
+
+        let mut set: HashSet<Cookie> = Default::default();
+
+        for i in (0..NUM_COOKIES) {
+            set.push(Cookie::try_new(&data_dir).await?);
+        }
+
+        // verify there are 50 unique cookies
+        assert_eq!(set.len(), NUM_COOKIES);
+    }
+
+    /// test cookie authentication.
+    ///
+    /// exercises:
+    ///  1. Cookie::try_new()
+    ///  2. Cookie::try_load()
+    ///
+    /// tests:
+    ///  1. Cookie::auth() succeeds for valid cookie
+    ///  2. Cookie::auth() returns AuthError::InvalidCookei for invalid cookie
+    #[tokio::test]
+    pub async fn cookie_auth() -> anyhow::Result<()> {
+        let data_dir = unit_test_data_directory(Network::Alpha)?;
+
+        let valid_cookie = Cookie::try_new(&data_dir).await?;
+        let valid_cookie_loaded = Cookie::try_load(&data_dir).await?;
+        let invalid_cookie = Cookie::new_in_mem();
+
+        assert_ne!(valid_cookie, invalid_cookie);
+
+        // verify that auth fails for invalid cookie.
+        let result = invalid_cookie.auth(&valid_cookie);
+        assert(matches!(result, AuthError::InvalidCookie));
+
+        // verify that auth succeeds for valid cookie.
+        assert!(valid_cookie_loaded.auth(&valid_cookie).is_ok());
     }
 }
