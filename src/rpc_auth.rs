@@ -73,7 +73,7 @@ type CookieBytes = [u8; 32];
 ///      has read access for files written by neptune-core.
 ///   2. enables automated authentication without requiring user to
 ///      manually set a password somewhere.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Cookie(CookieBytes);
 
 impl From<CookieBytes> for Cookie {
@@ -194,72 +194,91 @@ mod test {
     use super::*;
     use crate::tests::shared::unit_test_data_directory;
 
-    /// test token authentication, cookie variant.
-    ///
-    /// tests:
-    ///  1. Token::auth() succeeds for valid token
-    ///  2. Token::auth() returns AuthError::InvalidCookie for invalid token
-    #[tokio::test]
-    pub async fn token_cookie_auth() -> anyhow::Result<()> {
-        let data_dir = unit_test_data_directory(Network::Main)?;
+    mod token {
+        use super::*;
 
-        let valid_tokens: Vec<Token> = vec![Cookie::try_new(&data_dir).await?.into()];
-        let valid_token_loaded: Token = Cookie::try_load(&data_dir).await?.into();
-        let invalid_token: Token = Cookie::new_in_mem().into();
+        mod cookie {
+            use super::*;
 
-        // verify that auth fails for invalid token.
-        let result = invalid_token.auth(&valid_tokens);
-        assert(matches!(result, AuthError::InvalidCookie));
+            /// test token authentication, cookie variant.
+            ///
+            /// tests:
+            ///  1. Token::auth() succeeds for valid token
+            ///  2. Token::auth() returns AuthError::InvalidCookie for invalid token
+            #[tokio::test]
+            pub async fn auth() -> anyhow::Result<()> {
+                let data_dir = unit_test_data_directory(Network::Main)?;
 
-        // verify that auth succeeds for valid cookie.
-        assert!(valid_token_loaded.auth(&valid_tokens).is_ok());
+                let valid_tokens: Vec<Token> = vec![Cookie::try_new(&data_dir).await?.into()];
+                let valid_token_loaded: Token = Cookie::try_load(&data_dir).await?.into();
+                let invalid_token: Token = Cookie::new_in_mem().into();
+
+                // verify that auth fails for invalid token.
+                let result = invalid_token.auth(&valid_tokens);
+                assert!(matches!(result, Err(error::AuthError::InvalidCookie)));
+
+                // verify that auth succeeds for valid cookie.
+                assert!(valid_token_loaded.auth(&valid_tokens).is_ok());
+
+                Ok(())
+            }
+        }
     }
 
-    /// tests cookies are unique
-    ///
-    /// invokes Cookie::try_new() 50 times and stores in HashSet.
-    ///
-    /// tests:
-    ///  1. Verify that HashSet contains 50 items.
-    #[tokio::test]
-    pub async fn cookie_try_new_unique() -> anyhow::Result<()> {
-        let data_dir = unit_test_data_directory(Network::RegTest)?;
-        const NUM_COOKIES: u8 = 50;
+    mod cookie {
+        use super::*;
+        use std::collections::HashSet;
 
-        let mut set: HashSet<Cookie> = Default::default();
+        /// tests cookies are unique
+        ///
+        /// invokes Cookie::try_new() 50 times and stores in HashSet.
+        ///
+        /// tests:
+        ///  1. Verify that HashSet contains 50 items.
+        #[tokio::test]
+        pub async fn try_new_unique() -> anyhow::Result<()> {
+            let data_dir = unit_test_data_directory(Network::RegTest)?;
+            const NUM_COOKIES: usize = 50;
 
-        for i in (0..NUM_COOKIES) {
-            set.push(Cookie::try_new(&data_dir).await?);
+            let mut set: HashSet<Cookie> = Default::default();
+
+            for _ in 0..NUM_COOKIES {
+                set.insert(Cookie::try_new(&data_dir).await?);
+            }
+
+            // verify there are 50 unique cookies
+            assert_eq!(set.len(), NUM_COOKIES);
+
+            Ok(())
         }
 
-        // verify there are 50 unique cookies
-        assert_eq!(set.len(), NUM_COOKIES);
-    }
+        /// test cookie authentication.
+        ///
+        /// exercises:
+        ///  1. Cookie::try_new()
+        ///  2. Cookie::try_load()
+        ///
+        /// tests:
+        ///  1. Cookie::auth() succeeds for valid cookie
+        ///  2. Cookie::auth() returns AuthError::InvalidCookei for invalid cookie
+        #[tokio::test]
+        pub async fn auth() -> anyhow::Result<()> {
+            let data_dir = unit_test_data_directory(Network::Alpha)?;
 
-    /// test cookie authentication.
-    ///
-    /// exercises:
-    ///  1. Cookie::try_new()
-    ///  2. Cookie::try_load()
-    ///
-    /// tests:
-    ///  1. Cookie::auth() succeeds for valid cookie
-    ///  2. Cookie::auth() returns AuthError::InvalidCookei for invalid cookie
-    #[tokio::test]
-    pub async fn cookie_auth() -> anyhow::Result<()> {
-        let data_dir = unit_test_data_directory(Network::Alpha)?;
+            let valid_cookie = Cookie::try_new(&data_dir).await?;
+            let valid_cookie_loaded = Cookie::try_load(&data_dir).await?;
+            let invalid_cookie = Cookie::new_in_mem();
 
-        let valid_cookie = Cookie::try_new(&data_dir).await?;
-        let valid_cookie_loaded = Cookie::try_load(&data_dir).await?;
-        let invalid_cookie = Cookie::new_in_mem();
+            assert_ne!(valid_cookie, invalid_cookie);
 
-        assert_ne!(valid_cookie, invalid_cookie);
+            // verify that auth fails for invalid cookie.
+            let result = invalid_cookie.auth(&valid_cookie);
+            assert!(matches!(result, Err(error::AuthError::InvalidCookie)));
 
-        // verify that auth fails for invalid cookie.
-        let result = invalid_cookie.auth(&valid_cookie);
-        assert(matches!(result, AuthError::InvalidCookie));
+            // verify that auth succeeds for valid cookie.
+            assert!(valid_cookie_loaded.auth(&valid_cookie).is_ok());
 
-        // verify that auth succeeds for valid cookie.
-        assert!(valid_cookie_loaded.auth(&valid_cookie).is_ok());
+            Ok(())
+        }
     }
 }
