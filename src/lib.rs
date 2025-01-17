@@ -256,7 +256,8 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
     }
 
     // each time we start neptune-core a new RPC cookie is generated.
-    let cookie = crate::rpc_auth::Cookie::try_new(global_state_lock.data_dir())?;
+    let valid_tokens: Vec<rpc_auth::Token> =
+        vec![crate::rpc_auth::Cookie::try_new(global_state_lock.data_dir())?.into()];
 
     let rpc_join_handle = tokio::spawn(async move {
         rpc_listener
@@ -270,7 +271,7 @@ pub async fn initialize(cli_args: cli_args::Args) -> Result<i32> {
             .map(move |channel| {
                 let server = rpc_server::NeptuneRPCServer {
                     state: rpc_state_lock.clone(),
-                    cookie,
+                    valid_tokens: valid_tokens.clone(),
                     rpc_server_to_main_tx: rpc_server_to_main_tx.clone(),
                 };
 

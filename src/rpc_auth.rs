@@ -9,14 +9,33 @@ use serde::Serialize;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
 
+/// enumerates neptune-core RPC authentication token types
+///
+/// a [Token] is passed and authenticated with every RPC method call.
+///
+/// this is intended to be extensible with new variants in the future.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Token {
     Cookie(Cookie), //  [u8; 32]
+
+                    // possible future types, eg
+                    // Basic{user: String, pass: String},
 }
 
 impl Token {
-    pub fn auth(&self, valid_cookie: &Cookie) -> Result<(), error::AuthError> {
+    /// authenticate this token against known valid token data.
+    ///
+    /// valid_tokens should be an array containing one valid token of each [Token] variant.
+    pub(crate) fn auth(&self, valid_tokens: &[Self]) -> Result<(), error::AuthError> {
+        let valid_cookie = valid_tokens
+            .iter()
+            .filter_map(|v| match v {
+                Self::Cookie(c) => Some(c),
+            })
+            .next()
+            .expect("should have a valid cookie");
+
         match self {
             Self::Cookie(c) => c.auth(valid_cookie),
         }
@@ -29,8 +48,22 @@ impl From<Cookie> for Token {
     }
 }
 
+/// defines size of cookie byte array
 type CookieBytes = [u8; 32];
 
+/// represents an RPC authentication cookie
+///
+/// a cookie file is created each time neptune-core is started.
+///
+/// local (same-device) RPC clients with read access to the cookie
+/// file can read it and provide the cookie as an auth [Token]
+/// when calling RPC methods.
+///
+/// The cookie serves a couple purposes:
+///   1. proves to neptune-core that the client is on the same device and
+///      has read access for files written by neptune-core.
+///   2. enables automated authentication without requiring user to
+///      manually set a password somewhere.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Cookie(CookieBytes);
 
@@ -41,6 +74,7 @@ impl From<CookieBytes> for Cookie {
 }
 
 impl Cookie {
+    /// try loading cookie from a file
     pub fn try_load(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let mut cookie: CookieBytes = [0; 32];
         let path = Self::cookie_file_path(data_dir);
@@ -55,6 +89,7 @@ impl Cookie {
         Ok(Self(cookie))
     }
 
+    /// try creating a new cookie file
     pub fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let secret = Self::gen_secret();
         let path = Self::cookie_file_path(data_dir);
@@ -67,6 +102,7 @@ impl Cookie {
         Ok(Self(secret))
     }
 
+    /// authenticate against a known valid cookie
     pub fn auth(&self, valid: &Self) -> Result<(), error::AuthError> {
         match self == valid {
             true => Ok(()),
@@ -78,11 +114,13 @@ impl Cookie {
         rand::random()
     }
 
+    /// get cookie file path
     pub fn cookie_file_path(data_dir: &DataDirectory) -> PathBuf {
         data_dir.rpc_cookie_file_path()
     }
 }
 
+/// provides a hint neptune-core client can use to automate authentication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CookieHint {
     pub data_directory: DataDirectory,

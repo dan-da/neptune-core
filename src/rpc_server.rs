@@ -419,7 +419,7 @@ pub trait RPC {
 #[derive(Clone)]
 pub(crate) struct NeptuneRPCServer {
     pub(crate) state: GlobalStateLock,
-    pub(crate) cookie: rpc_auth::Cookie,
+    pub(crate) valid_tokens: Vec<rpc_auth::Token>,
     pub(crate) rpc_server_to_main_tx: tokio::sync::mpsc::Sender<RPCServerToMain>,
 }
 
@@ -833,7 +833,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Option<SocketAddr>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let listen_port = self.state.cli().own_listen_port();
         let listen_for_peers_ip = self.state.cli().listen_addr;
@@ -847,7 +847,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<InstanceId> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self.state.lock_guard().await.net.instance_id)
     }
@@ -859,7 +859,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<BlockHeight> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -879,7 +879,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Option<BlockHeight>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let guard = self.state.lock_guard().await;
         Ok(self.confirmations_internal(&guard).await)
@@ -893,7 +893,7 @@ impl RPC for NeptuneRPCServer {
         leaf_index: u64,
     ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let aocl = &state.chain.archival_state().archival_mutator_set.ams().aocl;
@@ -914,7 +914,7 @@ impl RPC for NeptuneRPCServer {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<Digest>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let archival_state = state.chain.archival_state();
@@ -937,7 +937,7 @@ impl RPC for NeptuneRPCServer {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockInfo>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let digest = match block_selector.as_digest(&state).await {
@@ -980,7 +980,7 @@ impl RPC for NeptuneRPCServer {
         height: BlockHeight,
     ) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1000,7 +1000,7 @@ impl RPC for NeptuneRPCServer {
         n: usize,
     ) -> RpcResult<Vec<Digest>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
 
@@ -1020,7 +1020,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Vec<PeerInfo>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1040,7 +1040,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<HashMap<IpAddr, PeerStanding>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let mut sanctions_in_memory = HashMap::default();
 
@@ -1076,7 +1076,7 @@ impl RPC for NeptuneRPCServer {
         network: Network,
     ) -> RpcResult<Option<ReceivingAddress>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let ret = if let Ok(address) = ReceivingAddress::from_bech32m(&address_string, network) {
             Some(address)
@@ -1098,7 +1098,7 @@ impl RPC for NeptuneRPCServer {
         amount_string: String,
     ) -> RpcResult<Option<NeptuneCoins>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         // parse string
         if let Ok(amt) = NeptuneCoins::from_str(&amount_string) {
@@ -1116,7 +1116,7 @@ impl RPC for NeptuneRPCServer {
         amount: NeptuneCoins,
     ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let now = Timestamp::now();
         // test inequality
@@ -1136,7 +1136,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<NeptuneCoins> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let now = Timestamp::now();
         let wallet_status = self
@@ -1155,7 +1155,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<NeptuneCoins> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let gs = self.state.lock_guard().await;
 
@@ -1172,7 +1172,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<WalletStatus> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1188,7 +1188,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<u64> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1207,7 +1207,7 @@ impl RPC for NeptuneRPCServer {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockHeader>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let block_digest = match block_selector.as_digest(&state).await {
@@ -1233,7 +1233,7 @@ impl RPC for NeptuneRPCServer {
         key_type: KeyType,
     ) -> RpcResult<ReceivingAddress> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
 
@@ -1256,7 +1256,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1275,7 +1275,7 @@ impl RPC for NeptuneRPCServer {
         key_type: KeyType,
     ) -> RpcResult<Vec<SpendingKey>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1293,7 +1293,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self.state.lock_guard().await.mempool.len())
     }
@@ -1305,7 +1305,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self.state.lock_guard().await.mempool.get_size())
     }
@@ -1317,7 +1317,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Vec<(Digest, BlockHeight, Timestamp, NeptuneCoins)>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let history = self.state.lock_guard().await.get_balance_history().await;
 
@@ -1339,7 +1339,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<DashBoardOverviewDataFromClient> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let now = Timestamp::now();
         let state = self.state.lock_guard().await;
@@ -1426,7 +1426,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -1454,7 +1454,7 @@ impl RPC for NeptuneRPCServer {
         ip: IpAddr,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         global_state_mut
@@ -1515,7 +1515,7 @@ impl RPC for NeptuneRPCServer {
         fee: NeptuneCoins,
     ) -> RpcResult<(TransactionKernelId, Vec<PrivateNotificationData>)> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         tracing::debug!("stm: entered fn");
 
@@ -1552,7 +1552,7 @@ impl RPC for NeptuneRPCServer {
         max_search_depth: Option<u64>,
     ) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let claim_data = self
             .claim_utxo_inner(encrypted_utxo_notification, max_search_depth)
@@ -1579,7 +1579,7 @@ impl RPC for NeptuneRPCServer {
     // documented in trait. do not add doc-comment.
     async fn shutdown(self, _: context::Context, token: rpc_auth::Token) -> RpcResult<bool> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         // 1. Send shutdown message to main
         let response = self
@@ -1598,7 +1598,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         if self.state.cli().mine() {
             let _ = self
@@ -1618,7 +1618,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<()> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         if self.state.cli().mine() {
             let _ = self
@@ -1638,7 +1638,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<usize> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let mut global_state_mut = self.state.lock_guard_mut().await;
         const DEFAULT_MUTXO_PRUNE_DEPTH: usize = 200;
@@ -1671,7 +1671,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Vec<CoinWithPossibleTimeLock>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(self
             .state
@@ -1689,7 +1689,7 @@ impl RPC for NeptuneRPCServer {
         token: rpc_auth::Token,
     ) -> RpcResult<Option<f32>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         Ok(Self::cpu_temp_inner())
     }
@@ -1703,7 +1703,7 @@ impl RPC for NeptuneRPCServer {
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Option<Vec<(u64, u64)>>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let last_block = match last_block.as_digest(&state).await {
@@ -1746,7 +1746,7 @@ impl RPC for NeptuneRPCServer {
         max_num_blocks: Option<usize>,
     ) -> RpcResult<Vec<(u64, Difficulty)>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let state = self.state.lock_guard().await;
         let last_block = last_block.as_digest(&state).await;
@@ -1786,7 +1786,7 @@ impl RPC for NeptuneRPCServer {
         number: usize,
     ) -> RpcResult<Vec<MempoolTransactionInfo>> {
         log_slow_scope!(fn_name!());
-        token.auth(&self.cookie)?;
+        token.auth(&self.valid_tokens)?;
 
         let global_state = self.state.lock_guard().await;
         let mempool_txkids = global_state
@@ -1964,11 +1964,14 @@ mod rpc_server_tests {
             }
         });
 
-        let cookie = rpc_auth::Cookie::try_new(global_state_lock.data_dir()).unwrap();
+        let valid_tokens: Vec<rpc_auth::Token> =
+            vec![rpc_auth::Cookie::try_new(global_state_lock.data_dir())
+                .unwrap()
+                .into()];
 
         NeptuneRPCServer {
             state: global_state_lock,
-            cookie,
+            valid_tokens,
             rpc_server_to_main_tx: dummy_tx,
         }
     }
