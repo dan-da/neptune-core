@@ -321,5 +321,44 @@ mod test {
 
             Ok(())
         }
+
+        // tests concurrent access to .cookie file.
+        //
+        // performs 1000 writes to .cookie file and 1000 reads
+        // of .cookie file in separate threads.
+        //
+        // if any error occurs, the test will panic.
+        #[tokio::test]
+        pub async fn concurrency() -> anyhow::Result<()> {
+            let data_dir = unit_test_data_directory(Network::Alpha)?;
+
+            // ensure a cookie file has been written.
+            Cookie::try_new(&data_dir).await?;
+
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .unwrap();
+                    rt.block_on(async {
+                        for _ in 0..1000 {
+                            Cookie::try_new(&data_dir).await.unwrap();
+                        }
+                    });
+                });
+                s.spawn(|| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .unwrap();
+                    rt.block_on(async {
+                        for _ in 0..1000 {
+                            Cookie::try_load(&data_dir).await.unwrap();
+                        }
+                    });
+                });
+            });
+
+            Ok(())
+        }
     }
 }
