@@ -26,18 +26,25 @@ pub enum Token {
 impl Token {
     /// authenticate this token against known valid token data.
     ///
-    /// valid_tokens should be an array containing one valid token of each [Token] variant.
+    /// `valid_tokens` should be an array containing one valid token of each
+    /// [Token] variant.
+    ///
+    /// validation occurs against first valid token of same variant type as
+    /// `self`.  any subsequent valid tokens of same type are ignored.
+    ///
+    /// panics if `valid_tokens` does not contain a variant matching `self`.
     pub(crate) fn auth(&self, valid_tokens: &[Self]) -> Result<(), error::AuthError> {
-        let valid_cookie = valid_tokens
+        // find first valid_token of same variant as self, panic if none.
+        let valid_token = valid_tokens
             .iter()
-            .filter_map(|v| match v {
-                Self::Cookie(c) => Some(c),
-            })
+            .filter(|v| std::mem::discriminant(self) == std::mem::discriminant(v))
             .next()
-            .expect("should have a valid cookie");
+            .expect("caller must provide one valid token of each variant");
 
-        match self {
-            Self::Cookie(c) => c.auth(valid_cookie),
+        match (self, valid_token) {
+            (Self::Cookie(c), Self::Cookie(valid)) => c.auth(valid),
+            // uncomment this line if another variant is added.
+            // _ => unreachable!(),
         }
     }
 }
