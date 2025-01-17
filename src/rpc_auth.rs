@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::config_models::data_directory::DataDirectory;
+use crate::config_models::network::Network;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -70,6 +71,12 @@ impl Cookie {
     pub fn cookie_file_path(data_dir: &DataDirectory) -> PathBuf {
         data_dir.rpc_cookie_file_path()
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CookieHint {
+    pub data_directory: DataDirectory,
+    pub network: Network,
 }
 
 pub mod error {

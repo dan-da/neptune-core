@@ -160,6 +160,11 @@ pub trait RPC {
     /******** READ DATA ********/
     // Place all methods that only read here
 
+    /// this method does not require authentication because local clients must
+    /// know the server's network in order to locate auth cookie file, which is
+    /// required for Cookie based authentication.
+    async fn cookie_hint() -> RpcResult<rpc_auth::CookieHint>;
+
     /// Return which network the client is running
     ///
     /// this method does not require authentication because local clients must
@@ -800,6 +805,20 @@ impl NeptuneRPCServer {
 }
 
 impl RPC for NeptuneRPCServer {
+    // documented in trait. do not add doc-comment.
+    async fn cookie_hint(self, _: context::Context) -> RpcResult<rpc_auth::CookieHint> {
+        log_slow_scope!(fn_name!());
+
+        if self.state.cli().allow_cookie_hint {
+            Ok(rpc_auth::CookieHint {
+                data_directory: self.state.data_dir().to_owned(),
+                network: self.state.cli().network,
+            })
+        } else {
+            Err(error::RpcError::CookieHintDisabled)
+        }
+    }
+
     // documented in trait. do not add doc-comment.
     async fn network(self, _: context::Context) -> RpcResult<Network> {
         log_slow_scope!(fn_name!());
@@ -1837,6 +1856,9 @@ pub mod error {
         Failed(String),
 
         // API specific error variants.
+        #[error("cookie hints are disabled on this node")]
+        CookieHintDisabled,
+
         #[error(transparent)]
         SendError(#[from] SendError),
 

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use anyhow::Context;
 use anyhow::Result;
 use directories::ProjectDirs;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::config_models::network::Network;
 use crate::models::database::DATABASE_DIRECTORY_ROOT_NAME;
@@ -22,7 +24,7 @@ const UTXO_TRANSFER_DIRECTORY: &str = "utxo-transfer";
 const RPC_COOKIE_FILE_NAME: &str = ".cookie"; // matches bitcoin-core name.
 
 // TODO: Add `rusty_leveldb::Options` and `fs::OpenOptions` here too, since they keep being repeated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataDirectory {
     data_dir: PathBuf,
 }
