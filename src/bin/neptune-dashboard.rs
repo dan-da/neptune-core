@@ -72,13 +72,11 @@ async fn main() {
     {
         Ok(Ok(la)) => la,
         Ok(Err(err)) => {
-            eprintln!("{err}");
-            eprintln!("Could not get listen address from client.");
+            eprintln!("Could not get listen address from client. error = {err}");
             process::exit(1);
         }
         Err(err) => {
-            eprintln!("{err}");
-            eprintln!("Could not get listen address from client.");
+            eprintln!("Could not get listen address from client. error = {err}");
             process::exit(1);
         }
     };
