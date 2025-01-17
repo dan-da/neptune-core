@@ -944,7 +944,7 @@ async fn get_cookie_hint(
 
     match result {
         Ok(hint) => Ok(hint),
-        Err(e) if matches!(e, RpcError::CookieHintDisabled) => fallback(client, args).await,
+        Err(RpcError::CookieHintDisabled) => fallback(client, args).await,
         Err(e) => Err(e.into()),
     }
 }
