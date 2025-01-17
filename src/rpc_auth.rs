@@ -41,19 +41,29 @@ impl From<CookieBytes> for Cookie {
 }
 
 impl Cookie {
-    pub fn try_load(data_dir: &DataDirectory) -> std::io::Result<Self> {
+    pub fn try_load(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let mut cookie: CookieBytes = [0; 32];
-        let mut f = File::open(Self::cookie_file_path(data_dir))?;
+        let path = Self::cookie_file_path(data_dir);
+        let mut f = File::open(&path).map_err(|e| error::CookieFileError {
+            path: path.clone(),
+            error: e,
+        })?;
 
-        f.read_exact(&mut cookie)?;
+        f.read_exact(&mut cookie)
+            .map_err(|e| error::CookieFileError { path, error: e })?;
 
         Ok(Self(cookie))
     }
 
-    pub fn try_new(data_dir: &DataDirectory) -> std::io::Result<Self> {
+    pub fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let secret = Self::gen_secret();
-        let mut file = File::create(Self::cookie_file_path(data_dir))?;
-        file.write_all(&secret)?;
+        let path = Self::cookie_file_path(data_dir);
+        let mut file = File::create(&path).map_err(|e| error::CookieFileError {
+            path: path.clone(),
+            error: e,
+        })?;
+        file.write_all(&secret)
+            .map_err(|e| error::CookieFileError { path, error: e })?;
         Ok(Self(secret))
     }
 
@@ -89,5 +99,15 @@ pub mod error {
     pub enum AuthError {
         #[error("invalid authentication cookie")]
         InvalidCookie,
+    }
+
+    /// enumerates possible cookie load errors
+    #[derive(Debug, thiserror::Error)]
+    #[error("cookie file error")]
+    pub struct CookieFileError {
+        pub path: PathBuf,
+
+        #[source]
+        pub error: std::io::Error,
     }
 }
