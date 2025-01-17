@@ -103,7 +103,7 @@ pub mod error {
 
     /// enumerates possible cookie load errors
     #[derive(Debug, thiserror::Error)]
-    #[error("cookie file error")]
+    #[error("cookie file error: {}, path: {}", self.error, self.path.display())]
     pub struct CookieFileError {
         pub path: PathBuf,
 
