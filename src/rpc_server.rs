@@ -1966,6 +1966,7 @@ mod rpc_server_tests {
 
         let valid_tokens: Vec<rpc_auth::Token> =
             vec![rpc_auth::Cookie::try_new(global_state_lock.data_dir())
+                .await
                 .unwrap()
                 .into()];
 
@@ -1976,8 +1977,9 @@ mod rpc_server_tests {
         }
     }
 
-    fn cookie_token(server: &NeptuneRPCServer) -> rpc_auth::Token {
-        rpc_auth::Cookie::try_load(&server.state.data_dir())
+    async fn cookie_token(server: &NeptuneRPCServer) -> rpc_auth::Token {
+        rpc_auth::Cookie::try_load(server.state.data_dir())
+            .await
             .unwrap()
             .into()
     }
@@ -2018,7 +2020,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let ctx = context::current();
         let _ = rpc_server.clone().network(ctx).await;
         let _ = rpc_server
@@ -2135,7 +2137,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let balance = rpc_server.synced_balance(context::current(), token).await?;
         assert!(balance.is_zero());
 
@@ -2153,7 +2155,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let rpc_request_context = context::current();
         let (peer_address0, peer_address1) = {
             let global_state = rpc_server.state.lock_guard().await;
@@ -2312,7 +2314,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let mut state = rpc_server.state.lock_guard_mut().await;
         let peer_address0 = state.net.peer_map.values().collect::<Vec<_>>()[0].connected_address();
         let peer_address1 = state.net.peer_map.values().collect::<Vec<_>>()[1].connected_address();
@@ -2441,7 +2443,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let aocl_leaves = rpc_server
             .state
             .lock_guard()
@@ -2481,7 +2483,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
@@ -2588,7 +2590,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let global_state = rpc_server.state.lock_guard().await;
         let ctx = context::current();
 
@@ -2672,7 +2674,7 @@ mod rpc_server_tests {
             cli_args::Args::default(),
         )
         .await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
         let _current_server_temperature = rpc_server
             .cpu_temp(context::current(), token)
             .await
@@ -2695,7 +2697,7 @@ mod rpc_server_tests {
         };
 
         let rpc_server = test_rpc_server(network, WalletSecret::new_random(), 2, cli_on).await;
-        let token = cookie_token(&rpc_server);
+        let token = cookie_token(&rpc_server).await;
 
         assert!(rpc_server
             .clone()
@@ -2777,7 +2779,7 @@ mod rpc_server_tests {
                     let rpc_server =
                         test_rpc_server(network, WalletSecret::new_random(), 2, Args::default())
                             .await;
-                    let token = cookie_token(&rpc_server);
+                    let token = cookie_token(&rpc_server).await;
 
                     let receiving_address_generation = rpc_server
                         .clone()
@@ -2938,7 +2940,7 @@ mod rpc_server_tests {
                 let bob_wallet = WalletSecret::new_random();
                 let mut bob =
                     test_rpc_server(network, bob_wallet.clone(), 2, Args::default()).await;
-                let bob_token = cookie_token(&bob);
+                let bob_token = cookie_token(&bob).await;
 
                 let in_seven_months =
                     Block::genesis_block(network).header().timestamp + Timestamp::months(7);
@@ -3097,7 +3099,7 @@ mod rpc_server_tests {
                 cli_args::Args::default(),
             )
             .await;
-            let token = cookie_token(&rpc_server);
+            let token = cookie_token(&rpc_server).await;
 
             let ctx = context::current();
             let timestamp = network.launch_date() + Timestamp::days(1);

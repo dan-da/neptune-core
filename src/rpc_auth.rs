@@ -2,13 +2,12 @@
 //!
 //! These types are designed to be flexible to facilitate adding additional
 //! authentication methods in the future.
-use std::fs::File;
-use std::io::Read;
-use std::io::Write;
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
@@ -41,8 +40,7 @@ impl Token {
         // find first valid_token of same variant as self, panic if none.
         let valid_token = valid_tokens
             .iter()
-            .filter(|v| std::mem::discriminant(self) == std::mem::discriminant(v))
-            .next()
+            .find(|v| std::mem::discriminant(self) == std::mem::discriminant(v))
             .expect("caller must provide one valid token of each variant");
 
         match (self, valid_token) {
@@ -86,30 +84,50 @@ impl From<CookieBytes> for Cookie {
 
 impl Cookie {
     /// try loading cookie from a file
-    pub fn try_load(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
+    pub async fn try_load(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let mut cookie: CookieBytes = [0; 32];
         let path = Self::cookie_file_path(data_dir);
-        let mut f = File::open(&path).map_err(|e| error::CookieFileError {
-            path: path.clone(),
-            error: e,
-        })?;
+        let mut f = tokio::fs::File::open(&path)
+            .await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?;
 
         f.read_exact(&mut cookie)
+            .await
             .map_err(|e| error::CookieFileError { path, error: e })?;
 
         Ok(Self(cookie))
     }
 
     /// try creating a new cookie file
-    pub fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
+    pub async fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let secret = Self::gen_secret();
         let path = Self::cookie_file_path(data_dir);
-        let mut file = File::create(&path).map_err(|e| error::CookieFileError {
-            path: path.clone(),
-            error: e,
-        })?;
+
+        tokio::fs::create_dir_all(&data_dir.root_dir_path())
+            .await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?;
+
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?;
+
         file.write_all(&secret)
+            .await
             .map_err(|e| error::CookieFileError { path, error: e })?;
+
         Ok(Self(secret))
     }
 
@@ -157,6 +175,6 @@ pub mod error {
         pub path: PathBuf,
 
         #[source]
-        pub error: std::io::Error,
+        pub error: tokio::io::Error,
     }
 }
