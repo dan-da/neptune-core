@@ -233,15 +233,15 @@ pub struct Args {
     #[clap(long, default_value = "16")]
     pub max_num_proofs: usize,
 
-    /// Enables the cookie_hint RPC API
+    /// Disables the cookie_hint RPC API
     ///
     /// client software can ask for a cookie hint to automatically determine the
     /// root data directory used by a running node, which enables loading a
     /// cookie file for authentication.
     ///
     /// Exposing the data directory leaks some privacy. Disable to prevent.
-    #[clap(long, default_value = "true")]
-    pub allow_cookie_hint: bool,
+    #[clap(long)]
+    pub disable_cookie_hint: bool,
 }
 
 impl Default for Args {

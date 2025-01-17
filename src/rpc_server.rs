@@ -809,13 +809,13 @@ impl RPC for NeptuneRPCServer {
     async fn cookie_hint(self, _: context::Context) -> RpcResult<rpc_auth::CookieHint> {
         log_slow_scope!(fn_name!());
 
-        if self.state.cli().allow_cookie_hint {
+        if self.state.cli().disable_cookie_hint {
+            Err(error::RpcError::CookieHintDisabled)
+        } else {
             Ok(rpc_auth::CookieHint {
                 data_directory: self.state.data_dir().to_owned(),
                 network: self.state.cli().network,
             })
-        } else {
-            Err(error::RpcError::CookieHintDisabled)
         }
     }
 
