@@ -226,8 +226,9 @@ mod test {
     }
 
     mod cookie {
-        use super::*;
         use std::collections::HashSet;
+
+        use super::*;
 
         /// tests cookies are unique
         ///
