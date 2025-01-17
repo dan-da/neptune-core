@@ -4,6 +4,8 @@
 //! authentication methods in the future.
 use std::path::PathBuf;
 
+use rand::distributions::Alphanumeric;
+use rand::distributions::DistString;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
@@ -103,10 +105,19 @@ impl Cookie {
 
     /// try creating a new cookie file
     ///
+    /// This will overwrite any existing cookie file.
+    ///
+    /// The overwrite is performed via rename, so should be an atomic operation
+    /// on most filesystems.
+    ///
     /// note: will create missing directories in path if necessary.
     pub async fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
         let secret = Self::gen_secret();
         let path = Self::cookie_file_path(data_dir);
+        let mut path_tmp = path.clone();
+
+        let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 10);
+        path_tmp.set_extension(extension);
 
         if let Some(parent_dir) = path.parent() {
             tokio::fs::create_dir_all(&parent_dir)
@@ -117,20 +128,33 @@ impl Cookie {
                 })?;
         }
 
+        // open new temp file
         let mut file = tokio::fs::OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&path)
+            .open(&path_tmp)
             .await
             .map_err(|e| error::CookieFileError {
                 path: path.clone(),
                 error: e,
             })?;
 
+        // write to temp file
         file.write_all(&secret)
             .await
-            .map_err(|e| error::CookieFileError { path, error: e })?;
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?;
+
+        // rename temp file.  rename is an atomic operation in most filesystems.
+        tokio::fs::rename(&path_tmp, &path)
+            .await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?;
 
         Ok(Self(secret))
     }
