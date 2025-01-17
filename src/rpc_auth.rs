@@ -1,3 +1,7 @@
+//! This module contains types related to authentication for the RPC methods.
+//!
+//! These types are designed to be flexible to facilitate adding additional
+//! authentication methods in the future.
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
