@@ -20,6 +20,8 @@ pub mod models;
 pub mod peer_loop;
 pub mod prelude;
 pub mod rpc_auth;
+#[allow(clippy::too_many_arguments)]
+// clippy  + tarpc workaround.  see https://github.com/google/tarpc/issues/502
 pub mod rpc_server;
 pub mod util_types;
 
