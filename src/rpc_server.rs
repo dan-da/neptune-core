@@ -165,7 +165,7 @@ pub trait RPC {
     ///
     /// The CookieHint provides a location for the cookie file used by this
     /// neptune-core instance as well as the [Network].
-
+    ///
     /// this method does not require authentication because local clients must
     /// be able to call this method in order to bootstrap cookie-based
     /// authentication.
