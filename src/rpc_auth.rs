@@ -96,7 +96,7 @@ impl Cookie {
                 error: e,
             })?;
 
-        f.read_exact(&mut cookie)
+        f.read(&mut cookie)
             .await
             .map_err(|e| error::CookieFileError { path, error: e })?;
 
@@ -147,22 +147,6 @@ impl Cookie {
                 path: path_tmp.clone(),
                 error: e,
             })?;
-
-        // unlink old path if existing.
-        if tokio::fs::try_exists(&path)
-            .await
-            .map_err(|e| error::CookieFileError {
-                path: path.clone(),
-                error: e,
-            })?
-        {
-            tokio::fs::remove_file(&path)
-                .await
-                .map_err(|e| error::CookieFileError {
-                    path: path.clone(),
-                    error: e,
-                })?;
-        }
 
         // rename temp file.  rename is an atomic operation in most filesystems.
         tokio::fs::rename(&path_tmp, &path)
@@ -330,32 +314,63 @@ mod test {
         // if any error occurs, the test will panic.
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
-            let data_dir = unit_test_data_directory(Network::Alpha)?;
+            let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
 
             // ensure a cookie file has been written.
-            Cookie::try_new(&data_dir).await?;
+            Cookie::try_new(&data_dir_orig).await?;
 
             std::thread::scope(|s| {
-                s.spawn(|| {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .build()
-                        .unwrap();
-                    rt.block_on(async {
-                        for _ in 0..1000 {
-                            Cookie::try_new(&data_dir).await.unwrap();
-                        }
+                let mut handles: Vec<_> = vec![];
+                for n in 0..30 {
+                    let x = n;
+                    let data_dir = data_dir_orig.clone();
+                    let h = s.spawn(move || {
+                        let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_time()
+                            .build()
+                            .unwrap();
+                        rt.block_on(async {
+                            for i in 0..100 {
+                                if let Err(e) = Cookie::try_new(&data_dir).await {
+                                    println!("write thread error: {}, {:?}", e.to_string(), e);
+                                    panic!("write thread error: {}, {:?}", e.to_string(), e);
+                                }
+                                if i % 10 == 0 {
+                                    println!("write thread {}, cookie file writes {}", x, i);
+                                }
+                            }
+                        });
                     });
-                });
-                s.spawn(|| {
-                    let rt = tokio::runtime::Builder::new_current_thread()
-                        .build()
-                        .unwrap();
-                    rt.block_on(async {
-                        for _ in 0..1000 {
-                            Cookie::try_load(&data_dir).await.unwrap();
-                        }
+                    handles.push(h);
+                }
+                for n in 0..30 {
+                    let x = n;
+                    let data_dir = data_dir_orig.clone();
+                    let h = s.spawn(move || {
+                        let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_time()
+                            .build()
+                            .unwrap();
+                        rt.block_on(async {
+                            for i in 0..100 {
+                                if let Err(e) = Cookie::try_load(&data_dir).await {
+                                    println!("read thread error: {}, {:?}", e.to_string(), e);
+                                    panic!("read thread error: {}, {:?}", e.to_string(), e);
+                                }
+                                if i % 10 == 0 {
+                                    println!("read thread {}, cookie file reads {}", x, i);
+                                }
+                            }
+                        });
                     });
-                });
+                    handles.push(h);
+                }
+
+                for jh in handles {
+                    if let Err(e) = jh.join() {
+                        panic!("got join error: {:?}", e);
+                    }
+                }
             });
 
             Ok(())
