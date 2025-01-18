@@ -125,7 +125,6 @@ impl Cookie {
 
         let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
         path_tmp.set_extension(extension);
-        // println!("tmp: {}", path_tmp.display());
 
         if let Some(parent_dir) = path.parent() {
             tokio::fs::create_dir_all(&parent_dir)
@@ -164,6 +163,10 @@ impl Cookie {
         drop(file);
 
         // rename temp file.  rename is an atomic operation in most filesystems.
+        //
+        // the test cookie::concurrency() fails if .cookie file is written to
+        // directly without a rename and other tests might fail randomly
+        // when run in parallel.
         tokio::fs::rename(&path_tmp, &path)
             .await
             .map_err(|e| error::CookieFileError {
@@ -402,8 +405,8 @@ mod test {
                                 match Cookie::try_new_with_secret(&data_dir, secret).await {
                                     Ok(c) => add_cookie(&data_dir, &c).await,
                                     Err(e) => {
-                                        println!("write thread error: {}, {:?}", e.to_string(), e);
-                                        panic!("write thread error: {}, {:?}", e.to_string(), e);
+                                        println!("write thread error: {}, {:?}", e, e);
+                                        panic!("write thread error: {}, {:?}", e, e);
                                     }
                                 };
                                 if i % 10 == 0 {
@@ -436,8 +439,8 @@ mod test {
                                         );
                                     }
                                     Err(e) => {
-                                        println!("read thread error: {}, {:?}", e.to_string(), e);
-                                        panic!("read thread error: {}, {:?}", e.to_string(), e);
+                                        println!("read thread error: {}, {:?}", e, e);
+                                        panic!("read thread error: {}, {:?}", e, e);
                                     }
                                 };
                                 if i % 10 == 0 {
