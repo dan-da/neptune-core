@@ -116,8 +116,10 @@ impl Cookie {
         let path = Self::cookie_file_path(data_dir);
         let mut path_tmp = path.clone();
 
-        let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 10);
+        let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
         path_tmp.set_extension(extension);
+
+        println!("tmp: {}", path_tmp.display());
 
         if let Some(parent_dir) = path.parent() {
             tokio::fs::create_dir_all(&parent_dir)
@@ -315,6 +317,7 @@ mod test {
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
             let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
+            let cookies_orig: crate::locks::std::AtomicRw<HashSet<Cookie>> = crate::locks::std::AtomicRw::from(HashSet::default());
 
             // ensure a cookie file has been written.
             Cookie::try_new(&data_dir_orig).await?;
@@ -324,6 +327,7 @@ mod test {
                 for n in 0..30 {
                     let x = n;
                     let data_dir = data_dir_orig.clone();
+                    let mut cookies = cookies_orig.clone();
                     let h = s.spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
                             .enable_time()
@@ -331,10 +335,13 @@ mod test {
                             .unwrap();
                         rt.block_on(async {
                             for i in 0..100 {
-                                if let Err(e) = Cookie::try_new(&data_dir).await {
-                                    println!("write thread error: {}, {:?}", e.to_string(), e);
-                                    panic!("write thread error: {}, {:?}", e.to_string(), e);
-                                }
+                                match Cookie::try_new(&data_dir).await {
+                                    Ok(c) => cookies.lock_mut(|v| v.insert(c)),
+                                    Err(e) => {
+                                        println!("write thread error: {}, {:?}", e.to_string(), e);
+                                        panic!("write thread error: {}, {:?}", e.to_string(), e);
+                                    }
+                                };
                                 if i % 10 == 0 {
                                     println!("write thread {}, cookie file writes {}", x, i);
                                 }
@@ -346,6 +353,7 @@ mod test {
                 for n in 0..30 {
                     let x = n;
                     let data_dir = data_dir_orig.clone();
+                    let cookies = cookies_orig.clone();
                     let h = s.spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
                             .enable_time()
@@ -353,10 +361,18 @@ mod test {
                             .unwrap();
                         rt.block_on(async {
                             for i in 0..100 {
-                                if let Err(e) = Cookie::try_load(&data_dir).await {
-                                    println!("read thread error: {}, {:?}", e.to_string(), e);
-                                    panic!("read thread error: {}, {:?}", e.to_string(), e);
-                                }
+                                match Cookie::try_load(&data_dir).await {
+                                    Ok(c) => {
+                                        let len = c.0.iter().filter(|b| **b != 0).count();
+                                        assert_eq!(len, 32);
+//                                        assert!(cookies.lock(|h| h.contains(&c)));
+                                        cookies.lock(|h| if !h.contains(&c) {println!("cookie not found, {}/{}, len = {}", x, i, len)} else {println!("cookie found");});
+                                    }
+                                    Err(e) => {
+                                        println!("read thread error: {}, {:?}", e.to_string(), e);
+                                        panic!("read thread error: {}, {:?}", e.to_string(), e);
+                                    }
+                                };
                                 if i % 10 == 0 {
                                     println!("read thread {}, cookie file reads {}", x, i);
                                 }
