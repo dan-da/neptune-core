@@ -112,15 +112,20 @@ impl Cookie {
     ///
     /// note: will create missing directories in path if necessary.
     pub async fn try_new(data_dir: &DataDirectory) -> Result<Self, error::CookieFileError> {
-        let secret = Self::gen_secret();
-        let path = Self::cookie_file_path(data_dir);
-        
-                let mut path_tmp = path.clone();
+        Self::try_new_with_secret(data_dir, Self::gen_secret()).await
+    }
 
-                let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
-                path_tmp.set_extension(extension);
-                println!("tmp: {}", path_tmp.display());
-        
+    async fn try_new_with_secret(
+        data_dir: &DataDirectory,
+        secret: CookieBytes,
+    ) -> Result<Self, error::CookieFileError> {
+        let path = Self::cookie_file_path(data_dir);
+
+        let mut path_tmp = path.clone();
+
+        let extension = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+        path_tmp.set_extension(extension);
+        // println!("tmp: {}", path_tmp.display());
 
         if let Some(parent_dir) = path.parent() {
             tokio::fs::create_dir_all(&parent_dir)
@@ -151,22 +156,20 @@ impl Cookie {
                 error: e,
             })?;
 
-        file.sync_all().await
-                       .map_err(|e| error::CookieFileError {
-                path: path_tmp.clone(),
-                error: e,
-            })?;
+        file.sync_all().await.map_err(|e| error::CookieFileError {
+            path: path_tmp.clone(),
+            error: e,
+        })?;
 
-        // it is important to drop the file before renaming
         drop(file);
 
         // rename temp file.  rename is an atomic operation in most filesystems.
-            tokio::fs::rename(&path_tmp, &path)
-                .await
-                .map_err(|e| error::CookieFileError {
-                    path: path.clone(),
-                    error: e,
-                })?;
+        tokio::fs::rename(&path_tmp, &path)
+            .await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e,
+            })?;
 
         Ok(Self(secret))
     }
@@ -192,6 +195,16 @@ impl Cookie {
     /// get cookie file path
     pub fn cookie_file_path(data_dir: &DataDirectory) -> PathBuf {
         data_dir.rpc_cookie_file_path()
+    }
+
+    #[cfg(test)]
+    pub fn as_hex(&self) -> String {
+        use core::fmt::Write;
+        let mut s = String::with_capacity(2 * 32);
+        for byte in self.0 {
+            write!(s, "{:02X}", byte).unwrap()
+        }
+        s
     }
 }
 
@@ -320,26 +333,58 @@ mod test {
 
         // tests concurrent access to .cookie file.
         //
-        // performs 1000 writes to .cookie file and 1000 reads
-        // of .cookie file in separate threads.
+        // starts 30 write threads and 30 read threads.  (OS threads, not tokio tasks).
+        //
+        // each thread performs 100 operations (write or read).
+        //
+        // each write op creates a new .cookie file and adds the cookie value to a global set.
+        //
+        // each read op reads the cookie file and checks if the cookie is in global set.
+        //
+        // if a cookie is found that is not in the set this indicates file corruption
+        // and an assertion fails.
+        //
+        // No locking is used for the global set as that would serialize access and
+        // invalidate the test Thus the filesystem itself is used to store the global set, in
+        // a temp dir, one empty file per cookie. The cookie data is hex encoded in the filename.
         //
         // if any error occurs, the test will panic.
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
             let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
-            let mut cookies_orig: crate::locks::tokio::AtomicRw<HashSet<Cookie>> =
-                crate::locks::tokio::AtomicRw::from(HashSet::default());
+
+            let root = data_dir_orig.root_dir_path();
+            let tmp = root.join("tmp");
+            DataDirectory::create_dir_if_not_exists(&tmp).await?;
+
+            println!("tempfiles stored in {}", tmp.display());
+
+            async fn add_cookie(data_dir: &DataDirectory, cookie: &Cookie) {
+                let path = data_dir.root_dir_path().join("tmp").join(cookie.as_hex());
+                tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&path)
+                    .await
+                    .unwrap();
+            }
+
+            async fn cookie_exists(data_dir: &DataDirectory, cookie: &Cookie) -> bool {
+                tokio::fs::try_exists(&data_dir.root_dir_path().join("tmp").join(cookie.as_hex()))
+                    .await
+                    .unwrap()
+            }
 
             // ensure a cookie file has been written.
             let cookie_orig = Cookie::try_new(&data_dir_orig).await?;
-            cookies_orig.lock_guard_mut().await.insert(cookie_orig);
+            add_cookie(&data_dir_orig, &cookie_orig).await;
 
             std::thread::scope(|s| {
                 let mut handles: Vec<_> = vec![];
                 for n in 0..30 {
                     let x = n;
                     let data_dir = data_dir_orig.clone();
-                    let mut cookies = cookies_orig.clone();
                     let h = s.spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
                             .enable_time()
@@ -347,15 +392,20 @@ mod test {
                             .unwrap();
                         rt.block_on(async {
                             for i in 0..100 {
-                                let mut set = cookies.lock_guard_mut().await;
-                                match Cookie::try_new(&data_dir).await {
-                                    Ok(c) => set.insert(c),
+                                // we must store the cookie value to global set before generating
+                                // .cookie file, else a window of time would exist when readers
+                                // could see .cookie but not find it in global set.
+                                // To this end, we must cheat and use some private internals rather than
+                                // calling try_new(), but the file generation code is still tested.
+                                let secret = Cookie::gen_secret();
+                                add_cookie(&data_dir, &Cookie(secret)).await;
+                                match Cookie::try_new_with_secret(&data_dir, secret).await {
+                                    Ok(c) => add_cookie(&data_dir, &c).await,
                                     Err(e) => {
                                         println!("write thread error: {}, {:?}", e.to_string(), e);
                                         panic!("write thread error: {}, {:?}", e.to_string(), e);
                                     }
                                 };
-                                drop(set);
                                 if i % 10 == 0 {
                                     println!("write thread {}, cookie file writes {}", x, i);
                                 }
@@ -367,7 +417,6 @@ mod test {
                 for n in 0..30 {
                     let x = n;
                     let data_dir = data_dir_orig.clone();
-                    let cookies = cookies_orig.clone();
                     let h = s.spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
                             .enable_time()
@@ -377,22 +426,14 @@ mod test {
                             for i in 0..100 {
                                 match Cookie::try_load(&data_dir).await {
                                     Ok(c) => {
-                                        let len = c.0.iter().filter(|b| **b != 0).count();
-                                        // assert_eq!(len, 32);
-                                        //                                        assert!(cookies.lock(|h| h.contains(&c)));
-                                       // if len != 32 {
-                                       //     println!("loaded cookie wrong len: {}", len);
-                                       //  }
-                                        let found = cookies.lock_guard().await.contains(&c);
-                                            if !found {
-                                                println!(
-                                                    "cookie not found, {}/{}, cookie-len = {}, {:?}",
-                                                    x, i, len, c.0
-                                                )
-                                            } else {
-                                                println!("cookie found");
-                                            }
-                                        
+                                        let found = cookie_exists(&data_dir, &c).await;
+                                        if !found {
+                                            println!("cookie not found. {:?}, {}", c.0, c.as_hex());
+                                        }
+                                        assert!(
+                                            found,
+                                            "loaded cookie should be found in set of known cookies"
+                                        );
                                     }
                                     Err(e) => {
                                         println!("read thread error: {}, {:?}", e.to_string(), e);
@@ -414,6 +455,9 @@ mod test {
                     }
                 }
             });
+
+            // cleanup
+            tokio::fs::remove_dir_all(&tmp).await.unwrap();
 
             Ok(())
         }
