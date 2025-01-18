@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+use async_fd_lock::{LockRead, LockWrite};
 
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::network::Network;
@@ -94,6 +95,11 @@ impl Cookie {
             .map_err(|e| error::CookieFileError {
                 path: path.clone(),
                 error: e,
+            })?
+            .lock_read().await
+            .map_err(|e| error::CookieFileError {
+                path: path.clone(),
+                error: e.error,
             })?;
 
         f.read(&mut cookie)
@@ -140,6 +146,11 @@ impl Cookie {
             .map_err(|e| error::CookieFileError {
                 path: path_tmp.clone(),
                 error: e,
+            })?
+            .lock_write().await
+            .map_err(|e| error::CookieFileError {
+                path: path_tmp.clone(),
+                error: e.error,
             })?;
 
         // write to temp file
