@@ -85,7 +85,7 @@ impl DataDirectory {
 
     ///////////////////////////////////////////////////////////////////////////
     ///
-    /// The wallet file path
+    /// The rpc (auth) cookie file path
     pub fn rpc_cookie_file_path(&self) -> PathBuf {
         self.data_dir.join(Path::new(RPC_COOKIE_FILE_NAME))
     }

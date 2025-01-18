@@ -63,6 +63,7 @@ use crate::prelude::twenty_first;
 use crate::rpc_auth;
 use crate::twenty_first::prelude::Tip5;
 
+/// result returned by RPC methods
 pub type RpcResult<T> = Result<T, error::RpcError>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,16 +161,24 @@ pub trait RPC {
     /******** READ DATA ********/
     // Place all methods that only read here
 
+    /// Returns a [CookieHint] for purposes of zero-conf authentication
+    ///
+    /// The CookieHint provides a location for the cookie file used by this
+    /// neptune-core instance as well as the [Network].
+
     /// this method does not require authentication because local clients must
-    /// know the server's network in order to locate auth cookie file, which is
-    /// required for Cookie based authentication.
+    /// be able to call this method in order to bootstrap cookie-based
+    /// authentication.
     async fn cookie_hint() -> RpcResult<rpc_auth::CookieHint>;
 
-    /// Return which network the client is running
+    /// Return the network this neptune-core instance is running
     ///
     /// this method does not require authentication because local clients must
-    /// know the server's network in order to locate auth cookie file, which is
-    /// required for Cookie based authentication.
+    /// be able to call this method (in fallback mode) in order to bootstrap
+    /// cookie-based authentication
+    ///
+    /// Fallback mode occurs when the cookie_hint() RPC method is disabled or
+    /// if end user specifies location of the cookie file manually.
     async fn network() -> RpcResult<Network>;
 
     /// Returns local socket used for incoming peer-connections. Does not show
