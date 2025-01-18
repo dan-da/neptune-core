@@ -4,8 +4,6 @@
 //! authentication methods in the future.
 use std::path::PathBuf;
 
-use async_fd_lock::LockRead;
-use async_fd_lock::LockWrite;
 use rand::distributions::Alphanumeric;
 use rand::distributions::DistString;
 use serde::Deserialize;
@@ -96,12 +94,6 @@ impl Cookie {
             .map_err(|e| error::CookieFileError {
                 path: path.clone(),
                 error: e,
-            })?
-            .lock_read()
-            .await
-            .map_err(|e| error::CookieFileError {
-                path: path.clone(),
-                error: e.error,
             })?;
 
         f.read(&mut cookie)
@@ -149,12 +141,6 @@ impl Cookie {
             .map_err(|e| error::CookieFileError {
                 path: path_tmp.clone(),
                 error: e,
-            })?
-            .lock_write()
-            .await
-            .map_err(|e| error::CookieFileError {
-                path: path_tmp.clone(),
-                error: e.error,
             })?;
 
         // write to temp file
@@ -164,6 +150,14 @@ impl Cookie {
                 path: path_tmp.clone(),
                 error: e,
             })?;
+
+        file.sync_all().await
+                       .map_err(|e| error::CookieFileError {
+                path: path_tmp.clone(),
+                error: e,
+            })?;
+
+        // it is important to drop the file before renaming
         drop(file);
 
         // rename temp file.  rename is an atomic operation in most filesystems.
@@ -173,7 +167,6 @@ impl Cookie {
                     path: path.clone(),
                     error: e,
                 })?;
-        //        file.inner().sync_data().await.unwrap();
 
         Ok(Self(secret))
     }
@@ -334,12 +327,12 @@ mod test {
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
             let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
-            let mut cookies_orig: crate::locks::std::AtomicRw<HashSet<Cookie>> =
-                crate::locks::std::AtomicRw::from(HashSet::default());
+            let mut cookies_orig: crate::locks::tokio::AtomicRw<HashSet<Cookie>> =
+                crate::locks::tokio::AtomicRw::from(HashSet::default());
 
             // ensure a cookie file has been written.
             let cookie_orig = Cookie::try_new(&data_dir_orig).await?;
-            cookies_orig.lock_mut(|v| v.insert(cookie_orig));
+            cookies_orig.lock_guard_mut().await.insert(cookie_orig);
 
             std::thread::scope(|s| {
                 let mut handles: Vec<_> = vec![];
@@ -354,13 +347,15 @@ mod test {
                             .unwrap();
                         rt.block_on(async {
                             for i in 0..100 {
+                                let mut set = cookies.lock_guard_mut().await;
                                 match Cookie::try_new(&data_dir).await {
-                                    Ok(c) => cookies.lock_mut(|v| v.insert(c)),
+                                    Ok(c) => set.insert(c),
                                     Err(e) => {
                                         println!("write thread error: {}, {:?}", e.to_string(), e);
                                         panic!("write thread error: {}, {:?}", e.to_string(), e);
                                     }
                                 };
+                                drop(set);
                                 if i % 10 == 0 {
                                     println!("write thread {}, cookie file writes {}", x, i);
                                 }
@@ -388,16 +383,16 @@ mod test {
                                        // if len != 32 {
                                        //     println!("loaded cookie wrong len: {}", len);
                                        //  }
-                                        cookies.lock(|h| {
-                                            if !h.contains(&c) {
+                                        let found = cookies.lock_guard().await.contains(&c);
+                                            if !found {
                                                 println!(
-                                                    "cookie not found, {}/{}, hash count: {}, cookie-len = {}, {:?}",
-                                                    x, i, h.len(), len, c.0
+                                                    "cookie not found, {}/{}, cookie-len = {}, {:?}",
+                                                    x, i, len, c.0
                                                 )
                                             } else {
                                                 println!("cookie found");
                                             }
-                                        });
+                                        
                                     }
                                     Err(e) => {
                                         println!("read thread error: {}, {:?}", e.to_string(), e);
