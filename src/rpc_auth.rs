@@ -93,12 +93,20 @@ impl Cookie {
             .await
             .map_err(|e| error::CookieFileError {
                 path: path.clone(),
+                source_file: file!(),
+                source_line: line!(),
                 error: e,
             })?;
 
         f.read(&mut cookie)
             .await
-            .map_err(|e| error::CookieFileError { path, error: e })?;
+            .map_err(|e| error::CookieFileError {
+                path,
+                source_file: file!(),
+                source_line: line!(),
+
+                error: e,
+            })?;
 
         Ok(Self(cookie))
     }
@@ -131,6 +139,8 @@ impl Cookie {
                 .await
                 .map_err(|e| error::CookieFileError {
                     path: path.clone(),
+                    source_file: file!(),
+                    source_line: line!(),
                     error: e,
                 })?;
         }
@@ -144,6 +154,8 @@ impl Cookie {
             .await
             .map_err(|e| error::CookieFileError {
                 path: path_tmp.clone(),
+                source_file: file!(),
+                source_line: line!(),
                 error: e,
             })?;
 
@@ -152,11 +164,15 @@ impl Cookie {
             .await
             .map_err(|e| error::CookieFileError {
                 path: path_tmp.clone(),
+                source_file: file!(),
+                source_line: line!(),
                 error: e,
             })?;
 
         file.sync_all().await.map_err(|e| error::CookieFileError {
             path: path_tmp.clone(),
+            source_file: file!(),
+            source_line: line!(),
             error: e,
         })?;
 
@@ -171,6 +187,8 @@ impl Cookie {
             .await
             .map_err(|e| error::CookieFileError {
                 path: path.clone(),
+                source_file: file!(),
+                source_line: line!(),
                 error: e,
             })?;
 
@@ -234,8 +252,16 @@ pub mod error {
     #[derive(Debug, thiserror::Error)]
     #[error("cookie file error: {}, path: {}", self.error, self.path.display())]
     pub struct CookieFileError {
+        /// file path
         pub path: PathBuf,
 
+        /// source file
+        pub source_file: &'static str,
+
+        /// source line
+        pub source_line: u32,
+
+        /// filesystem error
         #[source]
         pub error: tokio::io::Error,
     }
@@ -313,7 +339,7 @@ mod test {
         ///
         /// tests:
         ///  1. Cookie::auth() succeeds for valid cookie
-        ///  2. Cookie::auth() returns AuthError::InvalidCookei for invalid cookie
+        ///  2. Cookie::auth() returns AuthError::InvalidCookie for invalid cookie
         #[tokio::test]
         pub async fn auth() -> anyhow::Result<()> {
             let data_dir = unit_test_data_directory(Network::Alpha)?;
@@ -336,6 +362,13 @@ mod test {
 
         // tests concurrent access to .cookie file.
         //
+        // this test exists because previously some other tests would randomly
+        // fail when all tests are run concurrently with `cargo test`.
+        //
+        // this test is disabled for windows because rename() is not atomic on
+        // windows (MoveFileX API) and throws PermissionDenied errors if file
+        // is open.
+        //
         // starts 30 write threads and 30 read threads.  (OS threads, not tokio tasks).
         //
         // each thread performs 100 operations (write or read).
@@ -352,6 +385,7 @@ mod test {
         // a temp dir, one empty file per cookie. The cookie data is hex encoded in the filename.
         //
         // if any error occurs, the test will panic.
+        #[cfg(not(target_os = "windows"))]
         #[tokio::test]
         pub async fn concurrency() -> anyhow::Result<()> {
             let data_dir_orig = unit_test_data_directory(Network::RegTest)?;
