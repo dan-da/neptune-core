@@ -1264,6 +1264,7 @@ mod block_tests {
         use rand::SeedableRng;
 
         use super::*;
+        use crate::job_queue::triton_vm::TritonVmJobPriority;
         use crate::mine_loop::mine_loop_tests::make_coinbase_transaction_from_state;
         use crate::models::state::wallet::address::KeyType;
         use crate::tests::shared::fake_valid_successor_for_tests;
@@ -1315,6 +1316,7 @@ mod block_tests {
                 0.5f64,
                 plus_eight_months,
                 TxProvingCapability::SingleProof,
+                (TritonVmJobPriority::Normal, None).into(),
             )
             .await
             .unwrap();
@@ -1384,6 +1386,7 @@ mod block_tests {
                     0.5f64,
                     plus_nine_months,
                     TxProvingCapability::SingleProof,
+                    (TritonVmJobPriority::Normal, None).into(),
                 )
                 .await
                 .unwrap();

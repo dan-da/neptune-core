@@ -38,6 +38,7 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job;
+use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -55,38 +56,62 @@ async fn compose_block(
     latest_block: Block,
     global_state_lock: GlobalStateLock,
     sender: oneshot::Sender<(Block, Vec<ExpectedUtxo>)>,
+    mut cancel_compose_rx: tokio::sync::watch::Receiver<()>,
     now: Timestamp,
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
 
-    let (transaction, composer_utxos) =
-        create_block_transaction(&latest_block, &global_state_lock, timestamp).await?;
-
     let triton_vm_job_queue = global_state_lock.vm_job_queue();
-    let proposal = Block::compose(
-        &latest_block,
-        transaction,
-        timestamp,
-        Digest::default(),
-        None,
-        triton_vm_job_queue,
-        (
-            TritonVmJobPriority::High,
-            global_state_lock.cli().max_log2_padded_height_for_proofs,
-        )
-            .into(),
-    )
-    .await;
+    let (cancel_job_tx, cancel_job_rx) = tokio::sync::watch::channel(());
 
-    let proposal = match proposal {
-        Ok(template) => template,
-        Err(_) => bail!("Miner failed to generate block template"),
+    let job_options = TritonVmProofJobOptions {
+        job_priority: TritonVmJobPriority::High,
+        job_settings: ProverJobSettings {
+            max_log2_padded_height_for_proofs: global_state_lock
+                .cli()
+                .max_log2_padded_height_for_proofs,
+        },
+        cancel_job_rx: Some(cancel_job_rx),
     };
 
-    // Please clap.
-    match sender.send((proposal, composer_utxos)) {
-        Ok(_) => Ok(()),
-        Err(_) => bail!("Composer task failed to send to miner master"),
+    let compose = async {
+        let (transaction, composer_utxos) = create_block_transaction(
+            &latest_block,
+            &global_state_lock,
+            timestamp,
+            job_options.clone(),
+        )
+        .await?;
+
+        let compose_result = Block::compose(
+            &latest_block,
+            transaction,
+            timestamp,
+            Digest::default(),
+            None,
+            triton_vm_job_queue,
+            job_options,
+        )
+        .await;
+
+        let proposal = match compose_result {
+            Ok(template) => template,
+            Err(e) => bail!("Miner failed to generate block template. {}", e.to_string()),
+        };
+
+        // Please clap.
+        match sender.send((proposal, composer_utxos)) {
+            Ok(_) => Ok(()),
+            Err(_) => bail!("Composer task failed to send to miner master"),
+        }
+    };
+
+    select! {
+        _ = cancel_compose_rx.changed() => {
+            cancel_job_tx.send(())?;
+            bail!("composing cancelled by caller");
+        }
+        result = compose => result
     }
 }
 
@@ -342,6 +367,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     timestamp: Timestamp,
     proving_power: TxProvingCapability,
     vm_job_queue: &JobQueue<TritonVmJobPriority>,
+    job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) =
         prepare_coinbase_transaction_stateless(latest_block, composer_parameters, timestamp)?;
@@ -351,10 +377,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         transaction_details,
         proving_power,
         vm_job_queue,
-        TritonVmProofJobOptions {
-            job_priority: TritonVmJobPriority::High,
-            job_settings: Default::default(),
-        },
+        job_options,
     )
     .await?;
     info!("Done: generating single proof for coinbase transaction");
@@ -450,6 +473,7 @@ pub(crate) async fn create_block_transaction_stateless(
     timestamp: Timestamp,
     shuffle_seed: [u8; 32],
     vm_job_queue: &JobQueue<TritonVmJobPriority>,
+    job_options: TritonVmProofJobOptions,
     mut selected_mempool_txs: Vec<Transaction>,
 ) -> Result<(Transaction, TxOutputList)> {
     // A coinbase transaction implies mining. So you *must*
@@ -460,6 +484,7 @@ pub(crate) async fn create_block_transaction_stateless(
         timestamp,
         TxProvingCapability::SingleProof,
         vm_job_queue,
+        job_options.clone(),
     )
     .await?;
 
@@ -470,11 +495,7 @@ pub(crate) async fn create_block_transaction_stateless(
         let nop =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
         let nop = PrimitiveWitness::from_transaction_details(nop);
-        let proof_job_options = TritonVmProofJobOptions {
-            job_priority: TritonVmJobPriority::High,
-            job_settings: Default::default(),
-        };
-        let nop_proof = SingleProof::produce(&nop, vm_job_queue, proof_job_options).await?;
+        let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
         let nop = Transaction {
             kernel: nop.kernel,
             proof: TransactionProof::SingleProof(nop_proof),
@@ -492,10 +513,7 @@ pub(crate) async fn create_block_transaction_stateless(
             tx_to_include,
             rng.gen(),
             vm_job_queue,
-            TritonVmProofJobOptions {
-                job_priority: TritonVmJobPriority::High,
-                job_settings: Default::default(),
-            },
+            job_options.clone(),
         )
         .await
         .expect("Must be able to merge transactions in mining context");
@@ -511,6 +529,7 @@ pub(crate) async fn create_block_transaction(
     predecessor_block: &Block,
     global_state_lock: &GlobalStateLock,
     timestamp: Timestamp,
+    job_options: TritonVmProofJobOptions,
 ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
     let block_capacity_for_transactions = SIZE_20MB_IN_BYTES;
 
@@ -555,6 +574,7 @@ pub(crate) async fn create_block_transaction(
         timestamp,
         rng.gen(),
         vm_job_queue,
+        job_options,
         mempool_txs_to_mine,
     )
     .await?;
@@ -671,6 +691,8 @@ pub(crate) async fn mine(
             None
         };
 
+        let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
+
         let compose = cli_args.compose;
         let mut composer_task = if !wait_for_confirmation
             && compose
@@ -688,6 +710,7 @@ pub(crate) async fn mine(
                 latest_block,
                 global_state_lock.clone(),
                 composer_tx,
+                cancel_compose_rx,
                 Timestamp::now(),
             );
 
@@ -741,8 +764,8 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
-                            composer_task.abort();
-                            debug!("Abort-signal sent to composer worker.");
+                            cancel_compose_tx.send(())?;
+                            debug!("Cancel signal sent to composer worker.");
                         }
 
                         break;
@@ -753,8 +776,8 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
-                            composer_task.abort();
-                            debug!("Abort-signal sent to composer worker.");
+                            cancel_compose_tx.send(())?;
+                            debug!("Cancel signal sent to composer worker.");
                         }
 
                         info!("Miner task received notification about new block");
@@ -765,8 +788,8 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
-                            composer_task.abort();
-                            debug!("Abort-signal sent to composer worker.");
+                            cancel_compose_tx.send(())?;
+                            debug!("Cancel signal sent to composer worker.");
                         }
 
                         info!("Miner received message about new block proposal for guessing.");
@@ -777,8 +800,8 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
-                            composer_task.abort();
-                            debug!("Abort-signal sent to composer worker.");
+                            cancel_compose_tx.send(())?;
+                            debug!("Cancel signal sent to composer worker.");
                         }
 
                         wait_for_confirmation = true;
@@ -794,8 +817,8 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
-                            composer_task.abort();
-                            debug!("Abort-signal sent to composer worker.");
+                            cancel_compose_tx.send(())?;
+                            debug!("Cancel signal sent to composer worker.");
                         }
                     }
                     MainToMiner::StartMining => {
@@ -817,8 +840,8 @@ pub(crate) async fn mine(
                             debug!("Abort-signal sent to guesser worker.");
                         }
                         if !composer_task.is_finished() {
-                            composer_task.abort();
-                            debug!("Abort-signal sent to composer worker.");
+                            cancel_compose_tx.send(())?;
+                            debug!("Cancel signal sent to composer worker.");
                         }
                     }
                 }
@@ -920,6 +943,7 @@ pub(crate) mod mine_loop_tests {
         guesser_block_subsidy_fraction: f64,
         timestamp: Timestamp,
         proving_power: TxProvingCapability,
+        job_options: TritonVmProofJobOptions,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
         // note: it is Ok to always use the same key here because:
         //  1. if we find a block, the utxo will go to our wallet
@@ -961,6 +985,7 @@ pub(crate) mod mine_loop_tests {
             timestamp,
             proving_power,
             vm_job_queue,
+            job_options,
         )
         .await?;
 
@@ -1089,6 +1114,7 @@ pub(crate) mod mine_loop_tests {
             0f64,
             network.launch_date(),
             TxProvingCapability::PrimitiveWitness,
+            (TritonVmJobPriority::Normal, None).into(),
         )
         .await
         .unwrap();
@@ -1171,9 +1197,14 @@ pub(crate) mod mine_loop_tests {
             cli.guesser_fraction = guesser_fee_fraction;
             alice.set_cli(cli.clone()).await;
             let (transaction_empty_mempool, _coinbase_utxo_info) = {
-                create_block_transaction(&genesis_block, &alice, now)
-                    .await
-                    .unwrap()
+                create_block_transaction(
+                    &genesis_block,
+                    &alice,
+                    now,
+                    (TritonVmJobPriority::Normal, None).into(),
+                )
+                .await
+                .unwrap()
             };
 
             let cb_txkmh = transaction_empty_mempool.kernel.mast_hash();
@@ -1226,9 +1257,14 @@ pub(crate) mod mine_loop_tests {
 
             // Build transaction for block
             let (transaction_non_empty_mempool, _new_coinbase_sender_randomness) = {
-                create_block_transaction(&genesis_block, &alice, now)
-                    .await
-                    .unwrap()
+                create_block_transaction(
+                    &genesis_block,
+                    &alice,
+                    now,
+                    (TritonVmJobPriority::Normal, None).into(),
+                )
+                .await
+                .unwrap()
             };
             assert_eq!(
             4,
@@ -1280,17 +1316,30 @@ pub(crate) mod mine_loop_tests {
             "Mempool must be empty at start of test"
         );
         let (sender_1, receiver_1) = oneshot::channel();
-        compose_block(genesis_block.clone(), alice.clone(), sender_1, mocked_now)
-            .await
-            .unwrap();
+        let (_cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
+        compose_block(
+            genesis_block.clone(),
+            alice.clone(),
+            sender_1,
+            cancel_compose_rx.clone(),
+            mocked_now,
+        )
+        .await
+        .unwrap();
         let (block_1, _) = receiver_1.await.unwrap();
         assert!(block_1.is_valid(&genesis_block, mocked_now).await);
         alice.set_new_tip(block_1.clone()).await.unwrap();
 
         let (sender_2, receiver_2) = oneshot::channel();
-        compose_block(block_1.clone(), alice.clone(), sender_2, mocked_now)
-            .await
-            .unwrap();
+        compose_block(
+            block_1.clone(),
+            alice.clone(),
+            sender_2,
+            cancel_compose_rx,
+            mocked_now,
+        )
+        .await
+        .unwrap();
         let (block_2, _) = receiver_2.await.unwrap();
         assert!(block_2.is_valid(&block_1, mocked_now).await);
     }
@@ -1332,6 +1381,7 @@ pub(crate) mod mine_loop_tests {
             0f64,
             launch_date,
             TxProvingCapability::PrimitiveWitness,
+            (TritonVmJobPriority::Normal, None).into(),
         )
         .await
         .unwrap();
@@ -1404,6 +1454,7 @@ pub(crate) mod mine_loop_tests {
             0f64,
             ten_seconds_ago,
             TxProvingCapability::PrimitiveWitness,
+            (TritonVmJobPriority::Normal, None).into(),
         )
         .await
         .unwrap();
@@ -1701,6 +1752,7 @@ pub(crate) mod mine_loop_tests {
             0f64,
             launch_date,
             TxProvingCapability::PrimitiveWitness,
+            (TritonVmJobPriority::Normal, None).into(),
         )
         .await
         .unwrap();

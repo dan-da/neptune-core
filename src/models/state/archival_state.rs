@@ -1825,6 +1825,7 @@ mod archival_state_tests {
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
@@ -2078,6 +2079,7 @@ mod archival_state_tests {
             guesser_fraction,
             in_seven_months,
             TxProvingCapability::SingleProof,
+            TritonVmJobPriority::Normal.into(),
         )
         .await
         .unwrap();
