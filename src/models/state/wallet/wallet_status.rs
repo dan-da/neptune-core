@@ -40,6 +40,16 @@ pub struct WalletStatus {
 }
 
 impl WalletStatus {
+    /// confirmed, total balance.
+    pub fn synced_unspent_total_amount(&self) -> NativeCurrencyAmount {
+        self.synced_unspent
+            .iter()
+            .map(|(wse, _msmp)| &wse.utxo)
+            .map(|utxo| utxo.get_native_currency_amount())
+            .sum::<NativeCurrencyAmount>()
+    }
+
+    /// confirmed, available balance
     pub fn synced_unspent_liquid_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
@@ -48,6 +58,8 @@ impl WalletStatus {
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
     }
+
+    /// confirmed, unavailable (timelocked) funds
     pub fn synced_unspent_timelocked_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.synced_unspent
             .iter()
@@ -57,16 +69,20 @@ impl WalletStatus {
             .sum::<NativeCurrencyAmount>()
     }
 
+    /// unconfirmed, available balance
+    ///
     /// Sum of value of monitored unsynced, unspent UTXOs. Does not check for
     /// spendability, as that can only be determined once the monitored UTXO
     /// is synced.
-    pub fn unsynced_unspent_amount(&self) -> NativeCurrencyAmount {
+    pub fn unsynced_unspent_amount(&self, timestamp: Timestamp) -> NativeCurrencyAmount {
         self.unsynced_unspent
             .iter()
+            .filter(|wse| wse.utxo.can_spend_at(timestamp))
             .map(|wse| wse.utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
     }
 
+    /// confirmed, spent funds
     pub fn synced_spent_amount(&self) -> NativeCurrencyAmount {
         self.synced_spent
             .iter()
@@ -74,6 +90,7 @@ impl WalletStatus {
             .sum::<NativeCurrencyAmount>()
     }
 
+    /// unconfirmed, spent funds
     pub fn unsynced_spent_amount(&self) -> NativeCurrencyAmount {
         self.unsynced_spent
             .iter()
@@ -119,7 +136,7 @@ impl Display for WalletStatus {
         let unsynced_unspent: String = format!(
             "unsynced, unspent UTXOS: count: {}, amount: {:?}\n[{}]",
             unsynced_unspent_count,
-            self.unsynced_unspent_amount(),
+            self.unsynced_unspent_amount(now),
             self.unsynced_unspent
                 .iter()
                 .map(|x| x.to_string())

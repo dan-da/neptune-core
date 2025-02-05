@@ -37,8 +37,10 @@ use super::screen::Screen;
 #[derive(Debug, Clone, Default)]
 pub struct OverviewData {
     available_balance: Option<NativeCurrencyAmount>,
-    available_unconfirmed_balance: Option<NativeCurrencyAmount>,
-    timelocked_balance: Option<NativeCurrencyAmount>,
+    total_balance: Option<NativeCurrencyAmount>,
+    unconfirmed_available_balance: Option<NativeCurrencyAmount>,
+    unconfirmed_total_balance: Option<NativeCurrencyAmount>,
+
     confirmations: Option<BlockHeight>,
     synchronization_percentage: Option<f64>,
 
@@ -159,8 +161,9 @@ impl OverviewScreen {
                                 own_overview_data.authenticated_peer_count=Some(0);
                                 own_overview_data.syncing=resp.syncing;
                                 own_overview_data.available_balance = Some(resp.available_balance);
-                                own_overview_data.available_unconfirmed_balance = Some(resp.available_unconfirmed_balance);
-                                own_overview_data.timelocked_balance = Some(resp.timelocked_balance);
+                                own_overview_data.total_balance = Some(resp.total_balance);
+                                own_overview_data.unconfirmed_available_balance = Some(resp.unconfirmed_available_balance);
+                                own_overview_data.unconfirmed_total_balance = Some(resp.unconfirmed_total_balance);
                                 own_overview_data.mining_status = resp.mining_status;
                                 own_overview_data.confirmations = resp.confirmations;
                                 own_overview_data.cpu_temperature = resp.cpu_temp;
@@ -319,23 +322,24 @@ impl Widget for OverviewScreen {
             };
         }
 
-        // balance
+        // confirmed balance
         lines.push(format!(
-            "available balance: {} {}",
+            "confirmed balance:   available: {}  total: {}   {}",
             dashifnotset!(data.available_balance),
+            dashifnotset!(data.total_balance),
             match data.confirmations {
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
         ));
+
+        // confirmed balance
         lines.push(format!(
-            "unconfirmed balance: {}",
-            dashifnotset!(data.available_unconfirmed_balance),
+            "unconfirmed balance: available: {}  total: {}",
+            dashifnotset!(data.unconfirmed_available_balance),
+            dashifnotset!(data.unconfirmed_total_balance),
         ));
-        lines.push(format!(
-            "time-locked balance: {}",
-            dashifnotset!(data.timelocked_balance),
-        ));
+
         lines.push(format!(
             "synchronization: {}",
             match data.synchronization_percentage {

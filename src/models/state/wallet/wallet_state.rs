@@ -486,13 +486,34 @@ impl WalletState {
         wallet_status.synced_unspent_liquid_amount(timestamp)
     }
 
-    pub async fn unconfirmed_balance(
+    pub async fn unconfirmed_available_balance(
         &self,
         tip_digest: Digest,
         timestamp: Timestamp,
     ) -> NativeCurrencyAmount {
         self.confirmed_balance(tip_digest, timestamp)
             .await
+            .checked_sub(
+                &self
+                    .mempool_spent_utxos_iter()
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .expect("balance must never be negative")
+            .checked_add(
+                &self
+                    .mempool_unspent_utxos_iter()
+                    .filter(|utxo| utxo.can_spend_at(timestamp))
+                    .map(|u| u.get_native_currency_amount())
+                    .sum(),
+            )
+            .expect("balance must never overflow")
+    }
+
+    pub async fn unconfirmed_total_balance(&self, tip_digest: Digest) -> NativeCurrencyAmount {
+        let wallet_status = self.get_wallet_status_from_lock(tip_digest).await;
+        wallet_status
+            .synced_unspent_total_amount()
             .checked_sub(
                 &self
                     .mempool_spent_utxos_iter()

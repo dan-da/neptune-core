@@ -110,8 +110,9 @@ pub struct DashBoardOverviewDataFromClient {
     pub tip_header: BlockHeader,
     pub syncing: bool,
     pub available_balance: NativeCurrencyAmount,
-    pub timelocked_balance: NativeCurrencyAmount,
-    pub available_unconfirmed_balance: NativeCurrencyAmount,
+    pub total_balance: NativeCurrencyAmount,
+    pub unconfirmed_available_balance: NativeCurrencyAmount,
+    pub unconfirmed_total_balance: NativeCurrencyAmount,
     pub mempool_size: usize,
     pub mempool_total_tx_count: usize,
     pub mempool_own_tx_count: usize,
@@ -1228,7 +1229,7 @@ impl RPC for NeptuneRPCServer {
 
         Ok(gs
             .wallet_state
-            .unconfirmed_balance(gs.chain.light_state().hash(), Timestamp::now())
+            .unconfirmed_available_balance(gs.chain.light_state().hash(), Timestamp::now())
             .await)
     }
 
@@ -1430,13 +1431,22 @@ impl RPC for NeptuneRPCServer {
             state.mempool.num_own_txs()
         };
         let cpu_temp = None; // disable for now.  call is too slow.
-        let unconfirmed_balance = {
-            log_slow_scope!(fn_name!() + "::unconfirmed_balance()");
+
+        let unconfirmed_available_balance = {
+            log_slow_scope!(fn_name!() + "::unconfirmed_available_balance()");
             state
                 .wallet_state
-                .unconfirmed_balance(tip_digest, now)
+                .unconfirmed_available_balance(tip_digest, now)
                 .await
         };
+        let unconfirmed_total_balance = {
+            log_slow_scope!(fn_name!() + "::unconfirmed_total_balance()");
+            state
+                .wallet_state
+                .unconfirmed_total_balance(tip_digest)
+                .await
+        };
+
         let proving_capability = self.state.cli().proving_capability();
 
         info!("proving capability: {proving_capability}");
@@ -1455,9 +1465,9 @@ impl RPC for NeptuneRPCServer {
             log_slow_scope!(fn_name!() + "::synced_unspent_available_amount()");
             wallet_status.synced_unspent_liquid_amount(now)
         };
-        let timelocked_balance = {
-            log_slow_scope!(fn_name!() + "::synced_unspent_timelocked_amount()");
-            wallet_status.synced_unspent_timelocked_amount(now)
+        let total_balance = {
+            log_slow_scope!(fn_name!() + "::synced_unspent_total_amount()");
+            wallet_status.synced_unspent_total_amount()
         };
 
         Ok(DashBoardOverviewDataFromClient {
@@ -1465,8 +1475,9 @@ impl RPC for NeptuneRPCServer {
             tip_header,
             syncing,
             available_balance,
-            timelocked_balance,
-            available_unconfirmed_balance: unconfirmed_balance,
+            total_balance,
+            unconfirmed_available_balance,
+            unconfirmed_total_balance,
             mempool_size,
             mempool_total_tx_count,
             mempool_own_tx_count,
