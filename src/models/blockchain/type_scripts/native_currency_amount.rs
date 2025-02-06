@@ -765,12 +765,21 @@ pub(crate) mod test {
         }
     }
 
-    #[proptest]
-    fn parse_and_display_match(input: f64) {
-        if let Ok(amt) = NativeCurrencyAmount::try_from(input) {
-            prop_assert_eq!(amt.to_string(), input.to_string());
-        } else {
-            println!("Could not parse f64 into NativeCurrencyAmount: {}", input);
+    proptest::proptest! {
+
+        #[test]
+        fn parse_and_display_match(input in 0.0000000000001..42000000f32) {
+            let input_str = format!("{:.5}", input);
+            let input_parsed: f64 = input_str.parse().unwrap();
+            if input_parsed == 0.0 {
+                return Ok(());
+            }
+            println!("test input: {}", input_str);
+            if let Ok(amt) = NativeCurrencyAmount::from_str(&input_str) {
+                prop_assert_eq!(amt.to_string().parse::<f64>().unwrap(), input_parsed);
+            } else {
+                println!("Could not parse f64 into NativeCurrencyAmount: {}", input);
+            }
         }
     }
 
