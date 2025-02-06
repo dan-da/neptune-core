@@ -126,7 +126,11 @@ pub struct DashBoardOverviewDataFromClient {
 
     pub proving_capability: TxProvingCapability,
 
-    // # of confirmations since last wallet balance change.
+    // # of confirmations of the last wallet balance change.
+    //
+    // Starts at 1, as the block in which a tx is included is considered the 1st
+    // confirmation.
+    //
     // `None` indicates that wallet balance has never changed.
     pub confirmations: Option<BlockHeight>,
 
@@ -501,10 +505,14 @@ impl NeptuneRPCServer {
                 assert!(tip_block_header.height >= latest_balance_height);
 
                 // subtract latest balance height from chain tip.
+                //
+                // we add 1 to the result because the block that a tx is confirmed
+                // in is considered the 1st confirmation.
+                //
                 // note: BlockHeight is u64 internally and BlockHeight::sub() returns i128.
                 //       The subtraction and cast is safe given we passed the above assert.
                 let confirmations: BlockHeight =
-                    ((tip_block_header.height - latest_balance_height) as u64).into();
+                    ((tip_block_header.height - latest_balance_height) as u64 + 1).into();
                 Some(confirmations)
             }
             None => None,

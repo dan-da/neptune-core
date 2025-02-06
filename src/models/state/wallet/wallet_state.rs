@@ -2699,7 +2699,7 @@ mod tests {
                 );
                 assert_eq!(
                     gs.wallet_state
-                        .unconfirmed_balance(tip_digest, timestamp)
+                        .unconfirmed_available_balance(tip_digest, timestamp)
                         .await,
                     half_coinbase_amt
                 );
@@ -2748,7 +2748,7 @@ mod tests {
                 );
                 assert_eq!(
                     gs.wallet_state
-                        .unconfirmed_balance(tip_digest, timestamp)
+                        .unconfirmed_available_balance(tip_digest, timestamp)
                         .await,
                     half_coinbase_amt.checked_sub(&send_amt).unwrap()
                 );
@@ -2767,7 +2767,7 @@ mod tests {
                     .lock_guard()
                     .await
                     .wallet_state
-                    .unconfirmed_balance(tip_digest, timestamp)
+                    .unconfirmed_available_balance(tip_digest, timestamp)
                     .await,
                 half_coinbase_amt
             );

@@ -324,10 +324,11 @@ impl Widget for OverviewScreen {
 
         // confirmed balance
         lines.push(format!(
-            "confirmed balance:   available: {}  total: {}   {}",
-            dashifnotset!(data.available_balance),
+            "confirmed balance:   total: {}  available: {}   {}",
             dashifnotset!(data.total_balance),
+            dashifnotset!(data.available_balance),
             match data.confirmations {
+                Some(c) if c == 1.into() => format!("({} confirmation)", c),
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
@@ -340,9 +341,9 @@ impl Widget for OverviewScreen {
         {
             // unconfirmed balance
             lines.push(format!(
-                "unconfirmed balance: available: {}  total: {}",
-                dashifnotset!(data.unconfirmed_available_balance),
+                "unconfirmed balance: total: {}  available: {}",
                 dashifnotset!(data.unconfirmed_total_balance),
+                dashifnotset!(data.unconfirmed_available_balance),
             ));
         }
 

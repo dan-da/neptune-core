@@ -477,7 +477,7 @@ impl Display for NativeCurrencyAmount {
 
 #[cfg(any(test, feature = "arbitrary-impls"))]
 pub mod neptune_arbitrary {
-    use ::arbitrary::Arbitrary;
+    use arbitrary::Arbitrary;
     use proptest::prelude::BoxedStrategy;
     use proptest::prelude::Strategy;
     use proptest_arbitrary_interop::arb;
@@ -762,6 +762,15 @@ pub(crate) mod test {
                 s,
                 NativeCurrencyAmount::from_str(s).unwrap()
             );
+        }
+    }
+
+    #[proptest]
+    fn parse_and_display_match(input: f64) {
+        if let Ok(amt) = NativeCurrencyAmount::try_from(input) {
+            prop_assert_eq!(amt.to_string(), input.to_string());
+        } else {
+            println!("Could not parse f64 into NativeCurrencyAmount: {}", input);
         }
     }
 
