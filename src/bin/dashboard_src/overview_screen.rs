@@ -322,9 +322,12 @@ impl Widget for OverviewScreen {
             };
         }
 
+        let int_width = 8; // 8 whole coin digits
+        let dec_width = 2; // 2 decimal digits. (for now)
+
         // confirmed balance
         lines.push(format!(
-            "confirmed balance:   total: {}  available: {}   {}",
+            "confirmed balance:   total: {:intw$.decw$}  available: {:intw$.decw$}   {}",
             dashifnotset!(data.total_balance),
             dashifnotset!(data.available_balance),
             match data.confirmations {
@@ -332,6 +335,8 @@ impl Widget for OverviewScreen {
                 Some(c) => format!("({} confirmations)", c),
                 None => " ".to_string(),
             },
+            intw = int_width,
+            decw = dec_width,
         ));
 
         // we only display the unconfirmed balance row if a field is
@@ -341,9 +346,11 @@ impl Widget for OverviewScreen {
         {
             // unconfirmed balance
             lines.push(format!(
-                "unconfirmed balance: total: {}  available: {}",
+                "unconfirmed balance: total: {:intw$.decw$}  available: {:intw$.decw$}",
                 dashifnotset!(data.unconfirmed_total_balance),
                 dashifnotset!(data.unconfirmed_available_balance),
+                intw = int_width,
+                decw = dec_width,
             ));
         }
 
