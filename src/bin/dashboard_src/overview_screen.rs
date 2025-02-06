@@ -333,12 +333,18 @@ impl Widget for OverviewScreen {
             },
         ));
 
-        // confirmed balance
-        lines.push(format!(
-            "unconfirmed balance: available: {}  total: {}",
-            dashifnotset!(data.unconfirmed_available_balance),
-            dashifnotset!(data.unconfirmed_total_balance),
-        ));
+        // we only display the unconfirmed balance row if a field is
+        // different from the confirmed balance row fields.
+        if data.unconfirmed_available_balance != data.available_balance
+            || data.unconfirmed_total_balance != data.total_balance
+        {
+            // unconfirmed balance
+            lines.push(format!(
+                "unconfirmed balance: available: {}  total: {}",
+                dashifnotset!(data.unconfirmed_available_balance),
+                dashifnotset!(data.unconfirmed_total_balance),
+            ));
+        }
 
         lines.push(format!(
             "synchronization: {}",
