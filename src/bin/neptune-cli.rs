@@ -178,10 +178,10 @@ enum Command {
         block_selector: BlockSelector,
     },
 
-    /// retrieve confirmed balance
+    /// retrieve confirmed balance (excludes time-locked utxos)
     ConfirmedAvailableBalance,
 
-    /// retrieve unconfirmed balance (includes unconfirmed transactions)
+    /// retrieve unconfirmed balance (includes unconfirmed transactions, excludes time-locked utxos)
     UnconfirmedAvailableBalance,
 
     /// retrieve wallet status information

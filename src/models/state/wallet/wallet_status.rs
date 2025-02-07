@@ -61,6 +61,7 @@ impl Display for WalletStatusElement {
 pub struct WalletStatus {
     pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof)>,
     pub synced_spent: Vec<WalletStatusElement>,
+
     pub unsynced_unspent: Vec<WalletStatusElement>,
     pub unsynced_spent: Vec<WalletStatusElement>,
 }

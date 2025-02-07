@@ -280,11 +280,15 @@ pub trait RPC {
         block_selector: BlockSelector,
     ) -> RpcResult<Option<BlockHeader>>;
 
-    /// Get sum of unspent UTXOs.
+    /// Get sum of confirmed, unspent, available UTXOs
+    ///
+    /// excludes time-locked utxos
     async fn confirmed_available_balance(token: rpc_auth::Token)
         -> RpcResult<NativeCurrencyAmount>;
 
-    /// Get sum of unspent UTXOs including mempool transactions.
+    /// Get sum of unconfirmed, unspent available UTXOs
+    ///
+    /// includes mempool transactions, excludes time-locked utxos
     async fn unconfirmed_available_balance(
         token: rpc_auth::Token,
     ) -> RpcResult<NativeCurrencyAmount>;
