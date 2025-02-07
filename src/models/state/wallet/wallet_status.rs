@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -40,7 +39,7 @@ impl Display for WalletStatusElement {
 /// 1. synced utxos are those which have a membership-proof for the current tip.
 ///
 /// 2. unsynced utxos are those which have a membership-proof for a block other
-///    than the current tip.
+///    than the current tip.  (unsynced_utxos are only used by unit tests.)
 ///
 /// Each group is further divided into:
 ///
@@ -62,7 +61,9 @@ pub struct WalletStatus {
     pub synced_unspent: Vec<(WalletStatusElement, MsMembershipProof)>,
     pub synced_spent: Vec<WalletStatusElement>,
 
+    #[cfg(test)]
     pub unsynced_unspent: Vec<WalletStatusElement>,
+    #[cfg(test)]
     pub unsynced_spent: Vec<WalletStatusElement>,
 }
 
@@ -94,108 +95,5 @@ impl WalletStatus {
             .filter(|utxo| utxo.is_timelocked_but_otherwise_spendable_at(timestamp))
             .map(|utxo| utxo.get_native_currency_amount())
             .sum::<NativeCurrencyAmount>()
-    }
-
-    /// sum of synced, spent funds
-    ///
-    /// note: only used by `impl Display`.  Can we remove it?
-    pub(crate) fn synced_spent_amount(&self) -> NativeCurrencyAmount {
-        self.synced_spent
-            .iter()
-            .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NativeCurrencyAmount>()
-    }
-
-    /// unsynced, available balance (excludes timelocked utxos)
-    ///
-    /// note: only used by `impl Display`.  Can we remove it?
-    pub(crate) fn unsynced_unspent_available_amount(
-        &self,
-        timestamp: Timestamp,
-    ) -> NativeCurrencyAmount {
-        self.unsynced_unspent
-            .iter()
-            .filter(|wse| wse.utxo.can_spend_at(timestamp))
-            .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NativeCurrencyAmount>()
-    }
-
-    /// unsynced, spent funds
-    ///
-    /// note: only used by `impl Display`.  Can we remove it?
-    pub(crate) fn unsynced_spent_amount(&self) -> NativeCurrencyAmount {
-        self.unsynced_spent
-            .iter()
-            .map(|wse| wse.utxo.get_native_currency_amount())
-            .sum::<NativeCurrencyAmount>()
-    }
-}
-
-impl Display for WalletStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let now = Timestamp::now();
-        let synced_unspent_available_count: usize = self
-            .synced_unspent
-            .iter()
-            .filter(|(wse, _mnmp)| wse.utxo.can_spend_at(now))
-            .count();
-        let synced_unspent_available: String = format!(
-            "synced, unspent available UTXOS: count: {}, amount: {:?}\n[{}]",
-            synced_unspent_available_count,
-            self.synced_unspent_available_amount(now),
-            self.synced_unspent
-                .iter()
-                .filter(|(wse, _mnmp)| wse.utxo.can_spend_at(now))
-                .map(|x| x.0.to_string())
-                .join(",")
-        );
-        let synced_unspent_timelocked_count: usize = self
-            .synced_unspent
-            .iter()
-            .filter(|(wse, _mnmp)| wse.utxo.is_timelocked_but_otherwise_spendable_at(now))
-            .count();
-        let synced_unspent_timelocked: String = format!(
-            "synced, unspent timelocked UTXOS: count: {}, amount: {:?}\n[{}]",
-            synced_unspent_timelocked_count,
-            self.synced_unspent_timelocked_amount(now),
-            self.synced_unspent
-                .iter()
-                .filter(|(wse, _mnmp)| wse.utxo.is_timelocked_but_otherwise_spendable_at(now))
-                .map(|x| x.0.to_string())
-                .join(",")
-        );
-        let unsynced_unspent_count: usize = self.unsynced_unspent.len();
-        let unsynced_unspent: String = format!(
-            "unsynced, unspent UTXOS: count: {}, amount: {:?}\n[{}]",
-            unsynced_unspent_count,
-            self.unsynced_unspent_available_amount(now),
-            self.unsynced_unspent
-                .iter()
-                .map(|x| x.to_string())
-                .join(",")
-        );
-        let synced_spent_count: usize = self.synced_spent.len();
-        let synced_spent: String = format!(
-            "synced, spent UTXOS: count: {}, amount: {:?}\n[{}]",
-            synced_spent_count,
-            self.synced_spent_amount(),
-            self.synced_spent.iter().map(|x| x.to_string()).join(",")
-        );
-        let unsynced_spent_count: usize = self.unsynced_spent.len();
-        let unsynced_spent: String = format!(
-            "unsynced, spent UTXOS: count: {}, amount: {:?}\n[{}]",
-            unsynced_spent_count,
-            self.unsynced_spent_amount(),
-            self.unsynced_spent.iter().map(|x| x.to_string()).join(",")
-        );
-        write!(
-            f,
-            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
-            synced_unspent_available,
-            synced_unspent_timelocked,
-            unsynced_unspent,
-            synced_spent,
-            unsynced_spent
-        )
     }
 }

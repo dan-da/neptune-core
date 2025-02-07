@@ -1335,8 +1335,11 @@ impl WalletState {
     pub async fn get_wallet_status(&self, tip_digest: Digest) -> WalletStatus {
         let monitored_utxos = self.wallet_db.monitored_utxos();
         let mut synced_unspent = vec![];
-        let mut unsynced_unspent = vec![];
         let mut synced_spent = vec![];
+
+        #[cfg(test)]
+        let mut unsynced_unspent = vec![];
+        #[cfg(test)]
         let mut unsynced_spent = vec![];
 
         let stream = monitored_utxos.stream().await;
@@ -1356,19 +1359,26 @@ impl WalletState {
                     ));
                 }
             } else {
-                let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
-                if spent {
-                    unsynced_spent.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
-                } else {
-                    unsynced_unspent.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                #[cfg(test)]
+                {
+                    let any_mp = &mutxo.blockhash_to_membership_proof.iter().next().unwrap().1;
+                    if spent {
+                        unsynced_spent.push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                    } else {
+                        unsynced_unspent
+                            .push(WalletStatusElement::new(any_mp.aocl_leaf_index, utxo));
+                    }
                 }
             }
         }
 
         WalletStatus {
             synced_unspent,
-            unsynced_unspent,
             synced_spent,
+
+            #[cfg(test)]
+            unsynced_unspent,
+            #[cfg(test)]
             unsynced_spent,
         }
     }
