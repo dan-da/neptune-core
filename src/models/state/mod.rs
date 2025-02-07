@@ -338,9 +338,7 @@ impl GlobalState {
 
     pub async fn get_wallet_status_for_tip(&self) -> WalletStatus {
         let tip_digest = self.chain.light_state().hash();
-        self.wallet_state
-            .get_wallet_status_from_lock(tip_digest)
-            .await
+        self.wallet_state.get_wallet_status(tip_digest).await
     }
 
     pub async fn get_latest_balance_height(&self) -> Option<BlockHeight> {
@@ -2158,7 +2156,7 @@ mod global_state_tests {
         assert!(!alice
             .get_wallet_status_for_tip()
             .await
-            .synced_unspent_liquid_amount(launch + seven_months)
+            .synced_unspent_available_amount(launch + seven_months)
             .is_zero());
 
         // Verify that this is unsynced with mock_block_1a
@@ -2214,7 +2212,7 @@ mod global_state_tests {
             3,
             alice
                 .wallet_state
-                .get_wallet_status_from_lock(mock_block_1a.hash())
+                .get_wallet_status(mock_block_1a.hash())
                 .await
                 .synced_unspent
                 .len()
@@ -2240,7 +2238,7 @@ mod global_state_tests {
         // Verify that two MUTXOs are unsynced, and that 1 (from genesis) is synced
         let alice_wallet_status_after_reorg = alice
             .wallet_state
-            .get_wallet_status_from_lock(parent_block.hash())
+            .get_wallet_status(parent_block.hash())
             .await;
         assert_eq!(1, alice_wallet_status_after_reorg.synced_unspent.len());
         assert_eq!(2, alice_wallet_status_after_reorg.unsynced_unspent.len());
@@ -2335,7 +2333,7 @@ mod global_state_tests {
                 3,
                 alice
                     .wallet_state
-                    .get_wallet_status_from_lock(block_1.hash())
+                    .get_wallet_status(block_1.hash())
                     .await
                     .synced_unspent
                     .len()
@@ -2354,7 +2352,7 @@ mod global_state_tests {
         // Verify that all both MUTXOs have synced MPs
         let wallet_status_on_a_fork = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_a_block.hash())
+            .get_wallet_status(fork_a_block.hash())
             .await;
 
         assert_eq!(3, wallet_status_on_a_fork.synced_unspent.len());
@@ -2368,7 +2366,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let alice_wallet_status_on_b_fork_before_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash())
+            .get_wallet_status(fork_b_block.hash())
             .await;
         assert_eq!(
             0,
@@ -2390,7 +2388,7 @@ mod global_state_tests {
             .unwrap();
         let wallet_status_on_b_fork_after_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_b_block.hash())
+            .get_wallet_status(fork_b_block.hash())
             .await;
         assert_eq!(3, wallet_status_on_b_fork_after_resync.synced_unspent.len());
         assert_eq!(
@@ -2408,7 +2406,7 @@ mod global_state_tests {
         // Verify that there are zero MUTXOs with synced MPs
         let alice_wallet_status_on_c_fork_before_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash())
+            .get_wallet_status(fork_c_block.hash())
             .await;
         assert_eq!(
             0,
@@ -2431,7 +2429,7 @@ mod global_state_tests {
             .unwrap();
         let alice_ws_c_after_resync = alice
             .wallet_state
-            .get_wallet_status_from_lock(fork_c_block.hash())
+            .get_wallet_status(fork_c_block.hash())
             .await;
         assert_eq!(1, alice_ws_c_after_resync.synced_unspent.len());
         assert_eq!(2, alice_ws_c_after_resync.unsynced_unspent.len());
@@ -2688,7 +2686,7 @@ mod global_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_liquid_amount(in_seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         assert_eq!(
             NativeCurrencyAmount::coins(7),
@@ -2696,7 +2694,7 @@ mod global_state_tests {
                 .await
                 .get_wallet_status_for_tip()
                 .await
-                .synced_unspent_liquid_amount(in_seven_months)
+                .synced_unspent_available_amount(in_seven_months)
         );
         // TODO: No idea why this isn't working.
         // {
@@ -3663,7 +3661,7 @@ mod global_state_tests {
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_liquid_amount(seven_months_post_launch);
+                    .synced_unspent_available_amount(seven_months_post_launch);
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
 
                 // create change key for alice. change_key_type is a test param.
@@ -3761,7 +3759,7 @@ mod global_state_tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_liquid_amount(seven_months_post_launch)
+                        .synced_unspent_available_amount(seven_months_post_launch)
                 );
 
                 block_1
@@ -3780,7 +3778,7 @@ mod global_state_tests {
                     bob_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_liquid_amount(seven_months_post_launch)
+                        .synced_unspent_available_amount(seven_months_post_launch)
                 );
             }
 
@@ -3817,7 +3815,7 @@ mod global_state_tests {
                 let alice_initial_balance = alice_state_mut
                     .get_wallet_status_for_tip()
                     .await
-                    .synced_unspent_liquid_amount(seven_months_post_launch);
+                    .synced_unspent_available_amount(seven_months_post_launch);
 
                 // lucky alice's wallet begins with 20 balance from premine.
                 assert_eq!(alice_initial_balance, NativeCurrencyAmount::coins(20));
@@ -3848,7 +3846,7 @@ mod global_state_tests {
                     alice_state_mut
                         .get_wallet_status_for_tip()
                         .await
-                        .synced_unspent_liquid_amount(seven_months_post_launch)
+                        .synced_unspent_available_amount(seven_months_post_launch)
                 );
             }
         }

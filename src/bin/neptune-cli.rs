@@ -179,10 +179,10 @@ enum Command {
     },
 
     /// retrieve confirmed balance
-    SyncedBalance,
+    ConfirmedAvailableBalance,
 
     /// retrieve unconfirmed balance (includes unconfirmed transactions)
-    SyncedBalanceUnconfirmed,
+    UnconfirmedAvailableBalance,
 
     /// retrieve wallet status information
     WalletStatus,
@@ -819,12 +819,12 @@ async fn main() -> Result<()> {
                 println!("{}", res.unwrap());
             }
         }
-        Command::SyncedBalance => {
-            let val = client.synced_balance(ctx, token).await??;
+        Command::ConfirmedAvailableBalance => {
+            let val = client.confirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
-        Command::SyncedBalanceUnconfirmed => {
-            let val = client.synced_balance_unconfirmed(ctx, token).await??;
+        Command::UnconfirmedAvailableBalance => {
+            let val = client.unconfirmed_available_balance(ctx, token).await??;
             println!("{val}");
         }
         Command::WalletStatus => {

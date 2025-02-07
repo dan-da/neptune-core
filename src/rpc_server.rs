@@ -109,8 +109,8 @@ pub struct DashBoardOverviewDataFromClient {
     pub tip_digest: Digest,
     pub tip_header: BlockHeader,
     pub syncing: bool,
-    pub available_balance: NativeCurrencyAmount,
-    pub total_balance: NativeCurrencyAmount,
+    pub confirmed_available_balance: NativeCurrencyAmount,
+    pub confirmed_total_balance: NativeCurrencyAmount,
     pub unconfirmed_available_balance: NativeCurrencyAmount,
     pub unconfirmed_total_balance: NativeCurrencyAmount,
     pub mempool_size: usize,
@@ -281,10 +281,13 @@ pub trait RPC {
     ) -> RpcResult<Option<BlockHeader>>;
 
     /// Get sum of unspent UTXOs.
-    async fn synced_balance(token: rpc_auth::Token) -> RpcResult<NativeCurrencyAmount>;
+    async fn confirmed_available_balance(token: rpc_auth::Token)
+        -> RpcResult<NativeCurrencyAmount>;
 
     /// Get sum of unspent UTXOs including mempool transactions.
-    async fn synced_balance_unconfirmed(token: rpc_auth::Token) -> RpcResult<NativeCurrencyAmount>;
+    async fn unconfirmed_available_balance(
+        token: rpc_auth::Token,
+    ) -> RpcResult<NativeCurrencyAmount>;
 
     /// Get the client's wallet transaction history
     async fn history(
@@ -344,7 +347,7 @@ pub trait RPC {
     ) -> RpcResult<Option<NativeCurrencyAmount>>;
 
     /// Determine whether the given amount is less than (or equal to) the balance
-    async fn amount_leq_synced_balance(
+    async fn amount_leq_confirmed_available_balance(
         token: rpc_auth::Token,
         amount: NativeCurrencyAmount,
     ) -> RpcResult<bool>;
@@ -1185,7 +1188,7 @@ impl RPC for NeptuneRPCServer {
     }
 
     // documented in trait. do not add doc-comment.
-    async fn amount_leq_synced_balance(
+    async fn amount_leq_confirmed_available_balance(
         self,
         _ctx: context::Context,
         token: rpc_auth::Token,
@@ -1194,38 +1197,19 @@ impl RPC for NeptuneRPCServer {
         log_slow_scope!(fn_name!());
         token.auth(&self.valid_tokens)?;
 
-        let now = Timestamp::now();
+        let gs = self.state.lock_guard().await;
+        let wallet_status = gs.get_wallet_status_for_tip().await;
+
+        let confirmed_available = gs
+            .wallet_state
+            .confirmed_available_balance(&wallet_status, Timestamp::now());
+
         // test inequality
-        let wallet_status = self
-            .state
-            .lock_guard()
-            .await
-            .get_wallet_status_for_tip()
-            .await;
-        Ok(amount <= wallet_status.synced_unspent_liquid_amount(now))
+        Ok(amount <= confirmed_available)
     }
 
     // documented in trait. do not add doc-comment.
-    async fn synced_balance(
-        self,
-        _context: tarpc::context::Context,
-        token: rpc_auth::Token,
-    ) -> RpcResult<NativeCurrencyAmount> {
-        log_slow_scope!(fn_name!());
-        token.auth(&self.valid_tokens)?;
-
-        let now = Timestamp::now();
-        let wallet_status = self
-            .state
-            .lock_guard()
-            .await
-            .get_wallet_status_for_tip()
-            .await;
-        Ok(wallet_status.synced_unspent_liquid_amount(now))
-    }
-
-    // documented in trait. do not add doc-comment.
-    async fn synced_balance_unconfirmed(
+    async fn confirmed_available_balance(
         self,
         _context: tarpc::context::Context,
         token: rpc_auth::Token,
@@ -1234,11 +1218,30 @@ impl RPC for NeptuneRPCServer {
         token.auth(&self.valid_tokens)?;
 
         let gs = self.state.lock_guard().await;
+        let wallet_status = gs.get_wallet_status_for_tip().await;
+
+        let confirmed_available = gs
+            .wallet_state
+            .confirmed_available_balance(&wallet_status, Timestamp::now());
+
+        Ok(confirmed_available)
+    }
+
+    // documented in trait. do not add doc-comment.
+    async fn unconfirmed_available_balance(
+        self,
+        _context: tarpc::context::Context,
+        token: rpc_auth::Token,
+    ) -> RpcResult<NativeCurrencyAmount> {
+        log_slow_scope!(fn_name!());
+        token.auth(&self.valid_tokens)?;
+
+        let gs = self.state.lock_guard().await;
+        let wallet_status = gs.get_wallet_status_for_tip().await;
 
         Ok(gs
             .wallet_state
-            .unconfirmed_available_balance(gs.chain.light_state().hash(), Timestamp::now())
-            .await)
+            .unconfirmed_available_balance(&wallet_status, Timestamp::now()))
     }
 
     // documented in trait. do not add doc-comment.
@@ -1421,10 +1424,6 @@ impl RPC for NeptuneRPCServer {
             state.chain.light_state().hash()
         };
         let tip_header = *state.chain.light_state().header();
-        let wallet_status = {
-            log_slow_scope!(fn_name!() + "::get_wallet_status_for_tip()");
-            state.get_wallet_status_for_tip().await
-        };
         let syncing = state.net.sync_anchor.is_some();
         let mempool_size = {
             log_slow_scope!(fn_name!() + "::mempool.get_size()");
@@ -1440,21 +1439,6 @@ impl RPC for NeptuneRPCServer {
         };
         let cpu_temp = None; // disable for now.  call is too slow.
 
-        let unconfirmed_available_balance = {
-            log_slow_scope!(fn_name!() + "::unconfirmed_available_balance()");
-            state
-                .wallet_state
-                .unconfirmed_available_balance(tip_digest, now)
-                .await
-        };
-        let unconfirmed_total_balance = {
-            log_slow_scope!(fn_name!() + "::unconfirmed_total_balance()");
-            state
-                .wallet_state
-                .unconfirmed_total_balance(tip_digest)
-                .await
-        };
-
         let proving_capability = self.state.cli().proving_capability();
 
         info!("proving capability: {proving_capability}");
@@ -1469,21 +1453,36 @@ impl RPC for NeptuneRPCServer {
             self.confirmations_internal(&state).await
         };
 
-        let available_balance = {
-            log_slow_scope!(fn_name!() + "::synced_unspent_available_amount()");
-            wallet_status.synced_unspent_liquid_amount(now)
+        let wallet_status = {
+            log_slow_scope!(fn_name!() + "::get_wallet_status_for_tip()");
+            state.get_wallet_status_for_tip().await
         };
-        let total_balance = {
-            log_slow_scope!(fn_name!() + "::synced_unspent_total_amount()");
-            wallet_status.synced_unspent_total_amount()
+        let wallet_state = &state.wallet_state;
+
+        let confirmed_available_balance = {
+            log_slow_scope!(fn_name!() + "::confirmed_available_balance()");
+            wallet_state.confirmed_available_balance(&wallet_status, now)
+        };
+        let confirmed_total_balance = {
+            log_slow_scope!(fn_name!() + "::confirmed_total_balance()");
+            wallet_state.confirmed_total_balance(&wallet_status)
+        };
+
+        let unconfirmed_available_balance = {
+            log_slow_scope!(fn_name!() + "::unconfirmed_available_balance()");
+            wallet_state.unconfirmed_available_balance(&wallet_status, now)
+        };
+        let unconfirmed_total_balance = {
+            log_slow_scope!(fn_name!() + "::unconfirmed_total_balance()");
+            wallet_state.unconfirmed_total_balance(&wallet_status)
         };
 
         Ok(DashBoardOverviewDataFromClient {
             tip_digest,
             tip_header,
             syncing,
-            available_balance,
-            total_balance,
+            confirmed_available_balance,
+            confirmed_total_balance,
             unconfirmed_available_balance,
             unconfirmed_total_balance,
             mempool_size,
@@ -2140,7 +2139,10 @@ mod rpc_server_tests {
             .block_digest(ctx, token, BlockSelector::Digest(Digest::default()))
             .await;
         let _ = rpc_server.clone().utxo_digest(ctx, token, 0).await;
-        let _ = rpc_server.clone().synced_balance(ctx, token).await;
+        let _ = rpc_server
+            .clone()
+            .confirmed_available_balance(ctx, token)
+            .await;
         let _ = rpc_server.clone().history(ctx, token).await;
         let _ = rpc_server.clone().wallet_status(ctx, token).await;
         let own_receiving_address = rpc_server
@@ -2226,7 +2228,9 @@ mod rpc_server_tests {
         )
         .await;
         let token = cookie_token(&rpc_server).await;
-        let balance = rpc_server.synced_balance(context::current(), token).await?;
+        let balance = rpc_server
+            .confirmed_available_balance(context::current(), token)
+            .await?;
         assert!(balance.is_zero());
 
         Ok(())
@@ -3000,7 +3004,7 @@ mod rpc_server_tests {
                             NativeCurrencyAmount::zero(),
                             bob_rpc_server
                                 .clone()
-                                .synced_balance(context::current(), bob_token)
+                                .confirmed_available_balance(context::current(), bob_token)
                                 .await?,
                         );
                         state.set_new_tip(blocks[1].clone()).await?;
@@ -3010,7 +3014,7 @@ mod rpc_server_tests {
                     assert_eq!(
                         bob_amount,
                         bob_rpc_server
-                            .synced_balance(context::current(), bob_token)
+                            .confirmed_available_balance(context::current(), bob_token)
                             .await?,
                     );
                 }
@@ -3145,7 +3149,7 @@ mod rpc_server_tests {
                     assert_eq!(
                         NativeCurrencyAmount::coins(32),
                         bob.clone()
-                            .synced_balance(context::current(), bob_token)
+                            .confirmed_available_balance(context::current(), bob_token)
                             .await?,
                     );
                     // bob applies the blocks after claiming utxos.
@@ -3155,7 +3159,7 @@ mod rpc_server_tests {
 
                 if spent {
                     assert!(bob
-                        .synced_balance(context::current(), bob_token)
+                        .confirmed_available_balance(context::current(), bob_token)
                         .await?
                         .is_zero(),);
                 } else {
@@ -3168,7 +3172,8 @@ mod rpc_server_tests {
                     // +19   change (less fee == 2)
                     assert_eq!(
                         NativeCurrencyAmount::coins(30),
-                        bob.synced_balance(context::current(), bob_token).await?,
+                        bob.confirmed_available_balance(context::current(), bob_token)
+                            .await?,
                     );
                 }
                 Ok(())
@@ -3300,10 +3305,10 @@ mod rpc_server_tests {
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
+                    let wallet_status = state_lock.get_wallet_status_for_tip().await;
                     let original_balance = state_lock
                         .wallet_state
-                        .confirmed_balance(genesis_block.hash(), timestamp)
-                        .await;
+                        .confirmed_available_balance(&wallet_status, timestamp);
                     assert!(original_balance.is_zero(), "Original balance assumed zero");
                 };
 
@@ -3315,10 +3320,10 @@ mod rpc_server_tests {
 
                 {
                     let state_lock = rpc_server.state.lock_guard().await;
+                    let wallet_status = state_lock.get_wallet_status_for_tip().await;
                     let new_balance = state_lock
                         .wallet_state
-                        .confirmed_balance(block_1.hash(), timestamp)
-                        .await;
+                        .confirmed_available_balance(&wallet_status, timestamp);
                     let mut expected_balance = Block::block_subsidy(block_1.header().height);
                     expected_balance.div_two();
                     assert_eq!(
