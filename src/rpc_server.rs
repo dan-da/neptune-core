@@ -1844,6 +1844,7 @@ impl NeptuneRPCServer {
                     .wallet_state
                     .count_sent_transactions_at_block(tip_digest)
                     .await;
+                tracing::debug!("send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}", send_count_at_tip, RATE_LIMIT);
                 if send_count_at_tip >= RATE_LIMIT {
                     let height = state.chain.light_state().header().height;
                     let e = error::SendError::RateLimit { height, tip_digest, max: RATE_LIMIT };
@@ -1943,28 +1944,33 @@ impl NeptuneRPCServer {
                 .add_expected_utxos(utxos_sent_to_self)
                 .await;
 
+            // ensure we write new wallet state out to disk.
+            gsm.persist_wallet().await.expect("flushed wallet");
+        }
+
+        // write-lock block.
+        {
+            tracing::debug!("stmi: step 6. add sent-transaction to wallet. with write-lock");
+
+            let mut gsm = self.state.lock_guard_mut().await;
             // inform wallet about the details of this sent transaction, so it can
             // group inputs and outputs together, eg for history purposes.
             let tip_digest = gsm.chain.light_state().hash();
             gsm.wallet_state
                 .add_sent_transaction((transaction_details, tip_digest).into())
-                .await;
+                .await;            
 
-            // ensure we write new wallet state out to disk.
-            gsm.persist_wallet().await.expect("flushed wallet");
+            tracing::debug!("stmi: step 7. flush dbs.  with write-lock");
+            gsm.flush_databases().await.expect("flushed DBs");
         }
 
-        tracing::debug!("stmi: step 6. send messges. no lock needed");
+        tracing::debug!("stmi: step 8. send messges. no lock needed");
 
         // Send transaction message to main
         let response = self
             .rpc_server_to_main_tx
             .send(RPCServerToMain::BroadcastTx(Box::new(transaction.clone())))
             .await;
-
-        tracing::debug!("stmi: step 7. flush dbs.  need write-lock");
-
-        self.state.flush_databases().await.expect("flushed DBs");
 
         if let Err(e) = response {
             tracing::error!("Could not send Tx to main task: error: {}", e.to_string());
@@ -4543,7 +4549,8 @@ mod rpc_server_tests {
             let outputs = std::iter::repeat(elem);
             let fee = NativeCurrencyAmount::zero();
 
-            for i in 0..5 {
+            // note: we can only perform 2 iters, else we bump into send rate-limit (per block)
+            for i in 5..7 {
                 let result = rpc_server
                     .clone()
                     .send_to_many_inner(
