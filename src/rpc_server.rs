@@ -4602,43 +4602,47 @@ mod rpc_server_tests {
         #[tokio::test]
         #[allow(clippy::needless_return)]
         async fn send_rate_limit() -> Result<()> {
+            let mut rng = StdRng::seed_from_u64(1815);
             let network = Network::Main;
-            let ctx = context::current();
-            let mut rng = thread_rng();
-            let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
-            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
-
             let rpc_server = test_rpc_server(
                 network,
-                WalletSecret::new_random(),
+                WalletSecret::new_pseudorandom(rng.gen()),
                 2,
                 cli_args::Args::default(),
             )
             .await;
-            let token = cookie_token(&rpc_server).await;
 
-            for i in 0..3 {
+            let ctx = context::current();
+            let timestamp = network.launch_date() + Timestamp::days(1);
+
+            let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.gen())
+                .to_address()
+                .into();
+            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
+            let fee = NativeCurrencyAmount::coins(1);
+
+            let outputs = vec![(address, amount)];
+
+            for i in 0..10 {
                 let result = rpc_server
                     .clone()
-                    .send(
+                    .send_to_many_inner(
                         ctx,
-                        token,
-                        amount,
-                        address.into(),
-                        UtxoNotificationMedium::OffChain,
-                        UtxoNotificationMedium::OffChain,
-                        NativeCurrencyAmount::zero(),
+                        outputs.clone(),
+                        (
+                            UtxoNotificationMedium::OnChain,
+                            UtxoNotificationMedium::OnChain,
+                        ),
+                        fee,
+                        timestamp,
+                        TxProvingCapability::PrimitiveWitness,
                     )
                     .await;
 
+                // any attempts after the 2nd send should result in RateLimit error.
                 match i {
                     0..2 => assert!(result.is_ok()),
-                    _ => assert!(matches!(
-                        result,
-                        Err(error::RpcError::SendError(
-                            error::SendError::RateLimit { .. }
-                        ))
-                    )),
+                    _ => assert!(matches!(result, Err(error::SendError::RateLimit { .. }))),
                 }
             }
 
