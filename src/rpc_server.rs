@@ -1487,6 +1487,9 @@ pub trait RPC {
 
     /// Send coins to multiple recipients
     ///
+    /// note: sending is rate-limited to 2 sends per block until block
+    /// 25000 is reached.
+    ///
     /// `outputs` is a list of transaction outputs in the format
     /// `[(address:amount)]`.  The address may be any type supported by
     /// [ReceivingAddress].
@@ -1958,7 +1961,7 @@ impl NeptuneRPCServer {
             let tip_digest = gsm.chain.light_state().hash();
             gsm.wallet_state
                 .add_sent_transaction((transaction_details, tip_digest).into())
-                .await;            
+                .await;
 
             tracing::debug!("stmi: step 7. flush dbs.  with write-lock");
             gsm.flush_databases().await.expect("flushed DBs");
