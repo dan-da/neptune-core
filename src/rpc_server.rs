@@ -1847,10 +1847,18 @@ impl NeptuneRPCServer {
                     .wallet_state
                     .count_sent_transactions_at_block(tip_digest)
                     .await;
-                tracing::debug!("send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}", send_count_at_tip, RATE_LIMIT);
+                tracing::debug!(
+                    "send-tx rate-limit check:  found {} sent-tx at current tip.  limit = {}",
+                    send_count_at_tip,
+                    RATE_LIMIT
+                );
                 if send_count_at_tip >= RATE_LIMIT {
                     let height = state.chain.light_state().header().height;
-                    let e = error::SendError::RateLimit { height, tip_digest, max: RATE_LIMIT };
+                    let e = error::SendError::RateLimit {
+                        height,
+                        tip_digest,
+                        max: RATE_LIMIT,
+                    };
                     tracing::warn!("{}", e.to_string());
                     return Err(e);
                 }
@@ -3316,7 +3324,11 @@ pub mod error {
         NegativeFee,
 
         #[error("Send rate limit reached for block height {height} ({digest}). A maximum of {max} tx may be sent per block.", digest = tip_digest.to_hex())]
-        RateLimit { height: BlockHeight, tip_digest: Digest, max: usize },
+        RateLimit {
+            height: BlockHeight,
+            tip_digest: Digest,
+            max: usize,
+        },
     }
 
     // convert anyhow::Error to a SendError::Failed.
