@@ -3,9 +3,9 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use serde::Serialize;
-use serde::Deserialize;
 use itertools::Itertools;
+use serde::Deserialize;
+use serde::Serialize;
 
 use super::utxo_notification::UtxoNotifyMethod;
 use crate::config_models::network::Network;

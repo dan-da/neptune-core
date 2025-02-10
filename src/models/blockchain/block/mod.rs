@@ -1321,7 +1321,7 @@ pub(crate) mod block_tests {
                 .await;
                 alice.set_new_tip(block1.clone()).await.unwrap();
                 let outputs = vec![output_to_self.clone(); i];
-                let (tx2, _) = alice
+                let (tx2, _, _) = alice
                     .lock_guard_mut()
                     .await
                     .create_transaction_with_prover_capability(
@@ -1377,7 +1377,7 @@ pub(crate) mod block_tests {
                 )
                 .await
                 .unwrap();
-                let (tx3, _) = alice
+                let (tx3, _, _) = alice
                     .lock_guard_mut()
                     .await
                     .create_transaction_with_prover_capability(
@@ -1657,7 +1657,7 @@ pub(crate) mod block_tests {
                 true,
             );
             let fee = NativeCurrencyAmount::coins(1);
-            let (tx1, _) = alice
+            let (tx1, _, _) = alice
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
@@ -1676,7 +1676,7 @@ pub(crate) mod block_tests {
                 Block::block_template_invalid_proof(&genesis_block, tx1, in_seven_months, None);
             alice.set_new_tip(block1.clone()).await.unwrap();
 
-            let (tx2, _) = alice
+            let (tx2, _, _) = alice
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(

@@ -1183,7 +1183,7 @@ pub(crate) mod mine_loop_tests {
             alice_key.to_address().into(),
             false,
         );
-        let (tx_from_alice, _maybe_change_output) = alice
+        let (tx_from_alice, _, _maybe_change_output) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(

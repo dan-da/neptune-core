@@ -1895,7 +1895,7 @@ mod global_state_tests {
             .is_err());
 
         // one month after though, we should be
-        let (tx, _change_output) = bob
+        let (tx, _, _change_output) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1935,7 +1935,7 @@ mod global_state_tests {
             output_utxos.push(output_utxo);
         }
 
-        let (new_tx, _change) = bob
+        let (new_tx, _, _change) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2579,7 +2579,7 @@ mod global_state_tests {
             .next_unused_spending_key(KeyType::Generation)
             .await
             .unwrap();
-        let (tx_to_alice_and_bob, maybe_change_output) = premine_receiver
+        let (tx_to_alice_and_bob, _, maybe_change_output) = premine_receiver
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2759,7 +2759,7 @@ mod global_state_tests {
         // state is being updated correctly with new blocks; not the
         // use-`ProofCollection`-instead-of-`SingleProof` functionality.
         // Weaker machines need to use the proof server.
-        let (tx_from_alice, maybe_change_for_alice) = alice
+        let (tx_from_alice, _, maybe_change_for_alice) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2802,7 +2802,7 @@ mod global_state_tests {
                 false,
             ),
         ];
-        let (tx_from_bob, maybe_change_for_bob) = bob
+        let (tx_from_bob, _, maybe_change_for_bob) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -3711,7 +3711,7 @@ mod global_state_tests {
                 );
 
                 // create tx.  utxo_notify_method is a test param.
-                let (alice_to_bob_tx, maybe_change_utxo) = alice_state_lock
+                let (alice_to_bob_tx, _, maybe_change_utxo) = alice_state_lock
                     .lock_guard()
                     .await
                     .create_transaction_with_prover_capability(

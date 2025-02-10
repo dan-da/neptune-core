@@ -36,12 +36,12 @@ use super::expected_utxo::ExpectedUtxo;
 use super::expected_utxo::UtxoNotifier;
 use super::incoming_utxo::IncomingUtxo;
 use super::rusty_wallet_database::RustyWalletDatabase;
+use super::sent_transaction::SentTransaction;
 use super::unlocked_utxo::UnlockedUtxo;
 use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
-use super::sent_transaction::SentTransaction;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::DbtVec;
@@ -541,6 +541,7 @@ impl WalletState {
         self.wallet_db.expected_utxos().len().await
     }
 
+    /// adds a [SentTransaction] to the wallet db
     pub(crate) async fn add_sent_transaction(&mut self, sent_transaction: SentTransaction) {
         self.wallet_db
             .sent_transactions_mut()
@@ -548,12 +549,21 @@ impl WalletState {
             .await;
     }
 
+    /// returns a count of transactions this wallet sent at given block.
+    ///
+    /// note that the block specifies the current tip at the moment the
+    /// transactions were sent -- NOT when they were confirmed.
+    ///
+    /// This fn is provided to facilitate send-rate limiting.
+    /// ie to limit how many payments the wallet can send per block.
+    ///
+    /// once send-rate limiting is disabled, this fn can probably be removed.
     pub(crate) async fn count_sent_transactions_at_block(&self, block: Digest) -> usize {
         let list = self.wallet_db.sent_transactions();
         let len = list.len().await;
 
         // iterate over list in reverse order (newest blocks first)
-        let stream = list.stream_many_values( (0..len).rev() ).await;
+        let stream = list.stream_many_values((0..len).rev()).await;
         pin_mut!(stream); // needed for iteration
 
         let mut count: usize = 0;
@@ -1793,7 +1803,7 @@ mod tests {
             false,
         );
         let tx_outputs = vec![txoutput.clone(), txoutput.clone()];
-        let (tx_block2, _) = bob
+        let (tx_block2, _, _) = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
@@ -1837,7 +1847,7 @@ mod tests {
 
         // Repeat the outputs to Alice in block 3 and verify correct new
         // balance.
-        let (tx_block3, _) = bob
+        let (tx_block3, _, _) = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
@@ -1897,7 +1907,7 @@ mod tests {
             false,
         );
         let fee = NativeCurrencyAmount::coins(10);
-        let (mut tx_block2, _) = bob
+        let (mut tx_block2, _, _) = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
@@ -1997,7 +2007,7 @@ mod tests {
             false,
         );
         let fee = NativeCurrencyAmount::coins(10);
-        let (mut tx_block2, _) = bob
+        let (mut tx_block2, _, _) = bob
             .lock_guard_mut()
             .await
             .create_transaction_with_prover_capability(
@@ -2705,7 +2715,7 @@ mod tests {
             let block2_timestamp = block1.header().timestamp + Timestamp::minutes(2);
             let fee = NativeCurrencyAmount::coins(1);
             let a_key = GenerationSpendingKey::derive_from_seed(rng.gen());
-            let (mut tx_spending_guesser_fee, _) = bob
+            let (mut tx_spending_guesser_fee, _, _) = bob
                 .global_state_lock
                 .lock_guard()
                 .await
@@ -2850,7 +2860,7 @@ mod tests {
                     UtxoNotificationMedium::OnChain,
                 );
 
-                let (tx, _change_output) = gs
+                let (tx, _, _change_output) = gs
                     .create_transaction_with_prover_capability(
                         tx_outputs,
                         change_key,
@@ -3434,7 +3444,7 @@ mod tests {
                 let an_address = GenerationReceivingAddress::derive_from_seed(rng.gen());
                 let tx_output =
                     TxOutput::onchain_native_currency(amount, rng.gen(), an_address.into(), false);
-                let (spending_tx, _) = alice_global_lock
+                let (spending_tx, _, _) = alice_global_lock
                     .global_state_lock
                     .lock_guard()
                     .await

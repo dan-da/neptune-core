@@ -1361,7 +1361,7 @@ mod archival_state_tests {
 
         let tx_output_anyone_can_spend =
             TxOutput::no_notification(utxo, rng.gen(), rng.gen(), false);
-        let (sender_tx, _change_output) = alice
+        let (sender_tx, _, _change_output) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1467,7 +1467,7 @@ mod archival_state_tests {
         let fee = NativeCurrencyAmount::zero();
 
         let in_seven_months = Timestamp::now() + Timestamp::months(7);
-        let (big_tx, _) = alice
+        let (big_tx, _, _) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1483,7 +1483,7 @@ mod archival_state_tests {
             .unwrap();
         let block_1a = invalid_block_with_transaction(&genesis_block, big_tx);
 
-        let (empty_tx, _) = alice
+        let (empty_tx, _, _) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -1568,7 +1568,7 @@ mod archival_state_tests {
         let num_blocks = 30;
         for _ in 0..num_blocks {
             let timestamp = previous_block.header().timestamp + Timestamp::months(7);
-            let (tx, _) = alice
+            let (tx, _, _) = alice
                 .lock_guard()
                 .await
                 .create_transaction_with_prover_capability(
@@ -1812,7 +1812,7 @@ mod archival_state_tests {
             .next_unused_spending_key(KeyType::Symmetric)
             .await
             .unwrap();
-        let (tx_to_alice_and_bob, change_utxo) = premine_rec
+        let (tx_to_alice_and_bob, _, change_utxo) = premine_rec
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2017,7 +2017,7 @@ mod archival_state_tests {
             .wallet_secret
             .nth_symmetric_key_for_tests(0)
             .into();
-        let (tx_from_alice, alice_change) = alice
+        let (tx_from_alice, _, alice_change) = alice
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(
@@ -2063,7 +2063,7 @@ mod archival_state_tests {
             .wallet_secret
             .nth_symmetric_key_for_tests(0)
             .into();
-        let (tx_from_bob, bob_change) = bob
+        let (tx_from_bob, _, bob_change) = bob
             .lock_guard()
             .await
             .create_transaction_with_prover_capability(

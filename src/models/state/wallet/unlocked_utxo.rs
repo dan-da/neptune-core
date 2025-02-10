@@ -1,6 +1,6 @@
-use tasm_lib::triton_vm::prelude::Tip5;
-use serde::Serialize;
 use serde::Deserialize;
+use serde::Serialize;
+use tasm_lib::triton_vm::prelude::Tip5;
 
 use super::address::SpendingKey;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;

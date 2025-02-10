@@ -1831,12 +1831,22 @@ impl NeptuneRPCServer {
 
         // check if this send would exceed the send rate-limit (per block)
         {
-            const RATE_LIMIT: usize = 2;
+            // send rate limiting only applies below height 25000
+            // which is approx 5.6 months after launch.
+            // after that, the training wheel come off.
+            const RATE_LIMIT_UNTIL_HEIGHT: u64 = 25000;
             let state = self.state.lock_guard().await;
-            let tip_digest = state.chain.light_state().hash();
-            let send_count_at_tip = state.wallet_state.count_sent_transactions_at_block(tip_digest).await;
-            if send_count_at_tip >= RATE_LIMIT {
-                return Err(error::SendError::RateLimit{max: RATE_LIMIT});
+
+            if state.chain.light_state().header().height < RATE_LIMIT_UNTIL_HEIGHT.into() {
+                const RATE_LIMIT: usize = 2;
+                let tip_digest = state.chain.light_state().hash();
+                let send_count_at_tip = state
+                    .wallet_state
+                    .count_sent_transactions_at_block(tip_digest)
+                    .await;
+                if send_count_at_tip >= RATE_LIMIT {
+                    return Err(error::SendError::RateLimit { max: RATE_LIMIT });
+                }
             }
         }
 
@@ -1933,7 +1943,9 @@ impl NeptuneRPCServer {
             // inform wallet about the details of this sent transaction, so it can
             // group inputs and outputs together, eg for history purposes.
             let tip_digest = gsm.chain.light_state().hash();
-            gsm.wallet_state.add_sent_transaction((transaction_details, tip_digest).into()).await;
+            gsm.wallet_state
+                .add_sent_transaction((transaction_details, tip_digest).into())
+                .await;
 
             // ensure we write new wallet state out to disk.
             gsm.persist_wallet().await.expect("flushed wallet");
@@ -3292,7 +3304,7 @@ pub mod error {
         NegativeFee,
 
         #[error("Send rate limit reached. A maximum of {max} tx may be sent per block.")]
-        RateLimit {max: usize},
+        RateLimit { max: usize },
     }
 
     // convert anyhow::Error to a SendError::Failed.
