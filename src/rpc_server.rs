@@ -4606,14 +4606,14 @@ mod rpc_server_tests {
             let network = Network::Main;
             let rpc_server = test_rpc_server(
                 network,
-                WalletSecret::new_pseudorandom(rng.gen()),
+                WalletSecret::devnet_wallet(),
                 2,
                 cli_args::Args::default(),
             )
             .await;
 
             let ctx = context::current();
-            let timestamp = network.launch_date() + Timestamp::days(1);
+            let timestamp = network.launch_date() + Timestamp::months(7);
 
             let address: ReceivingAddress = GenerationSpendingKey::derive_from_seed(rng.gen())
                 .to_address()
