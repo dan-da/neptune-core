@@ -10,6 +10,7 @@ pub(crate) mod unlocked_utxo;
 pub mod utxo_notification;
 pub(crate) mod wallet_state;
 pub mod wallet_status;
+pub mod sent_transaction;
 
 use std::fs;
 use std::path::Path;

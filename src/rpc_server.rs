@@ -1829,6 +1829,17 @@ impl NeptuneRPCServer {
         let (owned_utxo_notification_medium, unowned_utxo_notification_medium) =
             utxo_notification_media;
 
+        // check if this send would exceed the send rate-limit (per block)
+        {
+            const RATE_LIMIT: usize = 2;
+            let state = self.state.lock_guard().await;
+            let tip_digest = state.chain.light_state().hash();
+            let send_count_at_tip = state.wallet_state.count_sent_transactions_at_block(tip_digest).await;
+            if send_count_at_tip >= RATE_LIMIT {
+                return Err(error::SendError::RateLimit{max: RATE_LIMIT});
+            }
+        }
+
         tracing::debug!("stmi: step 1. get change key. need write-lock");
 
         // obtain next unused symmetric key for change utxo
@@ -1864,7 +1875,7 @@ impl NeptuneRPCServer {
         // lengthy operation.
         //
         // note: A change output will be added to tx_outputs if needed.
-        let (mut transaction, maybe_change_output) = match state
+        let (mut transaction, transaction_details, maybe_change_output) = match state
             .create_transaction_with_prover_capability(
                 tx_outputs.clone(),
                 change_key,
@@ -1918,6 +1929,11 @@ impl NeptuneRPCServer {
             gsm.wallet_state
                 .add_expected_utxos(utxos_sent_to_self)
                 .await;
+
+            // inform wallet about the details of this sent transaction, so it can
+            // group inputs and outputs together, eg for history purposes.
+            let tip_digest = gsm.chain.light_state().hash();
+            gsm.wallet_state.add_sent_transaction((transaction_details, tip_digest).into()).await;
 
             // ensure we write new wallet state out to disk.
             gsm.persist_wallet().await.expect("flushed wallet");
@@ -3274,6 +3290,9 @@ pub mod error {
 
         #[error("Transaction with negative fees not allowed")]
         NegativeFee,
+
+        #[error("Send rate limit reached. A maximum of {max} tx may be sent per block.")]
+        RateLimit {max: usize},
     }
 
     // convert anyhow::Error to a SendError::Failed.

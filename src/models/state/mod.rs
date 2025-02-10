@@ -754,6 +754,7 @@ impl GlobalState {
             triton_vm_job_queue,
         )
         .await
+        .map(|(tx, _tx_details, output)| (tx, output))
     }
 
     /// Variant of [Self::create_transaction] that allows caller to specify
@@ -769,7 +770,7 @@ impl GlobalState {
         timestamp: Timestamp,
         prover_capability: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
-    ) -> Result<(Transaction, Option<TxOutput>)> {
+    ) -> Result<(Transaction, TransactionDetails, Option<TxOutput>)> {
         // TODO: Attempt to simplify method interface somehow, maybe by moving
         // it to GlobalStateLock?
         let tip = self.chain.light_state();
@@ -822,7 +823,7 @@ impl GlobalState {
 
         // 2. Create the transaction
         let transaction = Self::create_raw_transaction(
-            transaction_details,
+            &transaction_details,
             prover_capability,
             triton_vm_job_queue,
             (
@@ -833,7 +834,7 @@ impl GlobalState {
         )
         .await?;
 
-        Ok((transaction, maybe_change_output))
+        Ok((transaction, transaction_details, maybe_change_output))
     }
 
     /// creates a Transaction.
@@ -864,7 +865,7 @@ impl GlobalState {
     ///
     /// See the implementation of [Self::create_transaction()].
     pub(crate) async fn create_raw_transaction(
-        transaction_details: TransactionDetails,
+        transaction_details: &TransactionDetails,
         proving_power: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,
@@ -873,7 +874,7 @@ impl GlobalState {
         //       long time, perhaps minutes.  The `await` here, should avoid
         //       block the tokio executor and other async tasks.
         Self::create_transaction_from_data_worker(
-            transaction_details,
+            &transaction_details,
             proving_power,
             triton_vm_job_queue,
             proof_job_options,
@@ -887,7 +888,7 @@ impl GlobalState {
     //       Use create_transaction_from_data() instead.
     //
     async fn create_transaction_from_data_worker(
-        transaction_details: TransactionDetails,
+        transaction_details: &TransactionDetails,
         proving_power: TxProvingCapability,
         triton_vm_job_queue: &TritonVmJobQueue,
         proof_job_options: TritonVmProofJobOptions,

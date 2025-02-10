@@ -41,6 +41,7 @@ use super::wallet_status::WalletStatus;
 use super::wallet_status::WalletStatusElement;
 use super::WalletSecret;
 use super::WALLET_INCOMING_SECRETS_FILE_NAME;
+use super::sent_transaction::SentTransaction;
 use crate::config_models::cli_args::Args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::database::storage::storage_schema::DbtVec;
@@ -538,6 +539,40 @@ impl WalletState {
     /// Returns the number of expected UTXOs in the database.
     pub(crate) async fn num_expected_utxos(&self) -> u64 {
         self.wallet_db.expected_utxos().len().await
+    }
+
+    pub(crate) async fn add_sent_transaction(&mut self, sent_transaction: SentTransaction) {
+        self.wallet_db
+            .sent_transactions_mut()
+            .push(sent_transaction)
+            .await;
+    }
+
+    pub(crate) async fn count_sent_transactions_at_block(&self, block: Digest) -> usize {
+        let list = self.wallet_db.sent_transactions();
+        let len = list.len().await;
+
+        // iterate over list in reverse order (newest blocks first)
+        let stream = list.stream_many_values( (0..len).rev() ).await;
+        pin_mut!(stream); // needed for iteration
+
+        let mut count: usize = 0;
+
+        // note; this loop assumes that SentTransaction are ordered such
+        // that any elements with the same tip_when_sent (digest) are next
+        // to eachother, which should normally be true.
+        // that assumption allows us to break early rather than checking the
+        // entire list.
+
+        while let Some(stx) = stream.next().await {
+            if stx.tip_when_sent == block {
+                count += 1;
+            } else if count > 0 {
+                break;
+            }
+        }
+
+        return count;
     }
 
     // note: does not verify we do not have any dups.

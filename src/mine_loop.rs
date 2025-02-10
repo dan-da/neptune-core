@@ -393,7 +393,7 @@ pub(crate) async fn make_coinbase_transaction_stateless(
 
     info!("Start: generate single proof for coinbase transaction");
     let transaction = GlobalState::create_raw_transaction(
-        transaction_details,
+        &transaction_details,
         proving_power,
         vm_job_queue,
         job_options,
@@ -572,7 +572,7 @@ pub(crate) async fn create_block_transaction_from(
     if transactions_to_merge.is_empty() {
         let nop =
             TransactionDetails::nop(predecessor_block.mutator_set_accumulator_after(), timestamp);
-        let nop = PrimitiveWitness::from_transaction_details(nop);
+        let nop = PrimitiveWitness::from_transaction_details(&nop);
         let nop_proof = SingleProof::produce(&nop, vm_job_queue, job_options.clone()).await?;
         let nop = Transaction {
             kernel: nop.kernel,

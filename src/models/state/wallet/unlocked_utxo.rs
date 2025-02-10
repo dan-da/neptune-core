@@ -1,4 +1,6 @@
 use tasm_lib::triton_vm::prelude::Tip5;
+use serde::Serialize;
+use serde::Deserialize;
 
 use super::address::SpendingKey;
 use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
@@ -8,8 +10,8 @@ use crate::util_types::mutator_set::ms_membership_proof::MsMembershipProof;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
 
-#[derive(Debug, Clone)]
-pub(crate) struct UnlockedUtxo {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnlockedUtxo {
     pub utxo: Utxo,
     lock_script_and_witness: LockScriptAndWitness,
     membership_proof: MsMembershipProof,
