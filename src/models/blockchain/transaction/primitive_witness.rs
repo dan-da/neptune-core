@@ -245,7 +245,7 @@ impl PrimitiveWitness {
         // complete transaction kernel
         let removal_records = tx_inputs
             .iter()
-            .map(|txi| txi.removal_record(&mutator_set_accumulator))
+            .map(|txi| txi.removal_record(mutator_set_accumulator))
             .collect_vec();
         let kernel = TransactionKernelProxy {
             inputs: removal_records,
@@ -265,7 +265,7 @@ impl PrimitiveWitness {
         let sender_randomnesses = tx_outputs.sender_randomnesses();
         let receiver_digests = tx_outputs.receiver_digests();
         Self::generate_primitive_witness(
-            &unlocked_utxos,
+            unlocked_utxos,
             output_utxos,
             sender_randomnesses,
             receiver_digests,

@@ -874,7 +874,7 @@ impl GlobalState {
         //       long time, perhaps minutes.  The `await` here, should avoid
         //       block the tokio executor and other async tasks.
         Self::create_transaction_from_data_worker(
-            &transaction_details,
+            transaction_details,
             proving_power,
             triton_vm_job_queue,
             proof_job_options,

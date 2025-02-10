@@ -582,7 +582,7 @@ impl WalletState {
             }
         }
 
-        return count;
+        count
     }
 
     // note: does not verify we do not have any dups.
