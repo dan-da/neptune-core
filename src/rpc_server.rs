@@ -4596,6 +4596,55 @@ mod rpc_server_tests {
             Ok(())
         }
 
+        /// checks that the sending rate limit kicks in after 2 tx are sent.
+        /// note: rate-limit only applies below block 25000
+        #[traced_test]
+        #[tokio::test]
+        #[allow(clippy::needless_return)]
+        async fn send_rate_limit() -> Result<()> {
+            let network = Network::Main;
+            let ctx = context::current();
+            let mut rng = thread_rng();
+            let address = GenerationSpendingKey::derive_from_seed(rng.gen()).to_address();
+            let amount = NativeCurrencyAmount::coins(rng.gen_range(0..10));
+
+            let rpc_server = test_rpc_server(
+                network,
+                WalletSecret::new_random(),
+                2,
+                cli_args::Args::default(),
+            )
+            .await;
+            let token = cookie_token(&rpc_server).await;
+
+            for i in 0..3 {
+                let result = rpc_server
+                    .clone()
+                    .send(
+                        ctx,
+                        token,
+                        amount,
+                        address.into(),
+                        UtxoNotificationMedium::OffChain,
+                        UtxoNotificationMedium::OffChain,
+                        NativeCurrencyAmount::zero(),
+                    )
+                    .await;
+
+                match i {
+                    0..2 => assert!(result.is_ok()),
+                    _ => assert!(matches!(
+                        result,
+                        Err(error::RpcError::SendError(
+                            error::SendError::RateLimit { .. }
+                        ))
+                    )),
+                }
+            }
+
+            Ok(())
+        }
+
         mod worker {
             use super::*;
             use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
