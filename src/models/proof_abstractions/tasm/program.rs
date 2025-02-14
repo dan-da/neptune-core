@@ -490,7 +490,7 @@ pub mod test {
             let filename_ = filename.clone();
             let headers_ = headers.clone();
             let handle = std::thread::spawn(move || {
-                let url = format!("{}/{}", server_, filename_);
+                let url = format!("{}{}", server_, filename_);
 
                 debug!("requesting: <{url}>");
 
