@@ -191,10 +191,6 @@ pub mod test {
     use std::time::SystemTime;
 
     use itertools::Itertools;
-    use rand::seq::SliceRandom;
-    use reqwest::header::HeaderMap;
-    use reqwest::header::HeaderValue;
-    use reqwest::Url;
     use tasm_lib::triton_vm;
     use tracing::debug;
     use tracing::Span;
@@ -500,16 +496,17 @@ pub mod test {
             let filename_ = filename.clone();
             let headers_ = headers.clone();
             let handle = std::thread::spawn(move || {
-                let http_client = reqwest::blocking::Client::builder()
-                    .timeout(Duration::from_secs(10))
-                    .default_headers(headers_)
-                    .build()
-                    .expect("Must be able to build HTTP client instance");
                 let url = server_.join(&filename_).unwrap_or_else(|_| {
                     panic!("Must be able to form URL. Got: '{server_}' and '{filename_}'.")
                 });
+
+                let mut http_client = clienter::HttpClient::new();
+                http_client.timeout = Some(Duration::from_secs(10));
+                let request = http_client.request(clienter::HttpMethod::GET, &url);
+
                 debug!("requesting: <{url}>");
-                let Ok(response) = http_client.get(url).send() else {
+
+                let Ok(response) = http_client.send(&request) else {
                     println!(
                         "server '{}' failed for file '{}'; trying next ...",
                         server_.clone(),
@@ -519,7 +516,7 @@ pub mod test {
                     return None;
                 };
 
-                Some((response.status(), response.bytes()))
+                Some((response.status, response.body()))
             });
 
             let Some((status_code, body)) = handle.join().unwrap() else {
