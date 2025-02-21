@@ -14,6 +14,7 @@ use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
+use crate::models::state::mining_status::MiningInactiveReason;
 
 #[derive(Clone, Debug)]
 pub(crate) enum MainToMiner {
@@ -33,11 +34,10 @@ pub(crate) enum MainToMiner {
     /// proposal from the miner, and that miner can start a new task.
     Continue,
 
-    StopMining,
+    StopMining(MiningInactiveReason),
     StartMining,
-
-    StartSyncing,
-    StopSyncing,
+    // StartSyncing,
+    // StopSyncing,
     // SetCoinbasePubkey,
 }
 
@@ -49,10 +49,10 @@ impl MainToMiner {
             MainToMiner::NewBlockProposal => "new block proposal",
             MainToMiner::WaitForContinue => "wait for continue",
             MainToMiner::Continue => "continue",
-            MainToMiner::StopMining => "stop mining",
+            MainToMiner::StopMining(_) => "stop mining",
             MainToMiner::StartMining => "start mining",
-            MainToMiner::StartSyncing => "start syncing",
-            MainToMiner::StopSyncing => "stop syncing",
+            // MainToMiner::StartSyncing => "start syncing",
+            // MainToMiner::StopSyncing => "stop syncing",
         }
     }
 }

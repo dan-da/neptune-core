@@ -43,6 +43,7 @@ use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::mining_status::MiningInactiveReason;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -658,12 +659,14 @@ pub(crate) async fn mine(
                 (
                     !s.net.peer_map.is_empty(),
                     s.net.sync_anchor.is_some(),
-                    s.mining_status.clone(),
+                    s.mining_status,
                 )
             })
             .await;
         if !is_connected {
-            global_state_lock.set_mining_status_to_inactive().await;
+            global_state_lock
+                .set_mining_status_to_inactive(MiningInactiveReason::await_connections())
+                .await;
             warn!("Not mining because client has no connections");
             const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
             sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
@@ -690,7 +693,10 @@ pub(crate) async fn mine(
         // have already been guessing and are restarting with new params.
         let start_guessing = matches!(
             (mining_status, should_guess),
-            (MiningStatus::Inactive, true)
+            (
+                MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_)),
+                true
+            )
         );
 
         if start_guessing {
@@ -777,9 +783,8 @@ pub(crate) async fn mine(
             tokio::spawn(async { Ok(()) })
         };
 
+        let mut inactive_reason = None;
         let mut restart_guessing = false;
-        let mut stop_guessing = false;
-        let mut stop_composing = false;
         let mut stop_looping = false;
 
         // Await a message from either the worker task or from the main loop,
@@ -789,7 +794,7 @@ pub(crate) async fn mine(
                 restart_guessing = true;
             }
             Ok(Err(e)) = &mut composer_task => {
-                stop_composing = true;
+                inactive_reason = Some(MiningInactiveReason::compose_error());
 
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
@@ -812,60 +817,36 @@ pub(crate) async fn mine(
 
                 match main_message {
                     MainToMiner::Shutdown => {
-                        debug!("Miner shutting down.");
-
-                        stop_guessing = true;
-                        stop_composing = true;
                         stop_looping = true;
+                        MiningInactiveReason::shutdown();
+                        debug!("Miner shutting down.");
                     }
                     MainToMiner::NewBlock => {
-                        stop_guessing = true;
-                        stop_composing = true;
-
+                        inactive_reason = Some(MiningInactiveReason::await_block_proposal());
                         info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal => {
-                        stop_guessing = true;
-                        stop_composing = true;
-
+                        inactive_reason = Some(MiningInactiveReason::await_block());
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
-                        stop_guessing = true;
-                        stop_composing = true;
-
+                        inactive_reason = Some(MiningInactiveReason::new_tip_block());
                         wait_for_confirmation = true;
                     }
                     MainToMiner::Continue => {
                         wait_for_confirmation = false;
                     }
-                    MainToMiner::StopMining => {
+                    MainToMiner::StopMining(reason) => {
                         pause_mine = true;
-
-                        stop_guessing = true;
-                        stop_composing = true;
+                        inactive_reason = Some(reason);
                     }
                     MainToMiner::StartMining => {
                         pause_mine = false;
                     }
-                    MainToMiner::StopSyncing => {
-                        // no need to do anything here.  Mining will
-                        // resume or not at top of loop depending on
-                        // pause_mine and syncing variables.
-                    }
-                    MainToMiner::StartSyncing => {
-                        // when syncing begins, we must halt the mining
-                        // task.  But we don't change the pause_mine
-                        // variable, because it reflects the logical on/off
-                        // of mining, which syncing can temporarily override
-                        // but not alter the setting.
-                        stop_guessing = true;
-                        stop_composing = true;
-                    }
                 }
             }
             new_composition = composer_rx => {
-                stop_composing = true;
+                inactive_reason = Some(MiningInactiveReason::await_block());
 
                 match new_composition {
                     Ok((new_block_proposal, composer_utxos)) => {
@@ -876,7 +857,7 @@ pub(crate) async fn mine(
                 };
             }
             new_block = guesser_rx => {
-                stop_guessing = true;
+                inactive_reason = Some(MiningInactiveReason::await_block_proposal());
 
                 match new_block {
                     Err(err) => {
@@ -911,28 +892,26 @@ pub(crate) async fn mine(
             }
         }
 
+        if let Some(reason) = inactive_reason {
+            global_state_lock
+                .set_mining_status_to_inactive(reason)
+                .await;
+
+            if !composer_task.is_finished() {
+                cancel_compose_tx.send(())?;
+                debug!("Cancel signal sent to composer worker.");
+            }
+            if let Some(gt) = &guesser_task {
+                gt.abort();
+                debug!("Abort-signal sent to guesser worker.");
+            }
+        }
+
         if restart_guessing {
             if let Some(gt) = &guesser_task {
                 gt.abort();
                 debug!("Abort-signal sent to guesser worker.");
                 debug!("Restarting guesser task with new parameters");
-            }
-        }
-        if stop_guessing {
-            if let Some(gt) = &guesser_task {
-                gt.abort();
-                debug!("Abort-signal sent to guesser worker.");
-            }
-            global_state_lock.set_mining_status_to_inactive().await;
-        }
-        if stop_composing {
-            if !composer_task.is_finished() {
-                cancel_compose_tx.send(())?;
-                debug!("Cancel signal sent to composer worker.");
-            }
-            // avoid duplicate call if stop_guessing is also true.
-            if !stop_guessing {
-                global_state_lock.set_mining_status_to_inactive().await;
             }
         }
 
