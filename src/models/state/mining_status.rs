@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GuessingWorkInfo {
     work_start: SystemTime,
     num_inputs: usize,
@@ -29,7 +29,7 @@ impl GuessingWorkInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ComposingWorkInfo {
     // Only this info is available at the beginning of the composition work.
     // The rest of the information will have to be read from the log.
@@ -42,7 +42,7 @@ impl ComposingWorkInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MiningInactiveReason {
     /// disabled
     /// set at startup if mining (composing & guessing) is disabled.
@@ -180,7 +180,7 @@ impl Display for MiningInactiveReason {
 ///      Guessing --> Inactive(AwaitBlockProposal) --> Guessing ...
 ///
 /// Disabled --> none.  (final)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MiningStatus {
     /// guessing
     /// set when guessing starts
