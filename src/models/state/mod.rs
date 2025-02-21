@@ -73,6 +73,7 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposalRejectError;
+use crate::models::state::mining_status::MiningInactiveReason;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -179,35 +180,34 @@ impl GlobalStateLock {
         &self.vm_job_queue
     }
 
-    // check if mining
-    pub async fn mining(&self) -> bool {
-        self.lock(|s| match s.mining_status {
-            MiningStatus::Guessing(_) => true,
-            MiningStatus::Composing(_) => true,
-            MiningStatus::Inactive => false,
-        })
-        .await
+    pub async fn set_mining_status(&mut self, mining_status: MiningStatus) {
+        // this avoids acquiring write-lock if mining is disabled.
+        if !GlobalState::mining_enabled(&self.cli) {
+            return;
+        }
+
+        self.lock_guard_mut().await.mining_status = mining_status;
+        tracing::debug!("set mining status: {}", mining_status);
     }
 
-    pub async fn set_mining_status_to_inactive(&mut self) {
-        self.lock_guard_mut().await.mining_status = MiningStatus::Inactive;
-        tracing::debug!("set mining status: inactive");
+    pub async fn set_mining_status_to_inactive(&mut self, reason: MiningInactiveReason) {
+        self.set_mining_status(MiningStatus::Inactive(reason)).await
     }
 
     /// Indicate if we are guessing
     pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
         let now = SystemTime::now();
         let block_info = GuessingWorkInfo::new(now, block);
-        self.lock_guard_mut().await.mining_status = MiningStatus::Guessing(block_info);
-        tracing::debug!("set mining status: guessing");
+        self.set_mining_status(MiningStatus::Guessing(block_info))
+            .await
     }
 
     /// Indicate if we are composing
     pub async fn set_mining_status_to_composing(&mut self) {
         let now = SystemTime::now();
         let work_info = ComposingWorkInfo::new(now);
-        self.lock_guard_mut().await.mining_status = MiningStatus::Composing(work_info);
-        tracing::debug!("set mining status: composing");
+        self.set_mining_status(MiningStatus::Composing(work_info))
+            .await
     }
 
     // persist wallet state to disk
@@ -319,6 +319,12 @@ impl GlobalState {
         cli: cli_args::Args,
         mempool: Mempool,
     ) -> Self {
+        let mining_status = if Self::mining_enabled(&cli) {
+            MiningStatus::Inactive(MiningInactiveReason::init())
+        } else {
+            MiningStatus::Inactive(MiningInactiveReason::disabled())
+        };
+
         Self {
             wallet_state,
             chain,
@@ -326,8 +332,12 @@ impl GlobalState {
             cli,
             mempool,
             block_proposal: BlockProposal::default(),
-            mining_status: MiningStatus::Inactive,
+            mining_status,
         }
+    }
+
+    fn mining_enabled(cli: &cli_args::Args) -> bool {
+        cli.compose || cli.guess
     }
 
     /// Return a seed used to randomize shuffling.
