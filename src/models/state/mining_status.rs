@@ -217,6 +217,11 @@ impl Display for MiningStatus {
                     human_duration_secs(&elapsed_time.unwrap())
                 )
             }
+            MiningStatus::Inactive(reason)
+                if matches!(reason, MiningInactiveReason::Disabled(_)) =>
+            {
+                format!("inactive  ({})", reason.description())
+            }
             MiningStatus::Inactive(reason) => format!(
                 "inactive for {}  ({})",
                 human_duration_secs(&reason.since().elapsed()),
