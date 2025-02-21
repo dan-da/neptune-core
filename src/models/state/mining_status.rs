@@ -217,7 +217,11 @@ impl Display for MiningStatus {
                     human_duration_secs(&elapsed_time.unwrap())
                 )
             }
-            MiningStatus::Inactive(reason) => format!("inactive: {}", reason),
+            MiningStatus::Inactive(reason) => format!(
+                "inactive for {}  ({})",
+                reason.description(),
+                human_duration_secs(&reason.since().elapsed())
+            ),
         };
         let reward = match self {
             MiningStatus::Guessing(block_work_info) => format!(
