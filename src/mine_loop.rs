@@ -650,8 +650,9 @@ pub(crate) async fn mine(
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
-    let mut pause_mine = false;
-    let mut wait_for_confirmation = false;
+    // let mut pause_mine = false;
+    // let mut wait_for_confirmation = false;
+
     let mut maybe_proposal = BlockProposal::none();
     loop {
         // Ensure restart timer doesn't resolve again, without guesser
@@ -663,11 +664,10 @@ pub(crate) async fn mine(
         // todo: remove this read-lock acquisition which slows us down and can
         // potentially interfere with guessing if write-lock is held somewhere.
         // instead this information could be sent to us via channel msgs.
-        let (is_connected, is_syncing, mining_status, proposal_block_hash) = global_state_lock
+        let (is_connected, mining_status, proposal_block_hash) = global_state_lock
             .lock(|s| {
                 (
                     !s.net.peer_map.is_empty(),
-                    s.net.sync_anchor.is_some(),
                     s.mining_status,
                     s.block_proposal.block_hash(), // option
                 )
@@ -715,14 +715,12 @@ pub(crate) async fn mine(
             maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         }
 
-        let guess = cli_args.guess;
-
-        let should_guess = !wait_for_confirmation
-            && guess
-            && maybe_proposal.is_some()
-            && !is_syncing
-            && !pause_mine
-            && is_connected;
+        // let should_guess = !wait_for_confirmation
+        //     && guess
+        //     && maybe_proposal.is_some()
+        //     && !is_syncing
+        //     && !pause_mine
+        //     && is_connected;
 
         // if start_guessing is true, then we are in a state change from
         // inactive state to guessing state.
@@ -730,12 +728,19 @@ pub(crate) async fn mine(
         // if start_guessing is false and should_guess is true then we
         // have already been guessing and are restarting with new params.
         let start_guessing = matches!(
-            (mining_status, should_guess),
-            (
-                MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_)),
-                true
-            )
+            mining_status,
+            MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_))
         );
+
+        let should_guess = matches!(mining_status, MiningStatus::Guessing(_));
+
+        // let start_guessing = matches!(
+        //     (mining_status, should_guess),
+        //     (
+        //         MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_)),
+        //         true
+        //     )
+        // );
 
         if start_guessing {
             let proposal = maybe_proposal.unwrap(); // is_some() verified above
@@ -790,14 +795,18 @@ pub(crate) async fn mine(
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
-        let compose = cli_args.compose;
+        let should_compose = matches!(
+            mining_status,
+            MiningStatus::Inactive(MiningInactiveReason::AwaitBlockProposal(_))
+        );
 
-        let should_compose = !wait_for_confirmation
-            && compose
-            && guesser_task.is_none()
-            && !is_syncing
-            && !pause_mine
-            && is_connected;
+        //  maybe_proposal.is_none()
+        //     && !wait_for_confirmation
+        //     && compose
+        //     && guesser_task.is_none()
+        //     && !is_syncing
+        //     && !pause_mine
+        //     && is_connected;
 
         let mut composer_task = if should_compose {
             global_state_lock.set_mining_status_to_composing().await;
@@ -838,7 +847,6 @@ pub(crate) async fn mine(
 
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
-                        pause_mine = true;
                         tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
                     },
                     _ => {
@@ -871,17 +879,18 @@ pub(crate) async fn mine(
                     }
                     MainToMiner::WaitForContinue => {
                         inactive_reason = Some(MiningInactiveReason::new_tip_block());
-                        wait_for_confirmation = true;
+                        // wait_for_confirmation = true;
                     }
                     MainToMiner::Continue => {
-                        wait_for_confirmation = false;
+                        inactive_reason = Some(MiningInactiveReason::init());
+                        // wait_for_confirmation = false;
                     }
                     MainToMiner::StopMining(reason) => {
-                        pause_mine = true;
                         inactive_reason = Some(reason);
                     }
                     MainToMiner::StartMining => {
-                        pause_mine = false;
+                        inactive_reason = Some(MiningInactiveReason::init());
+                        // pause_mine = false;
                     }
                 }
             }
@@ -891,7 +900,6 @@ pub(crate) async fn mine(
                 match new_composition {
                     Ok((new_block_proposal, composer_utxos)) => {
                         to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
-                        wait_for_confirmation = true;
                     },
                     Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
                 };
@@ -925,7 +933,7 @@ pub(crate) async fn mine(
 
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
 
-                            wait_for_confirmation = true;
+                            // wait_for_confirmation = true;
                         }
                     },
                 };

@@ -42,10 +42,6 @@ impl BlockProposal {
         Self::None
     }
 
-    pub(crate) fn is_some(&self) -> bool {
-        !matches!(self, BlockProposal::None)
-    }
-
     pub(crate) fn unwrap(&self) -> &Block {
         match self {
             BlockProposal::OwnComposition((block, _)) => block,
