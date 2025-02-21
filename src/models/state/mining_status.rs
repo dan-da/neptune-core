@@ -42,6 +42,194 @@ impl ComposingWorkInfo {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MiningState {
+    Disabled = 0,
+    Init = 1,
+    Paused = 2, // ByRpc, SyncBlocks, AwaitConnections
+    AwaitBlockProposal = 3,
+    AwaitBlock = 4,
+    Composing = 5,
+    Guessing = 6,
+    ComposeError = 7,
+    ShutDown = 8,
+}
+
+#[rustfmt::skip]
+const MINING_STATE_TRANSITIONS: [&[MiningState]; 9] = [
+    // MiningState::Disabled
+    &[],
+
+    // MiningState::Init
+    &[
+        MiningState::Paused,
+        MiningState::AwaitBlockProposal,
+        MiningState::AwaitBlock,
+        MiningState::ShutDown,
+    ],
+
+    // MiningState::Paused
+    &[
+        MiningState::Init,
+        MiningState::ShutDown
+    ],
+
+    // MiningState::AwaitBlockProposal
+    &[
+        MiningState::Composing,
+        MiningState::AwaitBlock,
+        MiningState::Paused,
+        MiningState::ShutDown,
+    ],
+
+    // MiningState::AwaitBlock
+    &[
+        MiningState::Guessing,
+        MiningState::Paused,
+        MiningState::ShutDown,
+    ],
+
+    // MiningState::Composing
+    &[
+        MiningState::AwaitBlock,
+        MiningState::Paused,
+        MiningState::ComposeError,
+        MiningState::ShutDown,
+    ],
+
+    // MiningState::Guessing
+    &[
+        MiningState::Init,
+        MiningState::Paused,
+        MiningState::ShutDown,
+    ],
+
+    // MiningState::ComposeError
+    &[
+        MiningState::ShutDown
+    ],
+
+    // MiningState::ShutDown
+    &[],
+];
+
+pub struct MiningStateMachine {
+    state: MiningState,
+
+    syncing: bool,
+    paused_by_rpc: bool,
+    connections: u32,
+
+    role_compose: bool,
+    role_guess: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct InvalidStateTransition {
+    pub old_state: MiningState,
+    pub new_state: MiningState,
+}
+
+impl MiningStateMachine {
+    pub fn new(role_compose: bool, role_guess: bool) -> Self {
+        Self {
+            state: MiningState::Init,
+            syncing: false,
+            paused_by_rpc: false,
+            connections: 0,
+            role_compose,
+            role_guess,
+        }
+    }
+
+    pub fn try_advance(&mut self, new_state: MiningState) -> Result<(), InvalidStateTransition> {
+        self.ensure_allowed(new_state)?;
+        self.state = new_state;
+        Ok(())
+    }
+
+    pub fn set_connections(&mut self, connections: u32) {
+        if connections < 2 {
+            let new_state = MiningState::Paused;
+            if self.allowed(new_state) {
+                self.state = new_state;
+                self.connections = connections;
+            }
+        } else {
+            if self.connections < 2 {
+                let new_state = MiningState::Init;
+                if self.allowed(new_state) {
+                    self.state = new_state;
+                    self.connections = connections;
+                }
+            } else {
+                // connections was fine before, and still fine.
+                // keep our existing state.
+                self.connections = connections;
+            }
+        }
+    }
+
+    pub fn pause_by_rpc(&mut self) {
+        let new_state = MiningState::Paused;
+        if self.allowed(new_state) {
+            self.state = new_state;
+            self.paused_by_rpc = true;
+        }
+    }
+
+    pub fn unpause_by_rpc(&mut self) {
+        let new_state = MiningState::Init;
+        if self.allowed(new_state) {
+            self.state = new_state;
+            self.paused_by_rpc = false;
+        }
+    }
+
+    pub fn start_syncing(&mut self) {
+        let new_state = MiningState::Paused;
+        if self.allowed(new_state) {
+            self.state = new_state;
+            self.syncing = true;
+        }
+    }
+
+    pub fn stop_syncing(&mut self) {
+        let new_state = MiningState::Init;
+        if self.allowed(new_state) {
+            self.state = new_state;
+            self.syncing = false;
+        }
+    }
+
+    pub fn allowed(&self, state: MiningState) -> bool {
+        if state == self.state {
+            true
+        } else if !self.mining_enabled() {
+            state == MiningState::Disabled
+        } else {
+            let allowed_states: &[MiningState] = MINING_STATE_TRANSITIONS[self.state as usize];
+            allowed_states.iter().any(|v| *v == state)
+        }
+    }
+
+    fn ensure_allowed(&self, new_state: MiningState) -> Result<(), InvalidStateTransition> {
+        if self.allowed(new_state) {
+            Ok(())
+        } else {
+            Err(InvalidStateTransition {
+                old_state: self.state,
+                new_state,
+            })
+        }
+    }
+
+    fn mining_enabled(&self) -> bool {
+        self.role_compose && self.role_guess
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MiningInactiveReason {
     /// disabled
@@ -77,6 +265,7 @@ pub enum MiningInactiveReason {
     /// shutdown
     Shutdown(SystemTime),
 }
+
 impl MiningInactiveReason {
     pub(crate) fn can_compose(&self) -> bool {
         matches!(self, Self::AwaitBlockProposal(_))
