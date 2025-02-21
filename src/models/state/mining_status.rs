@@ -219,8 +219,8 @@ impl Display for MiningStatus {
             }
             MiningStatus::Inactive(reason) => format!(
                 "inactive for {}  ({})",
-                reason.description(),
-                human_duration_secs(&reason.since().elapsed())
+                human_duration_secs(&reason.since().elapsed()),
+                reason.description()
             ),
         };
         let reward = match self {
