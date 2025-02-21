@@ -674,10 +674,17 @@ pub(crate) async fn mine(
             continue;
         }
 
-        if matches!(
-            mining_status,
-            MiningStatus::Inactive(MiningInactiveReason::Init(_))
-        ) {
+        // if mining_status is inactive::not_connected, then we need to return
+        // to inactive::init
+        if let Some(MiningInactiveReason::AwaitConnections(_)) = mining_status.inactive_reason() {
+            global_state_lock
+                .set_mining_status_to_inactive(MiningInactiveReason::init())
+                .await;
+        }
+
+        // if mining_status is inactive::init, then we need to get into either
+        // await_block or await_block_proposal state.
+        if let Some(MiningInactiveReason::Init(_)) = mining_status.inactive_reason() {
             let new_reason = if proposal_block_hash.is_some() {
                 MiningInactiveReason::await_block()
             } else {
@@ -706,13 +713,6 @@ pub(crate) async fn mine(
             maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         }
 
-        // let should_guess = !wait_for_confirmation
-        //     && guess
-        //     && maybe_proposal.is_some()
-        //     && !is_syncing
-        //     && !pause_mine
-        //     && is_connected;
-
         // if start_guessing is true, then we are in a state change from
         // inactive state to guessing state.
         //
@@ -723,15 +723,7 @@ pub(crate) async fn mine(
             MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_))
         );
 
-        let should_guess = matches!(mining_status, MiningStatus::Guessing(_));
-
-        // let start_guessing = matches!(
-        //     (mining_status, should_guess),
-        //     (
-        //         MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_)),
-        //         true
-        //     )
-        // );
+        let should_guess = mining_status.can_guess();
 
         if start_guessing {
             let proposal = maybe_proposal.unwrap(); // is_some() verified above
@@ -783,18 +775,7 @@ pub(crate) async fn mine(
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
-        let should_compose = matches!(
-            mining_status,
-            MiningStatus::Inactive(MiningInactiveReason::AwaitBlockProposal(_))
-        );
-
-        //  maybe_proposal.is_none()
-        //     && !wait_for_confirmation
-        //     && compose
-        //     && guesser_task.is_none()
-        //     && !is_syncing
-        //     && !pause_mine
-        //     && is_connected;
+        let should_compose = mining_status.can_compose();
 
         let mut composer_task = if should_compose {
             global_state_lock.set_mining_status_to_composing().await;
@@ -854,7 +835,7 @@ pub(crate) async fn mine(
                 match main_message {
                     MainToMiner::Shutdown => {
                         stop_looping = true;
-                        MiningInactiveReason::shutdown();
+                        inactive_reason = Some(MiningInactiveReason::shutdown());
                         debug!("Miner shutting down.");
                     }
                     MainToMiner::NewBlock => {
@@ -867,18 +848,15 @@ pub(crate) async fn mine(
                     }
                     MainToMiner::WaitForContinue => {
                         inactive_reason = Some(MiningInactiveReason::new_tip_block());
-                        // wait_for_confirmation = true;
                     }
                     MainToMiner::Continue => {
                         inactive_reason = Some(MiningInactiveReason::init());
-                        // wait_for_confirmation = false;
                     }
                     MainToMiner::StopMining(reason) => {
                         inactive_reason = Some(reason);
                     }
                     MainToMiner::StartMining => {
                         inactive_reason = Some(MiningInactiveReason::init());
-                        // pause_mine = false;
                     }
                 }
             }
@@ -912,16 +890,12 @@ pub(crate) async fn mine(
                         if !new_block_found.block.has_proof_of_work(latest_block.header()) {
                             error!("Own mined block did not have valid PoW Discarding.");
                         } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now()).await {
-                                // Block could be invalid if for instance the proof and proof-of-work
-                                // took less time than the minimum block time.
-                                error!("Found block with valid proof-of-work but block is invalid.");
+                            // Block could be invalid if for instance the proof and proof-of-work
+                            // took less time than the minimum block time.
+                            error!("Found block with valid proof-of-work but block is invalid.");
                         } else {
-
                             info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
-
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
-
-                            // wait_for_confirmation = true;
                         }
                     },
                 };
