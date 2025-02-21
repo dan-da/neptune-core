@@ -78,6 +78,14 @@ pub enum MiningInactiveReason {
     Shutdown(SystemTime),
 }
 impl MiningInactiveReason {
+    pub(crate) fn can_compose(&self) -> bool {
+        matches!(self, Self::AwaitBlockProposal(_))
+    }
+
+    pub(crate) fn can_guess(&self) -> bool {
+        matches!(self, Self::AwaitBlock(_))
+    }
+
     pub(crate) fn disabled() -> Self {
         Self::Disabled(SystemTime::now())
     }
@@ -184,6 +192,31 @@ pub enum MiningStatus {
 
     /// inactive
     Inactive(MiningInactiveReason),
+}
+
+impl MiningStatus {
+    pub(crate) fn can_compose(&self) -> bool {
+        match self {
+            Self::Composing(_) => true,
+            Self::Guessing(_) => false,
+            Self::Inactive(reason) => reason.can_compose(),
+        }
+    }
+
+    pub(crate) fn can_guess(&self) -> bool {
+        match self {
+            Self::Composing(_) => false,
+            Self::Guessing(_) => true,
+            Self::Inactive(reason) => reason.can_guess(),
+        }
+    }
+
+    pub(crate) fn inactive_reason(&self) -> Option<MiningInactiveReason> {
+        match *self {
+            Self::Inactive(reason) => Some(reason),
+            _ => None,
+        }
+    }
 }
 
 impl Display for MiningStatus {
