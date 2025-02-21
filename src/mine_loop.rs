@@ -249,16 +249,22 @@ fn guess_worker(
         .unwrap();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(rand::rng, |rng, _i| {
-                guess_nonce_iteration(
-                    kernel_auth_path,
-                    threshold,
-                    sleepy_guessing,
-                    rng,
-                    header_auth_path,
-                    &sender,
-                )
-            })
+            .map_init(
+                || {
+                    let mut rng = rand::rng();
+                    rng.random()
+                },
+                |initial_nonce, _i| {
+                    guess_nonce_iteration(
+                        kernel_auth_path,
+                        threshold,
+                        sleepy_guessing,
+                        initial_nonce,
+                        header_auth_path,
+                        &sender,
+                    )
+                },
+            )
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
@@ -353,7 +359,7 @@ fn guess_nonce_iteration(
     kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
     threshold: Digest,
     sleepy_guessing: bool,
-    rng: &mut rand::rngs::ThreadRng,
+    nonce: &mut Digest,
     bh_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
@@ -361,23 +367,23 @@ fn guess_nonce_iteration(
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    // Modify the nonce in the block header. In order to collect the guesser
-    // fee, this nonce must be the post-image of a known pre-image under Tip5.
-    let nonce: Digest = rng.random();
-
     // Check every N guesses if task has been cancelled.
     if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
 
-    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, nonce);
+    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, *nonce);
     let success = block_hash <= threshold;
 
-    match success {
+    let ret = match success {
         false => GuessNonceResult::BlockNotFound,
-        true => GuessNonceResult::NonceFound { nonce },
-    }
+        true => GuessNonceResult::NonceFound { nonce: *nonce },
+    };
+
+    *nonce = block_hash;
+
+    ret
 }
 
 /// Make a coinbase transaction rewarding the composer identified by receiving
@@ -650,12 +656,8 @@ pub(crate) async fn mine(
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
-    // let mut pause_mine = false;
-    // let mut wait_for_confirmation = false;
-    
     let role_compose = global_state_lock.cli().compose;
     let role_guess = global_state_lock.cli().guess;
-   
 
     let mut maybe_proposal = BlockProposal::none();
     loop {
@@ -665,57 +667,56 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        // todo: remove this read-lock acquisition which slows us down and can
-        // potentially interfere with guessing if write-lock is held somewhere.
-        // instead this information could be sent to us via channel msgs.
-        let (is_connected, mining_status, proposal_block_hash) = global_state_lock
-            .lock(|s| {
-                (
-                    !s.net.peer_map.is_empty(),
-                    s.mining_status,
-                    s.block_proposal.block_hash(), // option
-                )
-            })
-            .await;
-        if !is_connected {
-            global_state_lock
-                .set_mining_status_to_inactive(MiningInactiveReason::await_connections())
+        let (mining_status, proposal_block_hash) = {
+            // todo: remove this read-lock acquisition which slows us down and can
+            // potentially interfere with guessing if write-lock is held somewhere.
+            // instead this information could be sent to us via channel msgs.
+            let (is_connected, mining_status, proposal_block_hash) = global_state_lock
+                .lock(|s| {
+                    (
+                        !s.net.peer_map.is_empty(),
+                        s.mining_status,
+                        s.block_proposal.block_hash(), // option
+                    )
+                })
                 .await;
-            warn!("Not mining because client has no connections");
-            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
-            sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
-            continue;
-        }
+            if !is_connected {
+                global_state_lock
+                    .set_mining_status_to_inactive(MiningInactiveReason::await_connections())
+                    .await;
+                warn!("Not mining because client has no connections");
+                const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
+                sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
+                continue;
+            }
 
-        // if mining_status is inactive::not_connected, then we need to return
-        // to inactive::init
-        let new_mining_status = if let Some(MiningInactiveReason::AwaitConnections(_)) =
-            mining_status.inactive_reason()
-        {
-            let ms = MiningStatus::Inactive(MiningInactiveReason::init());
-            ms
-        } else {
-            mining_status
-        };
-
-        // if mining_status is inactive::init, then we need to get into either
-        // await_block or await_block_proposal state.
-        let new_mining_status =
-            if let Some(MiningInactiveReason::Init(_)) = new_mining_status.inactive_reason() {
-                let new_reason = if proposal_block_hash.is_some() {
-                    MiningInactiveReason::await_block()
-                } else {
-                    MiningInactiveReason::await_block_proposal()
-                };
-                let ms = MiningStatus::Inactive(new_reason);
-                ms
-            } else {
-                mining_status
+            // if mining_status is inactive::await_connections, then we need to return
+            // to inactive::init
+            let new_mining_status = match mining_status.inactive_reason() {
+                Some(MiningInactiveReason::AwaitConnections(_)) => {
+                    MiningStatus::Inactive(MiningInactiveReason::init())
+                }
+                _ => mining_status,
             };
-        if new_mining_status != mining_status {
-            global_state_lock.set_mining_status(new_mining_status).await;
-        }
-        let mining_status = new_mining_status;
+
+            // if mining_status is inactive::init, then we need to get into either
+            // await_block or await_block_proposal state.
+            let new_mining_status = match new_mining_status.inactive_reason() {
+                Some(MiningInactiveReason::Init(_)) => {
+                    let new_reason = if proposal_block_hash.is_some() {
+                        MiningInactiveReason::await_block()
+                    } else {
+                        MiningInactiveReason::await_block_proposal()
+                    };
+                    MiningStatus::Inactive(new_reason)
+                }
+                _ => mining_status,
+            };
+            if new_mining_status != mining_status {
+                global_state_lock.set_mining_status(new_mining_status).await;
+            }
+            (new_mining_status, proposal_block_hash)
+        };
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
@@ -740,10 +741,11 @@ pub(crate) async fn mine(
         //
         // if start_guessing is false and should_guess is true then we
         // have already been guessing and are restarting with new params.
-        let start_guessing = role_guess && matches!(
-            mining_status,
-            MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_))
-        );
+        let start_guessing = role_guess
+            && matches!(
+                mining_status,
+                MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_))
+            );
 
         let should_guess = role_guess && mining_status.can_guess();
 
@@ -759,16 +761,17 @@ pub(crate) async fn mine(
 
             // safe because above `is_some`
             let proposal = maybe_proposal.unwrap();
-            let guesser_key = global_state_lock
-                .lock_guard()
-                .await
-                .wallet_state
-                .wallet_secret
-                .guesser_spending_key(proposal.header().prev_block_digest);
 
-            let latest_block_header = global_state_lock
-                .lock(|s| s.chain.light_state().header().to_owned())
-                .await;
+            let (guesser_key, latest_block_header) = {
+                let state = global_state_lock.lock_guard().await;
+                let key = state
+                    .wallet_state
+                    .wallet_secret
+                    .guesser_spending_key(proposal.header().prev_block_digest);
+                let tip_header = state.chain.light_state().header().to_owned();
+                (key, tip_header)
+            };
+
             let guesser_task = guess_nonce(
                 proposal.to_owned(),
                 latest_block_header,
