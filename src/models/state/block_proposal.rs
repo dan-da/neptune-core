@@ -1,5 +1,7 @@
 use std::fmt;
 
+use tasm_lib::prelude::Digest;
+
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -49,6 +51,14 @@ impl BlockProposal {
             BlockProposal::OwnComposition((block, _)) => block,
             BlockProposal::ForeignComposition(block) => block,
             BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
+        }
+    }
+
+    pub(crate) fn block_hash(&self) -> Option<Digest> {
+        match self {
+            BlockProposal::OwnComposition((block, _)) => Some(block.hash()),
+            BlockProposal::ForeignComposition(block) => Some(block.hash()),
+            BlockProposal::None => None,
         }
     }
 

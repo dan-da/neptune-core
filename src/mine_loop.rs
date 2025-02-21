@@ -43,6 +43,7 @@ use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::mining_status::MiningInactiveReason;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -629,6 +630,10 @@ pub(crate) async fn mine(
     to_main: mpsc::Sender<MinerToMain>,
     mut global_state_lock: GlobalStateLock,
 ) -> Result<()> {
+    global_state_lock
+        .set_mining_status_to_inactive(MiningInactiveReason::init())
+        .await;
+
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
@@ -647,6 +652,7 @@ pub(crate) async fn mine(
 
     let mut pause_mine = false;
     let mut wait_for_confirmation = false;
+    let mut maybe_proposal = BlockProposal::none();
     loop {
         // Ensure restart timer doesn't resolve again, without guesser
         // task actually being spawned.
@@ -654,12 +660,16 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let (is_connected, is_syncing, mining_status) = global_state_lock
+        // todo: remove this read-lock acquisition which slows us down and can
+        // potentially interfere with guessing if write-lock is held somewhere.
+        // instead this information could be sent to us via channel msgs.
+        let (is_connected, is_syncing, mining_status, proposal_block_hash) = global_state_lock
             .lock(|s| {
                 (
                     !s.net.peer_map.is_empty(),
                     s.net.sync_anchor.is_some(),
                     s.mining_status,
+                    s.block_proposal.block_hash(), // option
                 )
             })
             .await;
@@ -673,10 +683,38 @@ pub(crate) async fn mine(
             continue;
         }
 
+        if matches!(
+            mining_status,
+            MiningStatus::Inactive(MiningInactiveReason::Init(_))
+        ) {
+            let new_reason = if proposal_block_hash.is_some() {
+                MiningInactiveReason::await_block()
+            } else {
+                MiningInactiveReason::await_block_proposal()
+            };
+            global_state_lock
+                .set_mining_status_to_inactive(new_reason)
+                .await;
+        }
+
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
 
-        let maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
+        // optimization: only fetch proposal from global state if block hash has changed.
+        // this avoids a read-lock and expensive clone for most common path.
+        let fetch_new_proposal = match (maybe_proposal.block_hash(), proposal_block_hash) {
+            (Some(current), Some(latest)) => current != latest,
+            (None, Some(_)) => true,
+            (Some(_), None) => {
+                maybe_proposal = BlockProposal::none();
+                false
+            }
+            (None, None) => false,
+        };
+        if fetch_new_proposal {
+            maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
+        }
+
         let guess = cli_args.guess;
 
         let should_guess = !wait_for_confirmation
@@ -753,13 +791,15 @@ pub(crate) async fn mine(
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
         let compose = cli_args.compose;
-        let mut composer_task = if !wait_for_confirmation
+
+        let should_compose = !wait_for_confirmation
             && compose
             && guesser_task.is_none()
             && !is_syncing
             && !pause_mine
-            && is_connected
-        {
+            && is_connected;
+
+        let mut composer_task = if should_compose {
             global_state_lock.set_mining_status_to_composing().await;
 
             let latest_block = global_state_lock
