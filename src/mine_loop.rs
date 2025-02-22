@@ -843,11 +843,17 @@ pub(crate) async fn mine(
                     MainToMiner::Continue => {
                         machine.try_advance(MiningStatus::init()).unwrap();
                     }
-                    MainToMiner::StopMining(reason) => {
-                        machine.try_advance(MiningStatus::paused(reason)).unwrap();
+                    MainToMiner::StopMining => {
+                        machine.pause_by_rpc();
                     }
                     MainToMiner::StartMining => {
-                        machine.try_advance(MiningStatus::init()).unwrap();
+                        machine.unpause_by_rpc();
+                    }
+                    MainToMiner::StartSyncing => {
+                        machine.start_syncing();
+                    }
+                    MainToMiner::StopSyncing => {
+                        machine.stop_syncing();
                     }
                 }
             }
