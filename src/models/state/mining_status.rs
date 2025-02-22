@@ -90,7 +90,7 @@ pub enum MiningState {
     NewTipBlock = 5,
     // ---- end happy path ----
     ComposeError = 6,
-    Paused = 7, // Rpc, SyncBlocks, NeedConnections
+    Paused = 7, // Rpc, SyncBlocks, NeedConnection
     Disabled = 8,
     Shutdown = 9,
 }
@@ -326,7 +326,7 @@ impl MiningStateMachine {
         match reason {
             MiningPausedReason::Rpc(_) => self.pause_by_rpc(),
             MiningPausedReason::SyncBlocks(_) => self.pause_while_syncing(),
-            MiningPausedReason::NeedConnections(_) => self.pause_need_connection(),
+            MiningPausedReason::NeedConnection(_) => self.pause_need_connection(),
         };
     }
 
@@ -348,7 +348,7 @@ impl MiningStateMachine {
     }
 
     fn pause_need_connection(&mut self) {
-        let reason = MiningPausedReason::need_connections();
+        let reason = MiningPausedReason::need_connection();
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
@@ -487,7 +487,7 @@ pub enum MiningPausedReason {
     SyncBlocks(SystemTime),
 
     /// need peer connections
-    NeedConnections(SystemTime),
+    NeedConnection(SystemTime),
 }
 
 impl MiningPausedReason {
@@ -499,15 +499,15 @@ impl MiningPausedReason {
         Self::SyncBlocks(SystemTime::now())
     }
 
-    pub(crate) fn need_connections() -> Self {
-        Self::NeedConnections(SystemTime::now())
+    pub(crate) fn need_connection() -> Self {
+        Self::NeedConnection(SystemTime::now())
     }
 
     pub fn since(&self) -> SystemTime {
         match *self {
             Self::Rpc(i) => i,
             Self::SyncBlocks(i) => i,
-            Self::NeedConnections(i) => i,
+            Self::NeedConnection(i) => i,
         }
     }
 
@@ -515,7 +515,7 @@ impl MiningPausedReason {
         match self {
             Self::Rpc(_) => "user",
             Self::SyncBlocks(_) => "syncing blocks",
-            Self::NeedConnections(_) => "await connections",
+            Self::NeedConnection(_) => "await connections",
         }
     }
 }
@@ -553,7 +553,7 @@ impl Display for MiningPausedReason {
 pub enum MiningStatus {
     Disabled(SystemTime),
     Init(SystemTime),
-    Paused(Vec<MiningPausedReason>), // ByRpc, SyncBlocks, NeedConnections
+    Paused(Vec<MiningPausedReason>), // ByRpc, SyncBlocks, NeedConnection
     AwaitBlockProposal(SystemTime),
     AwaitBlock(SystemTime),
     Composing(SystemTime),
