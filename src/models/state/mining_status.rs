@@ -354,7 +354,7 @@ impl MiningPausedReason {
 
     pub fn description(&self) -> &str {
         match self {
-            Self::Rpc(_) => "rpc (user)",
+            Self::Rpc(_) => "user",
             Self::SyncBlocks(_) => "syncing blocks",
             Self::AwaitConnections(_) => "await connections",
         }
