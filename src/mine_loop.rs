@@ -653,15 +653,16 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let proposal_block_hash = {
+        let (gs_mining_status, proposal_block_hash) = {
             // todo: remove this read-lock acquisition which slows us down and can
             // potentially interfere with guessing if write-lock is held somewhere.
             // instead this information could be sent to us via channel msgs.
-            let (num_peers, syncing, proposal_block_hash) = global_state_lock
+            let (num_peers, syncing, mining_status, proposal_block_hash) = global_state_lock
                 .lock(|s| {
                     (
                         s.net.peer_map.len(),
                         s.net.sync_anchor.is_some(),
+                        s.mining_status.clone(),
                         s.block_proposal.block_hash(), // option
                     )
                 })
@@ -680,9 +681,9 @@ pub(crate) async fn mine(
                 continue;
             }
 
-            // if mining_status is inactive::init, then we need to get into either
+            // if mining_status::init, then we need to get into either
             // await_block or await_block_proposal state.
-            if !machine.mining_paused() {
+            if machine.mining_status().is_init() {
                 if proposal_block_hash.is_some() {
                     machine.try_advance(MiningStatus::await_block()).unwrap();
                 } else {
@@ -692,10 +693,7 @@ pub(crate) async fn mine(
                 };
             }
 
-            // if new_mining_status != mining_status {
-            //     global_state_lock.set_mining_status(new_mining_status).await;
-            // }
-            proposal_block_hash
+            (mining_status, proposal_block_hash)
         };
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
@@ -721,20 +719,18 @@ pub(crate) async fn mine(
                 machine
                     .try_advance(MiningStatus::guessing(maybe_proposal.unwrap().into()))
                     .unwrap();
-                global_state_lock
-                    .set_mining_status(machine.mining_status().to_owned())
-                    .await;
             }
         } else if machine.can_start_composing() {
             machine.try_advance(MiningStatus::composing()).unwrap();
+        }
+
+        if gs_mining_status != *machine.mining_status() {
             global_state_lock
                 .set_mining_status(machine.mining_status().to_owned())
                 .await;
         }
 
-        let can_guess = machine.can_guess();
-
-        let guesser_task: Option<JoinHandle<()>> = if can_guess {
+        let guesser_task: Option<JoinHandle<()>> = if machine.can_guess() {
 
             // safe because above `is_some`
             let proposal = maybe_proposal.unwrap();
