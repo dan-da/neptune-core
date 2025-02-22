@@ -150,6 +150,11 @@ impl MiningStateMachine {
     }
 
     pub fn try_advance(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
+        tracing::debug!(
+            "try_advance: old_state: {}, new_state: {}",
+            self.status.name(),
+            new_status.name()
+        );
         // special handling for pause.
         if let MiningStatus::Paused(ref reasons) = new_status {
             for reason in reasons {
@@ -162,8 +167,13 @@ impl MiningStateMachine {
         }
 
         self.ensure_allowed(&new_status)?;
-        self.status = new_status;
+        self.set_new_status(new_status);
         Ok(())
+    }
+
+    fn set_new_status(&mut self, new_status: MiningStatus) {
+        self.status = new_status;
+        tracing::debug!("try_advance: set new_state: {}", self.status.name());
     }
 
     pub fn set_connections(&mut self, connections: u32) {
@@ -176,7 +186,7 @@ impl MiningStateMachine {
         } else if self.connections < 2 {
             let new_status = MiningStatus::init();
             if self.allowed(&new_status) {
-                self.status = new_status;
+                self.set_new_status(new_status);
             } else {
                 // connections was fine before, and still fine.
                 // keep our existing state.
@@ -195,7 +205,7 @@ impl MiningStateMachine {
             (_, MiningStatus::Paused(reasons)) => MiningStatus::Paused(reasons),
             _ => panic!("attempted to merge status other than Paused"),
         };
-        self.status = merged_status;
+        self.set_new_status(merged_status);
     }
 
     pub fn pause_by_rpc(&mut self) {
@@ -210,7 +220,7 @@ impl MiningStateMachine {
     pub fn unpause_by_rpc(&mut self) {
         let new_status = MiningStatus::init();
         if self.allowed(&new_status) {
-            self.status = new_status;
+            self.set_new_status(new_status);
         }
         self.paused_by_rpc = false;
     }
@@ -237,7 +247,7 @@ impl MiningStateMachine {
     pub fn stop_syncing(&mut self) {
         let new_status = MiningStatus::init();
         if self.allowed(&new_status) {
-            self.status = new_status;
+            self.set_new_status(new_status);
         }
         self.syncing = false;
     }
@@ -276,9 +286,9 @@ impl MiningStateMachine {
         self.role_compose && self.role_guess
     }
 
-    pub(crate) fn mining_paused(&self) -> bool {
-        self.paused_count() > 0
-    }
+    // pub(crate) fn mining_paused(&self) -> bool {
+    //     self.paused_count() > 0
+    // }
 
     pub(crate) fn can_start_guessing(&self) -> bool {
         self.role_guess && self.status.state() == MiningState::AwaitBlock
@@ -423,6 +433,14 @@ impl MiningStatus {
         Self::Shutdown(SystemTime::now())
     }
 
+    pub fn is_disabled(&self) -> bool {
+        self.state() == MiningState::Disabled
+    }
+
+    pub fn is_init(&self) -> bool {
+        self.state() == MiningState::Init
+    }
+
     pub fn is_paused(&self) -> bool {
         self.state() == MiningState::Paused
     }
@@ -473,7 +491,7 @@ impl MiningStatus {
     pub(crate) fn name(&self) -> &str {
         match *self {
             Self::Disabled(_) => "disabled",
-            Self::Init(_) => "init",
+            Self::Init(_) => "initializing",
             Self::Paused(_) => "paused",
             Self::AwaitBlockProposal(_) => "await block proposal",
             Self::AwaitBlock(_) => "await block",
@@ -481,7 +499,7 @@ impl MiningStatus {
             Self::Guessing(_) => "guessing",
             Self::NewTipBlock(_) => "new tip block",
             Self::ComposeError(_) => "composer error",
-            Self::Shutdown(_) => "Shutdown",
+            Self::Shutdown(_) => "shutdown",
         }
     }
 
