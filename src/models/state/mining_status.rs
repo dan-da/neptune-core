@@ -283,7 +283,7 @@ impl MiningStateMachine {
     }
 
     pub(crate) fn mining_enabled(&self) -> bool {
-        self.role_compose && self.role_guess
+        self.role_compose || self.role_guess
     }
 
     // pub(crate) fn mining_paused(&self) -> bool {
@@ -299,11 +299,11 @@ impl MiningStateMachine {
     }
 
     pub(crate) fn can_start_composing(&self) -> bool {
-        self.role_guess && self.status.state() == MiningState::AwaitBlockProposal
+        self.role_compose && self.status.state() == MiningState::AwaitBlockProposal
     }
 
     pub(crate) fn can_compose(&self) -> bool {
-        self.role_guess && self.status.state() == MiningState::Composing
+        self.role_compose && self.status.state() == MiningState::Composing
     }
 }
 
