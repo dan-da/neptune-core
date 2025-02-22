@@ -44,6 +44,7 @@ use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::block_proposal::BlockProposal;
+use crate::models::state::mining_status::MiningEvent;
 use crate::models::state::mining_status::MiningStateMachine;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
@@ -651,10 +652,10 @@ pub(crate) async fn mine(
             // todo: remove this read-lock acquisition which slows us down and can
             // potentially interfere with guessing if write-lock is held somewhere.
             // instead this information could be sent to us via channel msgs.
-            let (num_peers, syncing, mining_status, proposal_block_hash) = global_state_lock
+            let (need_connection, syncing, mining_status, proposal_block_hash) = global_state_lock
                 .lock(|s| {
                     (
-                        s.net.peer_map.len(),
+                        s.net.peer_map.is_empty(),
                         s.net.sync_anchor.is_some(),
                         s.mining_status.clone(),
                         s.block_proposal.block_hash(), // option
@@ -662,33 +663,29 @@ pub(crate) async fn mine(
                 })
                 .await;
 
-            machine.set_connections(num_peers as u32);
+            machine.set_need_connection(need_connection);
             machine.set_syncing(syncing);
 
-            if num_peers == 0 {
-                // global_state_lock
-                //     .set_mining_status_to_inactive(MiningPausedReason::await_connections())
-                //     .await;
+            if need_connection {
                 warn!("Not mining because client has no connections");
                 const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
                 sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
                 continue;
             }
 
-            // if mining_status::init, then we need to get into either
-            // await_block or await_block_proposal state.
-            if machine.mining_status().is_init() {
-                if proposal_block_hash.is_some() {
-                    machine.try_advance(MiningStatus::await_block()).unwrap();
-                } else {
-                    machine
-                        .try_advance(MiningStatus::await_block_proposal())
-                        .unwrap();
-                };
-            }
-
             (mining_status, proposal_block_hash)
         };
+
+        // if mining_status::init, then we need to get into either
+        // await_block or await_block_proposal state.
+        if machine.mining_status().is_init() {
+            machine.advance().unwrap(); // Init --> AwaitBlockProposal
+
+            if proposal_block_hash.is_some() {
+                machine.advance().unwrap(); // AwaitBlockProposal --> Composing
+                machine.advance().unwrap(); // Composing          --> AwaitBlock
+            }
+        }
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
@@ -710,14 +707,17 @@ pub(crate) async fn mine(
 
         if maybe_proposal.is_some() {
             if machine.can_start_guessing() {
+                // AwaitBlock --> Guessing
                 machine
-                    .try_advance(MiningStatus::guessing(maybe_proposal.unwrap().into()))
+                    .advance_to(MiningStatus::guessing(maybe_proposal.unwrap().into()))
                     .unwrap();
             }
         } else if machine.can_start_composing() {
-            machine.try_advance(MiningStatus::composing()).unwrap();
+            // AwaitBlockProposal --> Composing
+            machine.advance().unwrap();
         }
 
+        // update global-state status if different.
         if gs_mining_status != *machine.mining_status() {
             global_state_lock
                 .set_mining_status(machine.mining_status().to_owned())
@@ -798,7 +798,7 @@ pub(crate) async fn mine(
         select! {
             _ = &mut guess_restart_timer => {}
             Ok(Err(e)) = &mut composer_task => {
-                machine.try_advance(MiningStatus::compose_error()).unwrap();
+                machine.handle_event(MiningEvent::ComposeError).unwrap();
 
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
@@ -820,40 +820,44 @@ pub(crate) async fn mine(
 
                 match main_message {
                     MainToMiner::Shutdown => {
-                        machine.try_advance(MiningStatus::shutdown()).unwrap();
+                        machine.handle_event(MiningEvent::Shutdown).unwrap();
                         debug!("Miner shutting down.");
                     }
                     MainToMiner::NewBlock => {
-                        machine.try_advance(MiningStatus::new_tip_block()).unwrap();
-                        machine.try_advance(MiningStatus::init()).unwrap();
+                        // ??? --> NewTipBlock
+                        machine.handle_event(MiningEvent::NewTipBlock).unwrap();
+                        // NewTipBlock --> Init
+                        machine.advance().unwrap();
+
                         info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal => {
-                        machine.try_advance(MiningStatus::await_block()).unwrap();
+                        machine.handle_event(MiningEvent::NewBlockProposal).unwrap();
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
-                        machine.try_advance(MiningStatus::new_tip_block()).unwrap();
+                        machine.handle_event(MiningEvent::NewTipBlock).unwrap();
                     }
                     MainToMiner::Continue => {
-                        machine.try_advance(MiningStatus::init()).unwrap();
+                        machine.handle_event(MiningEvent::Init).unwrap();
                     }
                     MainToMiner::StopMining => {
-                        machine.pause_by_rpc();
+                        machine.handle_event(MiningEvent::PauseRpc).unwrap();
                     }
                     MainToMiner::StartMining => {
-                        machine.unpause_by_rpc();
+                        machine.handle_event(MiningEvent::UnPauseRpc).unwrap();
                     }
                     MainToMiner::StartSyncing => {
-                        machine.start_syncing();
+                        machine.handle_event(MiningEvent::PauseSyncBlock).unwrap();
                     }
                     MainToMiner::StopSyncing => {
-                        machine.stop_syncing();
+                        machine.handle_event(MiningEvent::UnPauseSyncBlock).unwrap();
                     }
                 }
             }
             new_composition = composer_rx => {
-                machine.try_advance(MiningStatus::await_block()).unwrap();
+                // Compose --> AwaitBlock
+                machine.advance().unwrap();
 
                 match new_composition {
                     Ok((new_block_proposal, composer_utxos)) => {
@@ -863,7 +867,8 @@ pub(crate) async fn mine(
                 };
             }
             new_block = guesser_rx => {
-                machine.try_advance(MiningStatus::await_block_proposal()).unwrap();
+                machine.advance().unwrap(); // Guessing    --> NewTipBlock
+                machine.advance().unwrap(); // NewTipBlock --> Init
 
                 match new_block {
                     Err(err) => {
@@ -894,9 +899,9 @@ pub(crate) async fn mine(
             }
         }
 
-        global_state_lock
-            .set_mining_status(machine.mining_status().to_owned())
-            .await;
+        // global_state_lock
+        //     .set_mining_status(machine.mining_status().to_owned())
+        //     .await;
 
         if !machine.mining_status().is_composing() && !composer_task.is_finished() {
             cancel_compose_tx.send(())?;
