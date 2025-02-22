@@ -9,6 +9,8 @@ use serde::Serialize;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
+const MIN_CONNECTIONS_FOR_MINING: u8 = 1;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GuessingWorkInfo {
     work_start: SystemTime,
@@ -177,13 +179,13 @@ impl MiningStateMachine {
     }
 
     pub fn set_connections(&mut self, connections: u32) {
-        if connections < 2 {
+        if connections < MIN_CONNECTIONS_FOR_MINING {
             let reason = MiningPausedReason::await_connections();
             let new_status = MiningStatus::paused(reason);
             if self.allowed(&new_status) {
                 self.merge_set_paused_status(new_status);
             }
-        } else if self.connections < 2 {
+        } else if self.connections < MIN_CONNECTIONS_FOR_MINING {
             let new_status = MiningStatus::init();
             if self.allowed(&new_status) {
                 self.set_new_status(new_status);
@@ -268,7 +270,7 @@ impl MiningStateMachine {
     }
 
     fn paused_count(&self) -> u8 {
-        self.paused_by_rpc as u8 + self.syncing as u8 + (self.connections < 2) as u8
+        self.paused_by_rpc as u8 + self.syncing as u8 + (self.connections < MIN_CONNECTIONS_FOR_MINING) as u8
     }
 
     fn ensure_allowed(&self, new_status: &MiningStatus) -> Result<(), InvalidStateTransition> {
