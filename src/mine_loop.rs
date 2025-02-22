@@ -246,22 +246,16 @@ fn guess_worker(
         .unwrap();
     let guess_result = pool.install(|| {
         rayon::iter::repeat(0)
-            .map_init(
-                || {
-                    let mut rng = rand::rng();
-                    rng.random()
-                },
-                |initial_nonce, _i| {
-                    guess_nonce_iteration(
-                        kernel_auth_path,
-                        threshold,
-                        sleepy_guessing,
-                        initial_nonce,
-                        header_auth_path,
-                        &sender,
-                    )
-                },
-            )
+            .map_init(rand::rng, |rng, _i| {
+                guess_nonce_iteration(
+                    kernel_auth_path,
+                    threshold,
+                    sleepy_guessing,
+                    rng,
+                    header_auth_path,
+                    &sender,
+                )
+            })
             .find_any(|r| !r.block_not_found())
             .unwrap()
     });
@@ -350,7 +344,7 @@ fn guess_nonce_iteration(
     kernel_auth_path: [Digest; BlockKernel::MAST_HEIGHT],
     threshold: Digest,
     sleepy_guessing: bool,
-    nonce: &mut Digest,
+    rng: &mut rand::rngs::ThreadRng,
     bh_auth_path: [Digest; BlockHeader::MAST_HEIGHT],
     sender: &oneshot::Sender<NewBlockFound>,
 ) -> GuessNonceResult {
@@ -358,23 +352,23 @@ fn guess_nonce_iteration(
         std::thread::sleep(Duration::from_millis(100));
     }
 
+    // Modify the nonce in the block header. In order to collect the guesser
+    // fee, this nonce must be the post-image of a known pre-image under Tip5.
+    let nonce: Digest = rng.random();
+
     // Check every N guesses if task has been cancelled.
     if (sleepy_guessing || (nonce.values()[0].raw_u64() % (1 << 16)) == 0) && sender.is_canceled() {
         debug!("Guesser was cancelled.");
         return GuessNonceResult::Cancelled;
     }
 
-    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, *nonce);
+    let block_hash = fast_kernel_mast_hash(kernel_auth_path, bh_auth_path, nonce);
     let success = block_hash <= threshold;
 
-    let ret = match success {
+    match success {
         false => GuessNonceResult::BlockNotFound,
-        true => GuessNonceResult::NonceFound { nonce: *nonce },
-    };
-
-    *nonce = block_hash;
-
-    ret
+        true => GuessNonceResult::NonceFound { nonce },
+    }
 }
 
 /// Make a coinbase transaction rewarding the composer identified by receiving
@@ -830,7 +824,8 @@ pub(crate) async fn mine(
                         debug!("Miner shutting down.");
                     }
                     MainToMiner::NewBlock => {
-                        machine.try_advance(MiningStatus::await_block_proposal()).unwrap();
+                        machine.try_advance(MiningStatus::new_tip_block()).unwrap();
+                        machine.try_advance(MiningStatus::init()).unwrap();
                         info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal => {
