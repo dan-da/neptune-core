@@ -49,7 +49,7 @@ use crate::models::peer::PeerSynchronizationState;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::mempool::TransactionOrigin;
-use crate::models::state::mining_status::MiningInactiveReason;
+use crate::models::state::mining_status::MiningPausedReason;
 use crate::models::state::networking_state::SyncAnchor;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::GlobalState;
@@ -736,7 +736,7 @@ impl MainLoopHandler {
                     global_state_mut.net.sync_anchor =
                         Some(SyncAnchor::new(claimed_cumulative_pow, claimed_block_mmra));
                     self.main_to_miner_tx
-                        .send(MainToMiner::StopMining(MiningInactiveReason::sync_blocks()));
+                        .send(MainToMiner::StopMining(MiningPausedReason::sync_blocks()));
                 }
             }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -1683,9 +1683,8 @@ impl MainLoopHandler {
             RPCServerToMain::PauseMiner => {
                 info!("Received RPC request to stop miner");
 
-                self.main_to_miner_tx.send(MainToMiner::StopMining(
-                    MiningInactiveReason::paused_by_user(),
-                ));
+                self.main_to_miner_tx
+                    .send(MainToMiner::StopMining(MiningPausedReason::rpc()));
                 Ok(false)
             }
             RPCServerToMain::RestartMiner => {

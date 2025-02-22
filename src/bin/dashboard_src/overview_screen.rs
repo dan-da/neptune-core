@@ -380,7 +380,7 @@ impl Widget for OverviewScreen {
 
         lines.push(format!(
             "mining status: {}",
-            dashifnotset!(data.mining_status)
+            dashifnotset!(data.mining_status.clone())
         ));
 
         let tip_digest_hex = data.tip_digest.map(|d| d.to_hex());

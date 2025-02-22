@@ -44,7 +44,7 @@ use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::block_proposal::BlockProposal;
-use crate::models::state::mining_status::MiningInactiveReason;
+use crate::models::state::mining_status::MiningStateMachine;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -627,16 +627,14 @@ pub(crate) async fn mine(
     to_main: mpsc::Sender<MinerToMain>,
     mut global_state_lock: GlobalStateLock,
 ) -> Result<()> {
-    global_state_lock
-        .set_mining_status_to_inactive(MiningInactiveReason::init())
-        .await;
+    let cli = global_state_lock.cli().clone();
+    let mut machine = MiningStateMachine::new(cli.compose, cli.guess);
 
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
     const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
     tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
-    let cli_args = global_state_lock.cli().clone();
 
     // Set PoW guessing to restart every N seconds, if it has been started. Only
     // the guesser task may set this to actually resolve, as this will otherwise
@@ -647,9 +645,6 @@ pub(crate) async fn mine(
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
-    let role_compose = global_state_lock.cli().compose;
-    let role_guess = global_state_lock.cli().guess;
-
     let mut maybe_proposal = BlockProposal::none();
     loop {
         // Ensure restart timer doesn't resolve again, without guesser
@@ -658,55 +653,49 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let (mining_status, proposal_block_hash) = {
+        let proposal_block_hash = {
             // todo: remove this read-lock acquisition which slows us down and can
             // potentially interfere with guessing if write-lock is held somewhere.
             // instead this information could be sent to us via channel msgs.
-            let (is_connected, mining_status, proposal_block_hash) = global_state_lock
+            let (num_peers, syncing, proposal_block_hash) = global_state_lock
                 .lock(|s| {
                     (
-                        !s.net.peer_map.is_empty(),
-                        s.mining_status,
+                        s.net.peer_map.len(),
+                        s.net.sync_anchor.is_some(),
                         s.block_proposal.block_hash(), // option
                     )
                 })
                 .await;
-            if !is_connected {
-                global_state_lock
-                    .set_mining_status_to_inactive(MiningInactiveReason::await_connections())
-                    .await;
+
+            machine.set_connections(num_peers as u32);
+            machine.set_syncing(syncing);
+
+            if num_peers == 0 {
+                // global_state_lock
+                //     .set_mining_status_to_inactive(MiningPausedReason::await_connections())
+                //     .await;
                 warn!("Not mining because client has no connections");
                 const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
                 sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
                 continue;
             }
 
-            // if mining_status is inactive::await_connections, then we need to return
-            // to inactive::init
-            let new_mining_status = match mining_status.inactive_reason() {
-                Some(MiningInactiveReason::AwaitConnections(_)) => {
-                    MiningStatus::Inactive(MiningInactiveReason::init())
-                }
-                _ => mining_status,
-            };
-
             // if mining_status is inactive::init, then we need to get into either
             // await_block or await_block_proposal state.
-            let new_mining_status = match new_mining_status.inactive_reason() {
-                Some(MiningInactiveReason::Init(_)) => {
-                    let new_reason = if proposal_block_hash.is_some() {
-                        MiningInactiveReason::await_block()
-                    } else {
-                        MiningInactiveReason::await_block_proposal()
-                    };
-                    MiningStatus::Inactive(new_reason)
-                }
-                _ => mining_status,
-            };
-            if new_mining_status != mining_status {
-                global_state_lock.set_mining_status(new_mining_status).await;
+            if !machine.mining_paused() {
+                if proposal_block_hash.is_some() {
+                    machine.try_advance(MiningStatus::await_block()).unwrap();
+                } else {
+                    machine
+                        .try_advance(MiningStatus::await_block_proposal())
+                        .unwrap();
+                };
             }
-            (new_mining_status, proposal_block_hash)
+
+            // if new_mining_status != mining_status {
+            //     global_state_lock.set_mining_status(new_mining_status).await;
+            // }
+            proposal_block_hash
         };
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
@@ -727,27 +716,26 @@ pub(crate) async fn mine(
             maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
         }
 
-        // if start_guessing is true, then we are in a state change from
-        // inactive state to guessing state.
-        //
-        // if start_guessing is false and should_guess is true then we
-        // have already been guessing and are restarting with new params.
-        let start_guessing = role_guess
-            && matches!(
-                mining_status,
-                MiningStatus::Inactive(MiningInactiveReason::AwaitBlock(_))
-            );
-
-        let should_guess = role_guess && mining_status.can_guess();
-
-        if start_guessing {
-            let proposal = maybe_proposal.unwrap(); // is_some() verified above
+        if maybe_proposal.is_some() {
+            if machine.can_start_guessing() {
+                machine
+                    .try_advance(MiningStatus::guessing(maybe_proposal.unwrap().into()))
+                    .unwrap();
+                global_state_lock
+                    .set_mining_status(machine.mining_status().to_owned())
+                    .await;
+            }
+        } else if machine.can_start_composing() {
+            machine.try_advance(MiningStatus::composing()).unwrap();
             global_state_lock
-                .set_mining_status_to_guessing(proposal)
+                .set_mining_status(machine.mining_status().to_owned())
                 .await;
         }
 
-        let guesser_task: Option<JoinHandle<()>> = if should_guess {
+        let can_guess = machine.can_guess();
+
+        let guesser_task: Option<JoinHandle<()>> = if can_guess {
+
             // safe because above `is_some`
             let proposal = maybe_proposal.unwrap();
 
@@ -767,8 +755,8 @@ pub(crate) async fn mine(
                 guesser_tx,
                 guesser_key,
                 GuessingConfiguration {
-                    sleepy_guessing: cli_args.sleepy_guessing,
-                    num_guesser_threads: cli_args.guesser_threads,
+                    sleepy_guessing: cli.sleepy_guessing,
+                    num_guesser_threads: cli.guesser_threads,
                 },
                 None, // use default TARGET_BLOCK_INTERVAL
             );
@@ -791,11 +779,9 @@ pub(crate) async fn mine(
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
-        let should_compose = role_compose && mining_status.can_compose();
+        let can_compose = machine.can_compose();
 
-        let mut composer_task = if should_compose {
-            global_state_lock.set_mining_status_to_composing().await;
-
+        let mut composer_task = if can_compose {
             let latest_block = global_state_lock
                 .lock(|s| s.chain.light_state().to_owned())
                 .await;
@@ -817,18 +803,12 @@ pub(crate) async fn mine(
             tokio::spawn(async { Ok(()) })
         };
 
-        let mut inactive_reason = None;
-        let mut restart_guessing = false;
-        let mut stop_looping = false;
-
         // Await a message from either the worker task or from the main loop,
         // or the restart of the guesser-task.
         select! {
-            _ = &mut guess_restart_timer => {
-                restart_guessing = true;
-            }
+            _ = &mut guess_restart_timer => {}
             Ok(Err(e)) = &mut composer_task => {
-                inactive_reason = Some(MiningInactiveReason::compose_error());
+                machine.try_advance(MiningStatus::compose_error()).unwrap();
 
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
@@ -850,34 +830,33 @@ pub(crate) async fn mine(
 
                 match main_message {
                     MainToMiner::Shutdown => {
-                        stop_looping = true;
-                        inactive_reason = Some(MiningInactiveReason::shutdown());
+                        machine.try_advance(MiningStatus::shutdown()).unwrap();
                         debug!("Miner shutting down.");
                     }
                     MainToMiner::NewBlock => {
-                        inactive_reason = Some(MiningInactiveReason::await_block_proposal());
+                        machine.try_advance(MiningStatus::await_block_proposal()).unwrap();
                         info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal => {
-                        inactive_reason = Some(MiningInactiveReason::await_block());
+                        machine.try_advance(MiningStatus::await_block()).unwrap();
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
-                        inactive_reason = Some(MiningInactiveReason::new_tip_block());
+                        machine.try_advance(MiningStatus::new_tip_block()).unwrap();
                     }
                     MainToMiner::Continue => {
-                        inactive_reason = Some(MiningInactiveReason::init());
+                        machine.try_advance(MiningStatus::init()).unwrap();
                     }
                     MainToMiner::StopMining(reason) => {
-                        inactive_reason = Some(reason);
+                        machine.try_advance(MiningStatus::paused(reason)).unwrap();
                     }
                     MainToMiner::StartMining => {
-                        inactive_reason = Some(MiningInactiveReason::init());
+                        machine.try_advance(MiningStatus::init()).unwrap();
                     }
                 }
             }
             new_composition = composer_rx => {
-                inactive_reason = Some(MiningInactiveReason::await_block());
+                machine.try_advance(MiningStatus::await_block()).unwrap();
 
                 match new_composition {
                     Ok((new_block_proposal, composer_utxos)) => {
@@ -887,7 +866,7 @@ pub(crate) async fn mine(
                 };
             }
             new_block = guesser_rx => {
-                inactive_reason = Some(MiningInactiveReason::await_block_proposal());
+                machine.try_advance(MiningStatus::await_block_proposal()).unwrap();
 
                 match new_block {
                     Err(err) => {
@@ -918,30 +897,27 @@ pub(crate) async fn mine(
             }
         }
 
-        if let Some(reason) = inactive_reason {
-            global_state_lock
-                .set_mining_status_to_inactive(reason)
-                .await;
+        global_state_lock
+            .set_mining_status(machine.mining_status().to_owned())
+            .await;
 
-            if !composer_task.is_finished() {
-                cancel_compose_tx.send(())?;
-                debug!("Cancel signal sent to composer worker.");
-            }
-            if let Some(gt) = &guesser_task {
-                gt.abort();
-                debug!("Abort-signal sent to guesser worker.");
-            }
+        if !machine.mining_status().is_composing() && !composer_task.is_finished() {
+            cancel_compose_tx.send(())?;
+            debug!("Cancel signal sent to composer worker.");
         }
 
-        if restart_guessing {
-            if let Some(gt) = &guesser_task {
-                gt.abort();
-                debug!("Abort-signal sent to guesser worker.");
+        // we shutdown guesser task every iteration.  It will
+        // start again if our state is still guessing.
+        if let Some(gt) = &guesser_task {
+            gt.abort();
+            debug!("Abort-signal sent to guesser worker.");
+
+            if machine.mining_status().is_guessing() {
                 debug!("Restarting guesser task with new parameters");
             }
         }
 
-        if stop_looping {
+        if machine.mining_status().is_shutdown() {
             break;
         }
     }

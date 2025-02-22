@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -17,28 +18,21 @@ pub struct GuessingWorkInfo {
     total_guesser_fee: NativeCurrencyAmount,
 }
 
+impl From<&Block> for GuessingWorkInfo {
+    fn from(block: &Block) -> Self {
+        Self::new(block)
+    }
+}
+
 impl GuessingWorkInfo {
-    pub(crate) fn new(work_start: SystemTime, block: &Block) -> Self {
+    pub(crate) fn new(block: &Block) -> Self {
         Self {
-            work_start,
+            work_start: SystemTime::now(),
             num_inputs: block.body().transaction_kernel.inputs.len(),
             num_outputs: block.body().transaction_kernel.outputs.len(),
             total_coinbase: block.body().transaction_kernel.coinbase.unwrap_or_default(),
             total_guesser_fee: block.body().transaction_kernel.fee,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ComposingWorkInfo {
-    // Only this info is available at the beginning of the composition work.
-    // The rest of the information will have to be read from the log.
-    work_start: SystemTime,
-}
-
-impl ComposingWorkInfo {
-    pub(crate) fn new(work_start: SystemTime) -> Self {
-        Self { work_start }
     }
 }
 
@@ -52,12 +46,13 @@ pub enum MiningState {
     AwaitBlock = 4,
     Composing = 5,
     Guessing = 6,
-    ComposeError = 7,
-    ShutDown = 8,
+    NewTipBlock = 7,
+    ComposeError = 8,
+    Shutdown = 9,
 }
 
 #[rustfmt::skip]
-const MINING_STATE_TRANSITIONS: [&[MiningState]; 9] = [
+const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
     // MiningState::Disabled
     &[],
 
@@ -66,13 +61,13 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 9] = [
         MiningState::Paused,
         MiningState::AwaitBlockProposal,
         MiningState::AwaitBlock,
-        MiningState::ShutDown,
+        MiningState::Shutdown,
     ],
 
     // MiningState::Paused
     &[
         MiningState::Init,
-        MiningState::ShutDown
+        MiningState::Shutdown
     ],
 
     // MiningState::AwaitBlockProposal
@@ -80,14 +75,14 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 9] = [
         MiningState::Composing,
         MiningState::AwaitBlock,
         MiningState::Paused,
-        MiningState::ShutDown,
+        MiningState::Shutdown,
     ],
 
     // MiningState::AwaitBlock
     &[
         MiningState::Guessing,
         MiningState::Paused,
-        MiningState::ShutDown,
+        MiningState::Shutdown,
     ],
 
     // MiningState::Composing
@@ -95,27 +90,34 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 9] = [
         MiningState::AwaitBlock,
         MiningState::Paused,
         MiningState::ComposeError,
-        MiningState::ShutDown,
+        MiningState::Shutdown,
     ],
 
     // MiningState::Guessing
     &[
+        MiningState::NewTipBlock,
+        MiningState::Paused,
+        MiningState::Shutdown,
+    ],
+
+    // MiningState::NewTipBlock
+    &[
         MiningState::Init,
         MiningState::Paused,
-        MiningState::ShutDown,
+        MiningState::Shutdown,
     ],
 
     // MiningState::ComposeError
     &[
-        MiningState::ShutDown
+        MiningState::Shutdown
     ],
 
-    // MiningState::ShutDown
+    // MiningState::Shutdown
     &[],
 ];
 
 pub struct MiningStateMachine {
-    state: MiningState,
+    status: MiningStatus, // holds a MiningState.
 
     syncing: bool,
     paused_by_rpc: bool,
@@ -134,7 +136,7 @@ pub struct InvalidStateTransition {
 impl MiningStateMachine {
     pub fn new(role_compose: bool, role_guess: bool) -> Self {
         Self {
-            state: MiningState::Init,
+            status: MiningStatus::init(),
             syncing: false,
             paused_by_rpc: false,
             connections: 0,
@@ -143,216 +145,213 @@ impl MiningStateMachine {
         }
     }
 
-    pub fn try_advance(&mut self, new_state: MiningState) -> Result<(), InvalidStateTransition> {
-        self.ensure_allowed(new_state)?;
-        self.state = new_state;
+    pub fn mining_status(&self) -> &MiningStatus {
+        &self.status
+    }
+
+    pub fn try_advance(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
+        // special handling for pause.
+        if let MiningStatus::Paused(ref reasons) = new_status {
+            for reason in reasons {
+                match reason {
+                    MiningPausedReason::Rpc(_) => self.pause_by_rpc(),
+                    MiningPausedReason::SyncBlocks(_) => self.start_syncing(),
+                    MiningPausedReason::AwaitConnections(_) => self.set_connections(0),
+                };
+            }
+        }
+
+        self.ensure_allowed(&new_status)?;
+        self.status = new_status;
         Ok(())
     }
 
     pub fn set_connections(&mut self, connections: u32) {
         if connections < 2 {
-            let new_state = MiningState::Paused;
-            if self.allowed(new_state) {
-                self.state = new_state;
-                self.connections = connections;
+            let reason = MiningPausedReason::await_connections();
+            let new_status = MiningStatus::paused(reason);
+            if self.allowed(&new_status) {
+                self.merge_set_paused_status(new_status);
             }
-        } else {
-            if self.connections < 2 {
-                let new_state = MiningState::Init;
-                if self.allowed(new_state) {
-                    self.state = new_state;
-                    self.connections = connections;
-                }
+        } else if self.connections < 2 {
+            let new_status = MiningStatus::init();
+            if self.allowed(&new_status) {
+                self.status = new_status;
             } else {
                 // connections was fine before, and still fine.
                 // keep our existing state.
-                self.connections = connections;
             }
         }
+        self.connections = connections;
+    }
+
+    fn merge_set_paused_status(&mut self, new_status: MiningStatus) {
+        let merged_status = match (self.status.clone(), new_status) {
+            (MiningStatus::Paused(mut old_reasons), MiningStatus::Paused(mut new_reasons)) => {
+                // todo: ensure unique
+                old_reasons.append(&mut new_reasons);
+                MiningStatus::Paused(old_reasons)
+            }
+            (_, MiningStatus::Paused(reasons)) => MiningStatus::Paused(reasons),
+            _ => panic!("attempted to merge status other than Paused"),
+        };
+        self.status = merged_status;
     }
 
     pub fn pause_by_rpc(&mut self) {
-        let new_state = MiningState::Paused;
-        if self.allowed(new_state) {
-            self.state = new_state;
-            self.paused_by_rpc = true;
+        let reason = MiningPausedReason::rpc();
+        let new_status = MiningStatus::paused(reason);
+        if self.allowed(&new_status) {
+            self.merge_set_paused_status(new_status);
         }
+        self.paused_by_rpc = true;
     }
 
     pub fn unpause_by_rpc(&mut self) {
-        let new_state = MiningState::Init;
-        if self.allowed(new_state) {
-            self.state = new_state;
-            self.paused_by_rpc = false;
+        let new_status = MiningStatus::init();
+        if self.allowed(&new_status) {
+            self.status = new_status;
+        }
+        self.paused_by_rpc = false;
+    }
+
+    pub fn set_syncing(&mut self, syncing: bool) {
+        if self.syncing != syncing {
+            if syncing {
+                self.stop_syncing()
+            } else {
+                self.start_syncing()
+            }
         }
     }
 
     pub fn start_syncing(&mut self) {
-        let new_state = MiningState::Paused;
-        if self.allowed(new_state) {
-            self.state = new_state;
-            self.syncing = true;
+        let reason = MiningPausedReason::sync_blocks();
+        let new_status = MiningStatus::paused(reason);
+        if self.allowed(&new_status) {
+            self.merge_set_paused_status(new_status);
         }
+        self.syncing = true;
     }
 
     pub fn stop_syncing(&mut self) {
-        let new_state = MiningState::Init;
-        if self.allowed(new_state) {
-            self.state = new_state;
-            self.syncing = false;
+        let new_status = MiningStatus::init();
+        if self.allowed(&new_status) {
+            self.status = new_status;
         }
+        self.syncing = false;
     }
 
-    pub fn allowed(&self, state: MiningState) -> bool {
-        if state == self.state {
+    pub fn allowed(&self, status: &MiningStatus) -> bool {
+        if *status == self.status {
             true
         } else if !self.mining_enabled() {
-            state == MiningState::Disabled
+            *status == MiningStatus::disabled()
+        } else if self.paused_count() > 1 {
+            *status == MiningStatus::shutdown()
         } else {
-            let allowed_states: &[MiningState] = MINING_STATE_TRANSITIONS[self.state as usize];
+            let state = status.state();
+            let allowed_states: &[MiningState] =
+                MINING_STATE_TRANSITIONS[self.status.state() as usize];
             allowed_states.iter().any(|v| *v == state)
         }
     }
 
-    fn ensure_allowed(&self, new_state: MiningState) -> Result<(), InvalidStateTransition> {
-        if self.allowed(new_state) {
+    fn paused_count(&self) -> u8 {
+        self.paused_by_rpc as u8 + self.syncing as u8 + (self.connections < 2) as u8
+    }
+
+    fn ensure_allowed(&self, new_status: &MiningStatus) -> Result<(), InvalidStateTransition> {
+        if self.allowed(new_status) {
             Ok(())
         } else {
             Err(InvalidStateTransition {
-                old_state: self.state,
-                new_state,
+                old_state: self.status.state(),
+                new_state: new_status.state(),
             })
         }
     }
 
-    fn mining_enabled(&self) -> bool {
+    pub(crate) fn mining_enabled(&self) -> bool {
         self.role_compose && self.role_guess
+    }
+
+    pub(crate) fn mining_paused(&self) -> bool {
+        self.paused_count() > 0
+    }
+
+    pub(crate) fn can_start_guessing(&self) -> bool {
+        self.role_guess && self.status.state() == MiningState::AwaitBlock
+    }
+
+    pub(crate) fn can_guess(&self) -> bool {
+        self.role_guess && self.status.state() == MiningState::Guessing
+    }
+
+    pub(crate) fn can_start_composing(&self) -> bool {
+        self.role_guess && self.status.state() == MiningState::AwaitBlockProposal
+    }
+
+    pub(crate) fn can_compose(&self) -> bool {
+        self.role_guess && self.status.state() == MiningState::Composing
     }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MiningInactiveReason {
-    /// disabled
-    /// set at startup if mining (composing & guessing) is disabled.
-    Disabled(SystemTime),
+pub enum MiningPausedReason {
+    /// paused by rpc. (user)
+    Rpc(SystemTime),
 
-    /// initializing
-    Init(SystemTime),
-
-    /// paused by user
-    PausedByUser(SystemTime),
-
-    /// synching blocks
+    /// syncing blocks
     SyncBlocks(SystemTime),
-
-    /// await block proposal (guesser)
-    /// set when a new block is added
-    AwaitBlockProposal(SystemTime),
-
-    /// await block
-    /// set when a block-proposal is generated or received.
-    AwaitBlock(SystemTime),
 
     /// await peer connections
     AwaitConnections(SystemTime),
-
-    /// a new block has been added to tip
-    NewTipBlock(SystemTime),
-
-    /// error while composing
-    ComposeError(SystemTime),
-
-    /// shutdown
-    Shutdown(SystemTime),
 }
 
-impl MiningInactiveReason {
-    pub(crate) fn can_compose(&self) -> bool {
-        matches!(self, Self::AwaitBlockProposal(_))
-    }
-
-    pub(crate) fn can_guess(&self) -> bool {
-        matches!(self, Self::AwaitBlock(_))
-    }
-
-    pub(crate) fn disabled() -> Self {
-        Self::Disabled(SystemTime::now())
-    }
-
-    pub(crate) fn init() -> Self {
-        Self::Init(SystemTime::now())
-    }
-
-    pub(crate) fn paused_by_user() -> Self {
-        Self::PausedByUser(SystemTime::now())
+impl MiningPausedReason {
+    pub(crate) fn rpc() -> Self {
+        Self::Rpc(SystemTime::now())
     }
 
     pub(crate) fn sync_blocks() -> Self {
         Self::SyncBlocks(SystemTime::now())
     }
 
-    pub(crate) fn await_block_proposal() -> Self {
-        Self::AwaitBlockProposal(SystemTime::now())
-    }
-
-    pub(crate) fn await_block() -> Self {
-        Self::AwaitBlock(SystemTime::now())
-    }
-
     pub(crate) fn await_connections() -> Self {
         Self::AwaitConnections(SystemTime::now())
     }
 
-    pub(crate) fn new_tip_block() -> Self {
-        Self::NewTipBlock(SystemTime::now())
-    }
-
-    pub(crate) fn compose_error() -> Self {
-        Self::ComposeError(SystemTime::now())
-    }
-
-    pub(crate) fn shutdown() -> Self {
-        Self::Shutdown(SystemTime::now())
-    }
-
     pub fn since(&self) -> SystemTime {
         match *self {
-            Self::Disabled(i) => i,
-            Self::Init(i) => i,
-            Self::PausedByUser(i) => i,
+            Self::Rpc(i) => i,
             Self::SyncBlocks(i) => i,
-            Self::AwaitBlockProposal(i) => i,
-            Self::AwaitBlock(i) => i,
             Self::AwaitConnections(i) => i,
-            Self::NewTipBlock(i) => i,
-            Self::ComposeError(i) => i,
-            Self::Shutdown(i) => i,
         }
     }
 
     pub fn description(&self) -> &str {
         match self {
-            Self::Disabled(_) => "disabled",
-            Self::Init(_) => "initializing",
-            Self::PausedByUser(_) => "paused by user",
+            Self::Rpc(_) => "rpc (user)",
             Self::SyncBlocks(_) => "syncing blocks",
-            Self::AwaitBlockProposal(_) => "await block proposal",
-            Self::AwaitBlock(_) => "await block",
             Self::AwaitConnections(_) => "await connections",
-            Self::NewTipBlock(_) => "new tip block",
-            Self::ComposeError(_) => "new tip block",
-            Self::Shutdown(_) => "shutdown",
         }
     }
 }
 
-impl Display for MiningInactiveReason {
+impl Display for MiningPausedReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let desc = self.description();
         let elapsed = self.since().elapsed();
         write!(f, "{} for {}", desc, human_duration_secs(&elapsed))
     }
 }
+
+// impl Display for MiningPausedReasons {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "{}", self.join(", "))
+//     }
+// }
 
 /// normal operation state transitions:
 ///
@@ -369,56 +368,148 @@ impl Display for MiningInactiveReason {
 ///      Guessing --> Inactive(AwaitBlockProposal) --> Guessing ...
 ///
 /// Disabled --> none.  (final)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MiningStatus {
-    /// guessing
-    /// set when guessing starts
+    Disabled(SystemTime),
+    Init(SystemTime),
+    Paused(Vec<MiningPausedReason>), // ByRpc, SyncBlocks, AwaitConnections
+    AwaitBlockProposal(SystemTime),
+    AwaitBlock(SystemTime),
+    Composing(SystemTime),
     Guessing(GuessingWorkInfo),
-
-    /// composing
-    /// set when composing starts
-    Composing(ComposingWorkInfo),
-
-    /// inactive
-    Inactive(MiningInactiveReason),
+    NewTipBlock(SystemTime),
+    ComposeError(SystemTime),
+    Shutdown(SystemTime),
 }
 
 impl MiningStatus {
-    pub(crate) fn can_compose(&self) -> bool {
-        match self {
-            Self::Composing(_) => true,
-            Self::Guessing(_) => false,
-            Self::Inactive(reason) => reason.can_compose(),
-        }
+    pub fn disabled() -> Self {
+        Self::Disabled(SystemTime::now())
     }
 
-    pub(crate) fn can_guess(&self) -> bool {
-        match self {
-            Self::Composing(_) => false,
-            Self::Guessing(_) => true,
-            Self::Inactive(reason) => reason.can_guess(),
-        }
+    pub fn init() -> Self {
+        Self::Init(SystemTime::now())
     }
 
-    pub(crate) fn inactive_reason(&self) -> Option<MiningInactiveReason> {
+    pub fn paused(reason: MiningPausedReason) -> Self {
+        Self::Paused(vec![reason])
+    }
+
+    pub fn await_block_proposal() -> Self {
+        Self::AwaitBlockProposal(SystemTime::now())
+    }
+
+    pub fn await_block() -> Self {
+        Self::AwaitBlock(SystemTime::now())
+    }
+
+    pub fn composing() -> Self {
+        Self::Composing(SystemTime::now())
+    }
+
+    pub fn guessing(work_info: GuessingWorkInfo) -> Self {
+        Self::Guessing(work_info)
+    }
+
+    pub fn new_tip_block() -> Self {
+        Self::NewTipBlock(SystemTime::now())
+    }
+
+    pub fn compose_error() -> Self {
+        Self::ComposeError(SystemTime::now())
+    }
+
+    pub fn shutdown() -> Self {
+        Self::Shutdown(SystemTime::now())
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.state() == MiningState::Paused
+    }
+
+    pub fn is_await_block_proposal(&self) -> bool {
+        self.state() == MiningState::AwaitBlockProposal
+    }
+
+    pub fn is_await_block(&self) -> bool {
+        self.state() == MiningState::AwaitBlock
+    }
+
+    pub fn is_composing(&self) -> bool {
+        self.state() == MiningState::Composing
+    }
+
+    pub fn is_guessing(&self) -> bool {
+        self.state() == MiningState::Guessing
+    }
+
+    pub fn is_new_tip_block(&self) -> bool {
+        self.state() == MiningState::NewTipBlock
+    }
+
+    pub fn is_compose_error(&self) -> bool {
+        self.state() == MiningState::ComposeError
+    }
+
+    pub fn is_shutdown(&self) -> bool {
+        self.state() == MiningState::Shutdown
+    }
+
+    pub fn state(&self) -> MiningState {
         match *self {
-            Self::Inactive(reason) => Some(reason),
-            _ => None,
+            Self::Disabled(_) => MiningState::Disabled,
+            Self::Init(_) => MiningState::Init,
+            Self::Paused(_) => MiningState::Paused,
+            Self::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
+            Self::AwaitBlock(_) => MiningState::AwaitBlock,
+            Self::Composing(_) => MiningState::Composing,
+            Self::Guessing(_) => MiningState::Guessing,
+            Self::NewTipBlock(_) => MiningState::NewTipBlock,
+            Self::ComposeError(_) => MiningState::ComposeError,
+            Self::Shutdown(_) => MiningState::Shutdown,
         }
     }
+
+    pub(crate) fn name(&self) -> &str {
+        match *self {
+            Self::Disabled(_) => "disabled",
+            Self::Init(_) => "init",
+            Self::Paused(_) => "paused",
+            Self::AwaitBlockProposal(_) => "await block proposal",
+            Self::AwaitBlock(_) => "await block",
+            Self::Composing(_) => "composing",
+            Self::Guessing(_) => "guessing",
+            Self::NewTipBlock(_) => "new tip block",
+            Self::ComposeError(_) => "composer error",
+            Self::Shutdown(_) => "Shutdown",
+        }
+    }
+
+    pub fn since(&self) -> SystemTime {
+        match *self {
+            Self::Disabled(t) => t,
+            Self::Init(t) => t,
+            Self::Paused(ref reasons) => reasons.iter().map(|r| r.since()).min().unwrap(),
+            Self::AwaitBlockProposal(t) => t,
+            Self::AwaitBlock(t) => t,
+            Self::Composing(t) => t,
+            Self::Guessing(w) => w.work_start,
+            Self::NewTipBlock(t) => t,
+            Self::ComposeError(t) => t,
+            Self::Shutdown(t) => t,
+        }
+    }
+
+    // pub(crate) fn paused_reasons(&self) -> &[MiningPausedReason] {
+    //     match self {
+    //         Self::Paused(reasons) => reasons,
+    //         _ => &[],
+    //     }
+    // }
 }
 
 impl Display for MiningStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let elapsed_time = match self {
-            MiningStatus::Guessing(guessing_work_info) => {
-                Some(guessing_work_info.work_start.elapsed())
-            }
-            MiningStatus::Composing(composing_work_info) => {
-                Some(composing_work_info.work_start.elapsed())
-            }
-            _ => None,
-        };
         let input_output_info = match self {
             MiningStatus::Guessing(info) => {
                 format!(" {}/{}", info.num_inputs, info.num_outputs)
@@ -427,27 +518,18 @@ impl Display for MiningStatus {
         };
 
         let work_type_and_duration = match self {
-            MiningStatus::Guessing(_) => {
+            MiningStatus::Disabled(_) => self.name().to_string(),
+            MiningStatus::Paused(reasons) => {
                 format!(
-                    "guessing for {}",
-                    human_duration_secs(&elapsed_time.unwrap())
+                    "paused for {}  ({})",
+                    human_duration_secs(&self.since().elapsed()),
+                    reasons.iter().map(|r| r.description()).join(", ")
                 )
             }
-            MiningStatus::Composing(_) => {
-                format!(
-                    "composing for {}",
-                    human_duration_secs(&elapsed_time.unwrap())
-                )
-            }
-            MiningStatus::Inactive(reason)
-                if matches!(reason, MiningInactiveReason::Disabled(_)) =>
-            {
-                format!("inactive  ({})", reason.description())
-            }
-            MiningStatus::Inactive(reason) => format!(
-                "inactive for {}  ({})",
-                human_duration_secs(&reason.since().elapsed()),
-                reason.description()
+            _ => format!(
+                "{} for {}",
+                self.name(),
+                human_duration_secs(&self.since().elapsed()),
             ),
         };
         let reward = match self {
