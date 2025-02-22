@@ -9,8 +9,6 @@ use serde::Serialize;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-const MIN_CONNECTIONS_FOR_MINING: u32 = 1;
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GuessingWorkInfo {
     work_start: SystemTime,
@@ -51,66 +49,94 @@ impl GuessingWorkInfo {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum MiningEvent {
+    Advance,
+
+    Init,
+
+    PauseRpc,
+    UnPauseRpc,
+
+    PauseSyncBlock,
+    UnPauseSyncBlock,
+
+    PauseNoConnection,
+    UnPauseNoConnection,
+
+    NewBlockProposal,
+    NewTipBlock,
+
+    ComposeError,
+
+    Shutdown,
+}
+
+impl Display for MiningEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MiningState {
-    Disabled = 0,
-    Init = 1,
-    Paused = 2, // ByRpc, SyncBlocks, AwaitConnections
-    AwaitBlockProposal = 3,
-    AwaitBlock = 4,
-    Composing = 5,
-    Guessing = 6,
-    NewTipBlock = 7,
-    ComposeError = 8,
+    // ---- happy path ----
+    Init = 0,
+    AwaitBlockProposal = 1,
+    Composing = 2,
+    AwaitBlock = 3,
+    Guessing = 4,
+    NewTipBlock = 5,
+    // ---- end happy path ----
+    ComposeError = 6,
+    Paused = 7, // Rpc, SyncBlocks, NeedConnections
+    Disabled = 8,
     Shutdown = 9,
 }
 
 #[rustfmt::skip]
 const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
-    // MiningState::Disabled
-    &[],
+
+    // ----- start happy path -----
 
     // MiningState::Init
     &[
-        MiningState::Paused,
         MiningState::AwaitBlockProposal,
-        MiningState::AwaitBlock,
-        MiningState::Shutdown,
-    ],
-
-    // MiningState::Paused
-    &[
-        MiningState::Init,
-        MiningState::Shutdown
-    ],
-
-    // MiningState::AwaitBlockProposal
-    &[
-        MiningState::Composing,
-        MiningState::AwaitBlock,
-        MiningState::Paused,
-        MiningState::Shutdown,
-    ],
-
-    // MiningState::AwaitBlock
-    &[
-        MiningState::Guessing,
         MiningState::NewTipBlock,
         MiningState::Paused,
         MiningState::Shutdown,
     ],
 
+    // MiningState::AwaitBlockProposal
+    &[
+        MiningState::Composing,
+        MiningState::Paused,
+        MiningState::Shutdown,
+        MiningState::AwaitBlockProposal,
+        MiningState::NewTipBlock,
+    ],
+
     // MiningState::Composing
     &[
         MiningState::AwaitBlock,
-        MiningState::Paused,
         MiningState::ComposeError,
+        MiningState::Paused,
         MiningState::Shutdown,
+        MiningState::NewTipBlock,
+    ],
+
+    // MiningState::AwaitBlock
+    &[
+        MiningState::Guessing,
+        MiningState::Paused,
+        MiningState::Shutdown,
+        MiningState::NewTipBlock,
     ],
 
     // MiningState::Guessing
     &[
+        MiningState::AwaitBlock,   // if a new block-proposal arrives
         MiningState::NewTipBlock,
         MiningState::Paused,
         MiningState::Shutdown,
@@ -123,21 +149,43 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
         MiningState::Shutdown,
     ],
 
+    // ---- end happy path ----
+
     // MiningState::ComposeError
     &[
         MiningState::Shutdown
     ],
 
+    // MiningState::Paused
+    &[
+        MiningState::Init,
+        MiningState::Shutdown
+    ],
+
+    // MiningState::Disabled
+    &[],
+
+
     // MiningState::Shutdown
     &[],
+];
+
+#[rustfmt::skip]
+const HAPPY_PATH_STATE_TRANSITIONS: &[MiningState] = &[
+    MiningState::Init,
+    MiningState::AwaitBlockProposal,
+    MiningState::Composing,
+    MiningState::AwaitBlock,
+    MiningState::Guessing,
+    MiningState::NewTipBlock,
 ];
 
 pub struct MiningStateMachine {
     status: MiningStatus, // holds a MiningState.
 
-    syncing: bool,
+    paused_while_syncing: bool,
     paused_by_rpc: bool,
-    connections: u32,
+    paused_need_connection: bool,
 
     role_compose: bool,
     role_guess: bool,
@@ -154,9 +202,9 @@ impl MiningStateMachine {
     pub fn new(role_compose: bool, role_guess: bool) -> Self {
         Self {
             status: MiningStatus::init(),
-            syncing: false,
+            paused_while_syncing: false,
             paused_by_rpc: false,
-            connections: 0,
+            paused_need_connection: false,
             role_compose,
             role_guess,
         }
@@ -166,14 +214,74 @@ impl MiningStateMachine {
         &self.status
     }
 
-    pub fn try_advance(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
+    /// this is a shortcut for ::handle_event(MiningEvent::Advance)
+    pub fn advance(&mut self) -> Result<(), InvalidStateTransition> {
+        if let Some(state) = HAPPY_PATH_STATE_TRANSITIONS
+            .iter()
+            .cycle()
+            .filter(|v| **v == self.status.state())
+            .skip(1)
+            .next()
+        {
+            let new_status =
+                MiningStatus::try_from(*state).map_err(|_| InvalidStateTransition {
+                    old_state: self.status.state(),
+                    new_state: *state,
+                })?;
+            self.advance_to(new_status)?;
+
+            // composer role skips over AwaitBlockProposal
+            if self.role_compose && *state == MiningState::AwaitBlockProposal {
+                self.advance()?;
+            }
+            // guesser role skips over AwaitBlock
+            if self.role_guess && *state == MiningState::AwaitBlock {
+                self.advance()?;
+            }
+            Ok(())
+        } else {
+            unreachable!();
+        }
+    }
+
+    pub fn handle_event(&mut self, event: MiningEvent) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
-            "try_advance: old_state: {}, new_state: {}",
+            "handle_event: old_state: {}, event: {}",
+            self.status.name(),
+            event,
+        );
+
+        match event {
+            MiningEvent::Advance => self.advance()?,
+
+            MiningEvent::Init => self.advance_to(MiningStatus::init())?,
+
+            MiningEvent::PauseRpc => self.pause_by_rpc(),
+            MiningEvent::UnPauseRpc => self.unpause_by_rpc(),
+
+            MiningEvent::PauseSyncBlock => self.pause_while_syncing(),
+            MiningEvent::UnPauseSyncBlock => self.unpause_while_syncing(),
+
+            MiningEvent::PauseNoConnection => self.pause_need_connection(),
+            MiningEvent::UnPauseNoConnection => self.unpause_need_connection(),
+
+            MiningEvent::NewBlockProposal => self.advance_to(MiningStatus::await_block())?,
+            MiningEvent::NewTipBlock => self.advance_to(MiningStatus::new_tip_block())?,
+
+            MiningEvent::ComposeError => self.advance_to(MiningStatus::compose_error())?,
+
+            MiningEvent::Shutdown => self.advance_to(MiningStatus::shutdown())?,
+        }
+        Ok(())
+    }
+
+    /// prefer advance() and handle_event() instead.
+    pub fn advance_to(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
+        tracing::debug!(
+            "advance_to: old_state: {}, new_state: {}",
             self.status.name(),
             new_status.name()
         );
-
-        self.ensure_allowed(&new_status)?;
 
         // special handling for pause.
         if let MiningStatus::Paused(ref reasons) = new_status {
@@ -182,6 +290,7 @@ impl MiningStateMachine {
                 self.pause(reason)
             }
         } else {
+            self.ensure_allowed(&new_status)?;
             self.set_new_status(new_status);
         }
 
@@ -189,34 +298,15 @@ impl MiningStateMachine {
     }
 
     pub fn exec_states(&mut self, states: Vec<MiningStatus>) -> Result<(), InvalidStateTransition> {
-            for state in states {
-                self.try_advance(state)?
-            }
-            Ok(())
-    }    
+        for state in states {
+            self.advance_to(state)?
+        }
+        Ok(())
+    }
 
     fn set_new_status(&mut self, new_status: MiningStatus) {
         self.status = new_status;
         tracing::debug!("set new state: {}", self.status.name());
-    }
-
-    pub fn set_connections(&mut self, connections: u32) {
-        if connections < MIN_CONNECTIONS_FOR_MINING {
-            let reason = MiningPausedReason::await_connections();
-            let new_status = MiningStatus::paused(reason);
-            if self.allowed(&new_status) {
-                self.merge_set_paused_status(new_status);
-            }
-        } else if self.connections < MIN_CONNECTIONS_FOR_MINING {
-            let new_status = MiningStatus::init();
-            if self.allowed(&new_status) {
-                self.set_new_status(new_status);
-            } else {
-                // connections was fine before, and still fine.
-                // keep our existing state.
-            }
-        }
-        self.connections = connections;
     }
 
     fn merge_set_paused_status(&mut self, new_status: MiningStatus) {
@@ -232,15 +322,49 @@ impl MiningStateMachine {
         self.set_new_status(merged_status);
     }
 
-    pub fn pause(&mut self, reason: &MiningPausedReason) {
+    fn pause(&mut self, reason: &MiningPausedReason) {
         match reason {
             MiningPausedReason::Rpc(_) => self.pause_by_rpc(),
-            MiningPausedReason::SyncBlocks(_) => self.start_syncing(),
-            MiningPausedReason::AwaitConnections(_) => self.set_connections(0),
+            MiningPausedReason::SyncBlocks(_) => self.pause_while_syncing(),
+            MiningPausedReason::NeedConnections(_) => self.pause_need_connection(),
         };
     }
 
-    pub fn pause_by_rpc(&mut self) {
+    /// shortcut for:
+    ///
+    /// if need_connection {
+    ///   ::handle_event(MiningEvent::PauseNeedConnection)
+    /// } else {
+    ///   ::handle_event(MiningEvent::UnPauseNeedConnection)
+    /// }
+    pub fn set_need_connection(&mut self, need_connection: bool) {
+        if self.paused_need_connection != need_connection {
+            if need_connection {
+                self.pause_need_connection()
+            } else {
+                self.unpause_need_connection()
+            }
+        }
+    }
+
+    fn pause_need_connection(&mut self) {
+        let reason = MiningPausedReason::need_connections();
+        let new_status = MiningStatus::paused(reason);
+        if self.allowed(&new_status) {
+            self.merge_set_paused_status(new_status);
+        }
+        self.paused_need_connection = true;
+    }
+
+    fn unpause_need_connection(&mut self) {
+        let new_status = MiningStatus::init();
+        if self.allowed(&new_status) {
+            self.set_new_status(new_status);
+        }
+        self.paused_need_connection = false;
+    }
+
+    fn pause_by_rpc(&mut self) {
         let reason = MiningPausedReason::rpc();
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
@@ -249,7 +373,7 @@ impl MiningStateMachine {
         self.paused_by_rpc = true;
     }
 
-    pub fn unpause_by_rpc(&mut self) {
+    fn unpause_by_rpc(&mut self) {
         let new_status = MiningStatus::init();
         if self.allowed(&new_status) {
             self.set_new_status(new_status);
@@ -257,31 +381,38 @@ impl MiningStateMachine {
         self.paused_by_rpc = false;
     }
 
+    /// shortcut for:
+    ///
+    /// if sync_blocks {
+    ///   ::handle_event(MiningEvent::PauseSyncBlocks)
+    /// } else {
+    ///   ::handle_event(MiningEvent::UnPauseSyncBlocks)
+    /// }
     pub fn set_syncing(&mut self, syncing: bool) {
-        if self.syncing != syncing {
+        if self.paused_while_syncing != syncing {
             if syncing {
-                self.stop_syncing()
+                self.pause_while_syncing()
             } else {
-                self.start_syncing()
+                self.unpause_while_syncing()
             }
         }
     }
 
-    pub fn start_syncing(&mut self) {
+    fn pause_while_syncing(&mut self) {
         let reason = MiningPausedReason::sync_blocks();
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
         }
-        self.syncing = true;
+        self.paused_while_syncing = true;
     }
 
-    pub fn stop_syncing(&mut self) {
+    fn unpause_while_syncing(&mut self) {
         let new_status = MiningStatus::init();
         if self.allowed(&new_status) {
             self.set_new_status(new_status);
         }
-        self.syncing = false;
+        self.paused_while_syncing = false;
     }
 
     pub fn allowed(&self, status: &MiningStatus) -> bool {
@@ -292,7 +423,7 @@ impl MiningStateMachine {
         } else if !self.mining_enabled() {
             state == MiningState::Disabled
         } else if self.paused_count() > 1 {
-            state == MiningState::Shutdown  
+            state == MiningState::Shutdown
         } else if !self.role_compose && state == MiningState::Composing {
             false
         } else if !self.role_guess && state == MiningState::Guessing {
@@ -307,8 +438,8 @@ impl MiningStateMachine {
 
     fn paused_count(&self) -> u8 {
         self.paused_by_rpc as u8
-            + self.syncing as u8
-            + (self.connections < MIN_CONNECTIONS_FOR_MINING) as u8
+            + self.paused_while_syncing as u8
+            + self.paused_need_connection as u8
     }
 
     fn ensure_allowed(&self, new_status: &MiningStatus) -> Result<(), InvalidStateTransition> {
@@ -355,8 +486,8 @@ pub enum MiningPausedReason {
     /// syncing blocks
     SyncBlocks(SystemTime),
 
-    /// await peer connections
-    AwaitConnections(SystemTime),
+    /// need peer connections
+    NeedConnections(SystemTime),
 }
 
 impl MiningPausedReason {
@@ -368,15 +499,15 @@ impl MiningPausedReason {
         Self::SyncBlocks(SystemTime::now())
     }
 
-    pub(crate) fn await_connections() -> Self {
-        Self::AwaitConnections(SystemTime::now())
+    pub(crate) fn need_connections() -> Self {
+        Self::NeedConnections(SystemTime::now())
     }
 
     pub fn since(&self) -> SystemTime {
         match *self {
             Self::Rpc(i) => i,
             Self::SyncBlocks(i) => i,
-            Self::AwaitConnections(i) => i,
+            Self::NeedConnections(i) => i,
         }
     }
 
@@ -384,7 +515,7 @@ impl MiningPausedReason {
         match self {
             Self::Rpc(_) => "user",
             Self::SyncBlocks(_) => "syncing blocks",
-            Self::AwaitConnections(_) => "await connections",
+            Self::NeedConnections(_) => "await connections",
         }
     }
 }
@@ -422,7 +553,7 @@ impl Display for MiningPausedReason {
 pub enum MiningStatus {
     Disabled(SystemTime),
     Init(SystemTime),
-    Paused(Vec<MiningPausedReason>), // ByRpc, SyncBlocks, AwaitConnections
+    Paused(Vec<MiningPausedReason>), // ByRpc, SyncBlocks, NeedConnections
     AwaitBlockProposal(SystemTime),
     AwaitBlock(SystemTime),
     Composing(SystemTime),
@@ -430,6 +561,24 @@ pub enum MiningStatus {
     NewTipBlock(SystemTime),
     ComposeError(SystemTime),
     Shutdown(SystemTime),
+}
+
+impl TryFrom<MiningState> for MiningStatus {
+    type Error = anyhow::Error; // todo: make a real error
+
+    fn try_from(state: MiningState) -> anyhow::Result<Self> {
+        Ok(match state {
+            MiningState::Disabled => MiningStatus::disabled(),
+            MiningState::Init => MiningStatus::init(),
+            MiningState::AwaitBlockProposal => MiningStatus::await_block_proposal(),
+            MiningState::AwaitBlock => MiningStatus::await_block(),
+            MiningState::Composing => MiningStatus::composing(),
+            MiningState::NewTipBlock => MiningStatus::new_tip_block(),
+            MiningState::ComposeError => MiningStatus::compose_error(),
+            MiningState::Shutdown => MiningStatus::shutdown(),
+            _ => anyhow::bail!("cannot instantiate MiningStatus from {:?}", state),
+        })
+    }
 }
 
 impl MiningStatus {
@@ -614,7 +763,6 @@ fn human_duration_secs(duration_exact: &Result<Duration, std::time::SystemTimeEr
     humantime::format_duration(duration_to_secs).to_string()
 }
 
-
 #[cfg(test)]
 mod state_machine_tests {
 
@@ -622,22 +770,24 @@ mod state_machine_tests {
 
     #[test]
     fn compose_and_guess_happy_path() -> anyhow::Result<()> {
-
         let mut machine = MiningStateMachine::new(true, true);
         machine.exec_states(worker::compose_and_guess_happy_path())?;
 
         let mut machine = MiningStateMachine::new(true, false);
-        assert!(machine.exec_states(worker::compose_and_guess_happy_path()).is_err());
+        assert!(machine
+            .exec_states(worker::compose_and_guess_happy_path())
+            .is_err());
 
         let mut machine = MiningStateMachine::new(false, true);
-        assert!(machine.exec_states(worker::compose_and_guess_happy_path()).is_err());
+        assert!(machine
+            .exec_states(worker::compose_and_guess_happy_path())
+            .is_err());
 
         Ok(())
     }
 
     #[test]
     fn compose_happy_path() -> anyhow::Result<()> {
-
         let mut machine = MiningStateMachine::new(true, false);
         machine.exec_states(worker::compose_happy_path())?;
 
@@ -649,7 +799,6 @@ mod state_machine_tests {
 
     #[test]
     fn guess_happy_path() -> anyhow::Result<()> {
-
         let mut machine = MiningStateMachine::new(false, true);
         machine.exec_states(worker::guess_happy_path())?;
 
@@ -657,12 +806,12 @@ mod state_machine_tests {
         assert!(machine.exec_states(worker::guess_happy_path()).is_err());
 
         Ok(())
-    }    
+    }
 
     mod worker {
         use super::*;
 
-        pub(super) fn compose_happy_path()-> Vec<MiningStatus> {
+        pub(super) fn compose_happy_path() -> Vec<MiningStatus> {
             vec![
                 MiningStatus::await_block_proposal(),
                 MiningStatus::composing(),
@@ -672,16 +821,16 @@ mod state_machine_tests {
             ]
         }
 
-        pub(super) fn guess_happy_path()-> Vec<MiningStatus> {
+        pub(super) fn guess_happy_path() -> Vec<MiningStatus> {
             vec![
                 MiningStatus::await_block(),
                 MiningStatus::guessing(Default::default()),
                 MiningStatus::new_tip_block(),
                 MiningStatus::init(),
             ]
-        }        
+        }
 
-        pub(super) fn compose_and_guess_happy_path()-> Vec<MiningStatus> {
+        pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStatus> {
             vec![
                 MiningStatus::await_block_proposal(),
                 MiningStatus::composing(),
@@ -691,7 +840,5 @@ mod state_machine_tests {
                 MiningStatus::init(),
             ]
         }
-
     }
-
 }
