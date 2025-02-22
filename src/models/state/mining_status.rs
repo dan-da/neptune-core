@@ -20,6 +20,19 @@ pub struct GuessingWorkInfo {
     total_guesser_fee: NativeCurrencyAmount,
 }
 
+#[cfg(test)]
+impl Default for GuessingWorkInfo {
+    fn default() -> Self {
+        Self {
+            work_start: SystemTime::now(),
+            num_inputs: 1,
+            num_outputs: 2,
+            total_coinbase: NativeCurrencyAmount::coins(128),
+            total_guesser_fee: NativeCurrencyAmount::coins(120),
+        }
+    }
+}
+
 impl From<&Block> for GuessingWorkInfo {
     fn from(block: &Block) -> Self {
         Self::new(block)
@@ -129,7 +142,8 @@ pub struct MiningStateMachine {
     role_guess: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("invalid state transition")]
 pub struct InvalidStateTransition {
     pub old_state: MiningState,
     pub new_state: MiningState,
@@ -584,4 +598,28 @@ fn human_duration_secs(duration_exact: &Result<Duration, std::time::SystemTimeEr
         .map(|v| *v - Duration::from_nanos(v.subsec_nanos().into()))
         .unwrap_or(Duration::ZERO);
     humantime::format_duration(duration_to_secs).to_string()
+}
+
+
+#[cfg(test)]
+mod state_machine_tests {
+
+    use super::*;
+
+    #[test]
+    fn compose_and_guess_happy_path() -> anyhow::Result<()> {
+
+        let mut machine = MiningStateMachine::new(true, false);
+
+        machine.try_advance(MiningStatus::init())?;
+        machine.try_advance(MiningStatus::await_block_proposal())?;
+        machine.try_advance(MiningStatus::composing())?;
+        machine.try_advance(MiningStatus::await_block())?;
+        machine.try_advance(MiningStatus::guessing(Default::default()))?;
+        machine.try_advance(MiningStatus::new_tip_block())?;
+        machine.try_advance(MiningStatus::init())?;
+
+        Ok(())
+    }
+
 }
