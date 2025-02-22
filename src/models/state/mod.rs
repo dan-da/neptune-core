@@ -25,8 +25,6 @@ use block_proposal::BlockProposal;
 use blockchain_state::BlockchainState;
 use mempool::Mempool;
 use mempool::TransactionOrigin;
-use mining_status::ComposingWorkInfo;
-use mining_status::GuessingWorkInfo;
 use mining_status::MiningStatus;
 use networking_state::NetworkingState;
 use num_traits::CheckedSub;
@@ -73,7 +71,6 @@ use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::peer::SYNC_CHALLENGE_POW_WITNESS_LENGTH;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::block_proposal::BlockProposalRejectError;
-use crate::models::state::mining_status::MiningInactiveReason;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::monitored_utxo::MonitoredUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -186,28 +183,8 @@ impl GlobalStateLock {
             return;
         }
 
+        tracing::debug!("setting mining status: {}", mining_status);
         self.lock_guard_mut().await.mining_status = mining_status;
-        tracing::debug!("set mining status: {}", mining_status);
-    }
-
-    pub async fn set_mining_status_to_inactive(&mut self, reason: MiningInactiveReason) {
-        self.set_mining_status(MiningStatus::Inactive(reason)).await
-    }
-
-    /// Indicate if we are guessing
-    pub async fn set_mining_status_to_guessing(&mut self, block: &Block) {
-        let now = SystemTime::now();
-        let block_info = GuessingWorkInfo::new(now, block);
-        self.set_mining_status(MiningStatus::Guessing(block_info))
-            .await
-    }
-
-    /// Indicate if we are composing
-    pub async fn set_mining_status_to_composing(&mut self) {
-        let now = SystemTime::now();
-        let work_info = ComposingWorkInfo::new(now);
-        self.set_mining_status(MiningStatus::Composing(work_info))
-            .await
     }
 
     // persist wallet state to disk
@@ -320,9 +297,9 @@ impl GlobalState {
         mempool: Mempool,
     ) -> Self {
         let mining_status = if Self::mining_enabled(&cli) {
-            MiningStatus::Inactive(MiningInactiveReason::init())
+            MiningStatus::init()
         } else {
-            MiningStatus::Inactive(MiningInactiveReason::disabled())
+            MiningStatus::disabled()
         };
 
         Self {
