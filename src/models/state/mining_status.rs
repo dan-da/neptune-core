@@ -96,6 +96,7 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
     // MiningState::AwaitBlock
     &[
         MiningState::Guessing,
+        MiningState::NewTipBlock,
         MiningState::Paused,
         MiningState::Shutdown,
     ],
@@ -143,7 +144,7 @@ pub struct MiningStateMachine {
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("invalid state transition")]
+#[error("invalid state transition from {:?} to {:?}", old_state, new_state)]
 pub struct InvalidStateTransition {
     pub old_state: MiningState,
     pub new_state: MiningState,
@@ -186,6 +187,13 @@ impl MiningStateMachine {
 
         Ok(())
     }
+
+    pub fn exec_states(&mut self, states: Vec<MiningStatus>) -> Result<(), InvalidStateTransition> {
+            for state in states {
+                self.try_advance(state)?
+            }
+            Ok(())
+    }    
 
     fn set_new_status(&mut self, new_status: MiningStatus) {
         self.status = new_status;
@@ -277,12 +285,18 @@ impl MiningStateMachine {
     }
 
     pub fn allowed(&self, status: &MiningStatus) -> bool {
+        let state = status.state();
+
         if *status == self.status {
             true
         } else if !self.mining_enabled() {
-            *status == MiningStatus::disabled()
+            state == MiningState::Disabled
         } else if self.paused_count() > 1 {
-            *status == MiningStatus::shutdown()
+            state == MiningState::Shutdown  
+        } else if !self.role_compose && state == MiningState::Composing {
+            false
+        } else if !self.role_guess && state == MiningState::Guessing {
+            false
         } else {
             let state = status.state();
             let allowed_states: &[MiningState] =
@@ -609,17 +623,75 @@ mod state_machine_tests {
     #[test]
     fn compose_and_guess_happy_path() -> anyhow::Result<()> {
 
-        let mut machine = MiningStateMachine::new(true, false);
+        let mut machine = MiningStateMachine::new(true, true);
+        machine.exec_states(worker::compose_and_guess_happy_path())?;
 
-        machine.try_advance(MiningStatus::init())?;
-        machine.try_advance(MiningStatus::await_block_proposal())?;
-        machine.try_advance(MiningStatus::composing())?;
-        machine.try_advance(MiningStatus::await_block())?;
-        machine.try_advance(MiningStatus::guessing(Default::default()))?;
-        machine.try_advance(MiningStatus::new_tip_block())?;
-        machine.try_advance(MiningStatus::init())?;
+        let mut machine = MiningStateMachine::new(true, false);
+        assert!(machine.exec_states(worker::compose_and_guess_happy_path()).is_err());
+
+        let mut machine = MiningStateMachine::new(false, true);
+        assert!(machine.exec_states(worker::compose_and_guess_happy_path()).is_err());
 
         Ok(())
+    }
+
+    #[test]
+    fn compose_happy_path() -> anyhow::Result<()> {
+
+        let mut machine = MiningStateMachine::new(true, false);
+        machine.exec_states(worker::compose_happy_path())?;
+
+        let mut machine = MiningStateMachine::new(false, true);
+        assert!(machine.exec_states(worker::compose_happy_path()).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn guess_happy_path() -> anyhow::Result<()> {
+
+        let mut machine = MiningStateMachine::new(false, true);
+        machine.exec_states(worker::guess_happy_path())?;
+
+        let mut machine = MiningStateMachine::new(true, false);
+        assert!(machine.exec_states(worker::guess_happy_path()).is_err());
+
+        Ok(())
+    }    
+
+    mod worker {
+        use super::*;
+
+        pub(super) fn compose_happy_path()-> Vec<MiningStatus> {
+            vec![
+                MiningStatus::await_block_proposal(),
+                MiningStatus::composing(),
+                MiningStatus::await_block(),
+                MiningStatus::new_tip_block(),
+                MiningStatus::init(),
+            ]
+        }
+
+        pub(super) fn guess_happy_path()-> Vec<MiningStatus> {
+            vec![
+                MiningStatus::await_block(),
+                MiningStatus::guessing(Default::default()),
+                MiningStatus::new_tip_block(),
+                MiningStatus::init(),
+            ]
+        }        
+
+        pub(super) fn compose_and_guess_happy_path()-> Vec<MiningStatus> {
+            vec![
+                MiningStatus::await_block_proposal(),
+                MiningStatus::composing(),
+                MiningStatus::await_block(),
+                MiningStatus::guessing(Default::default()),
+                MiningStatus::new_tip_block(),
+                MiningStatus::init(),
+            ]
+        }
+
     }
 
 }
