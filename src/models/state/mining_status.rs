@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-const MIN_CONNECTIONS_FOR_MINING: u8 = 1;
+const MIN_CONNECTIONS_FOR_MINING: u32 = 1;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GuessingWorkInfo {
@@ -157,25 +157,25 @@ impl MiningStateMachine {
             self.status.name(),
             new_status.name()
         );
-        // special handling for pause.
-        if let MiningStatus::Paused(ref reasons) = new_status {
-            for reason in reasons {
-                match reason {
-                    MiningPausedReason::Rpc(_) => self.pause_by_rpc(),
-                    MiningPausedReason::SyncBlocks(_) => self.start_syncing(),
-                    MiningPausedReason::AwaitConnections(_) => self.set_connections(0),
-                };
-            }
-        }
 
         self.ensure_allowed(&new_status)?;
-        self.set_new_status(new_status);
+
+        // special handling for pause.
+        if let MiningStatus::Paused(ref reasons) = new_status {
+            assert!(!reasons.is_empty());
+            for reason in reasons {
+                self.pause(reason)
+            }
+        } else {
+            self.set_new_status(new_status);
+        }
+
         Ok(())
     }
 
     fn set_new_status(&mut self, new_status: MiningStatus) {
         self.status = new_status;
-        tracing::debug!("try_advance: set new_state: {}", self.status.name());
+        tracing::debug!("set new state: {}", self.status.name());
     }
 
     pub fn set_connections(&mut self, connections: u32) {
@@ -208,6 +208,14 @@ impl MiningStateMachine {
             _ => panic!("attempted to merge status other than Paused"),
         };
         self.set_new_status(merged_status);
+    }
+
+    pub fn pause(&mut self, reason: &MiningPausedReason) {
+        match reason {
+            MiningPausedReason::Rpc(_) => self.pause_by_rpc(),
+            MiningPausedReason::SyncBlocks(_) => self.start_syncing(),
+            MiningPausedReason::AwaitConnections(_) => self.set_connections(0),
+        };
     }
 
     pub fn pause_by_rpc(&mut self) {
@@ -270,7 +278,9 @@ impl MiningStateMachine {
     }
 
     fn paused_count(&self) -> u8 {
-        self.paused_by_rpc as u8 + self.syncing as u8 + (self.connections < MIN_CONNECTIONS_FOR_MINING) as u8
+        self.paused_by_rpc as u8
+            + self.syncing as u8
+            + (self.connections < MIN_CONNECTIONS_FOR_MINING) as u8
     }
 
     fn ensure_allowed(&self, new_status: &MiningStatus) -> Result<(), InvalidStateTransition> {
