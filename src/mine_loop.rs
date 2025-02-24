@@ -866,14 +866,12 @@ pub(crate) async fn mine(
                 };
             }
             new_block = guesser_rx => {
-                machine.advance().unwrap(); // Guessing    --> NewTipBlock
-                machine.advance().unwrap(); // NewTipBlock --> Init
-
                 match new_block {
                     Err(err) => {
                         warn!("Mining task was cancelled prematurely. Got: {}", err);
                     }
                     Ok(new_block_found) => {
+
                         debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
 
                         // Sanity check, remove for more efficient mining.
@@ -890,6 +888,13 @@ pub(crate) async fn mine(
                             // took less time than the minimum block time.
                             error!("Found block with valid proof-of-work but block is invalid.");
                         } else {
+                            machine.advance().unwrap(); // Guessing    --> NewTipBlock
+                            machine.advance().unwrap(); // NewTipBlock --> Init
+
+                            // temp hack: unset block proposal.
+                            // todo: new block proposals should be sent to miner over channel
+                            global_state_lock.lock_guard_mut().await.block_proposal = BlockProposal::none();
+
                             info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
                         }
