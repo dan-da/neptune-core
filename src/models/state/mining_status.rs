@@ -860,7 +860,9 @@ mod state_machine_tests {
             #[test]
             fn unpause_changes_only_certain_states() -> anyhow::Result<()> {
                 // test that all pause events only change correct states
-                for (pause_event, unpause_event) in worker::all_pause_and_unpause_events().into_iter() {
+                for (pause_event, unpause_event) in
+                    worker::all_pause_and_unpause_events().into_iter()
+                {
                     worker::unpause_changes_only_certain_states(pause_event, unpause_event)?;
                 }
                 Ok(())
@@ -1003,7 +1005,9 @@ mod state_machine_tests {
                         for event in events.iter() {
                             match *event {
                                 MiningEvent::PauseNeedConnection => paused_need_connection = true,
-                                MiningEvent::UnPauseNeedConnection => paused_need_connection = false,
+                                MiningEvent::UnPauseNeedConnection => {
+                                    paused_need_connection = false
+                                }
                                 MiningEvent::PauseRpc => paused_by_rpc = true,
                                 MiningEvent::UnPauseRpc => paused_by_rpc = false,
                                 MiningEvent::PauseSyncBlock => paused_while_syncing = true,
@@ -1019,8 +1023,9 @@ mod state_machine_tests {
                     assert_eq!(paused_while_syncing, machine.paused_while_syncing);
                     assert_eq!(paused_need_connection, machine.paused_need_connection);
 
-                    let paused_count =
-                        paused_by_rpc as u8 + paused_while_syncing as u8 + paused_need_connection as u8;
+                    let paused_count = paused_by_rpc as u8
+                        + paused_while_syncing as u8
+                        + paused_need_connection as u8;
                     assert_eq!(paused_count, machine.paused_count());
 
                     Ok(())
