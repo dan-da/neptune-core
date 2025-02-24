@@ -119,9 +119,9 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
     // MiningState::AwaitBlockProposal
     &[
         MiningState::Composing,
+        MiningState::AwaitBlock,
         MiningState::Paused,
         MiningState::Shutdown,
-        MiningState::AwaitBlockProposal,
         MiningState::NewTipBlock,
     ],
 
