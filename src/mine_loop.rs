@@ -682,8 +682,7 @@ pub(crate) async fn mine(
             machine.advance().unwrap(); // Init --> AwaitBlockProposal
 
             if proposal_block_hash.is_some() {
-                machine.advance().unwrap(); // AwaitBlockProposal --> Composing
-                machine.advance().unwrap(); // Composing          --> AwaitBlock
+                machine.handle_event(MiningEvent::NewBlockProposal);
             }
         }
 
