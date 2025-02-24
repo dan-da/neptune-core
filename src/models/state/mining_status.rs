@@ -249,7 +249,7 @@ impl MiningStateMachine {
     ///
     /// important: this method should never be called when moving to the
     /// `Guessing` state. If so, the `Guessing` work-info will not be present.
-    /// Instead use advance_to() and supply a `MiningStatus::Guessing(Some(_))`.
+    /// Instead use advance_with() and supply a `MiningStatus::Guessing(Some(_))`.
     pub fn advance(&mut self) -> Result<(), InvalidStateTransition> {
         let old_state = self.status.state();
 
@@ -262,7 +262,7 @@ impl MiningStateMachine {
             .map(|(_, next)| next)
         {
             let new_status = MiningStatus::from(*state);
-            self.advance_to(new_status)?;
+            self.advance_with(new_status)?;
 
             // take role(s) into account (composer, guesser)
             match *state {
@@ -302,7 +302,7 @@ impl MiningStateMachine {
         match event {
             MiningEvent::Advance => self.advance()?,
 
-            MiningEvent::Init => self.advance_to(MiningStatus::init())?,
+            MiningEvent::Init => self.advance_with(MiningStatus::init())?,
 
             MiningEvent::PauseRpc => self.pause_by_rpc(),
             MiningEvent::UnPauseRpc => self.unpause_by_rpc(),
@@ -313,20 +313,20 @@ impl MiningStateMachine {
             MiningEvent::PauseNeedConnection => self.pause_need_connection(),
             MiningEvent::UnPauseNeedConnection => self.unpause_need_connection(),
 
-            MiningEvent::NewBlockProposal => self.advance_to(MiningStatus::await_block())?,
-            MiningEvent::NewTipBlock => self.advance_to(MiningStatus::new_tip_block())?,
+            MiningEvent::NewBlockProposal => self.advance_with(MiningStatus::await_block())?,
+            MiningEvent::NewTipBlock => self.advance_with(MiningStatus::new_tip_block())?,
 
-            MiningEvent::ComposeError => self.advance_to(MiningStatus::compose_error())?,
+            MiningEvent::ComposeError => self.advance_with(MiningStatus::compose_error())?,
 
-            MiningEvent::Shutdown => self.advance_to(MiningStatus::shutdown())?,
+            MiningEvent::Shutdown => self.advance_with(MiningStatus::shutdown())?,
         }
         Ok(())
     }
 
     /// prefer advance() and handle_event() instead.
-    pub fn advance_to(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
+    pub fn advance_with(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
-            "advance_to: old_state: {}, new_state: {}",
+            "advance_with: old_state: {}, new_state: {}",
             self.status.name(),
             new_status.name()
         );
@@ -350,7 +350,7 @@ impl MiningStateMachine {
     #[cfg(test)]
     pub fn exec_states(&mut self, states: Vec<MiningStatus>) -> Result<(), InvalidStateTransition> {
         for state in states {
-            self.advance_to(state)?
+            self.advance_with(state)?
         }
         Ok(())
     }
@@ -1067,7 +1067,7 @@ mod state_machine_tests {
                 ) -> anyhow::Result<()> {
                     for status in compose_and_guess_happy_path() {
                         let state = status.state();
-                        machine.advance_to(status)?;
+                        machine.advance_with(status)?;
                         if state == target {
                             break;
                         }
