@@ -492,10 +492,6 @@ impl MiningStateMachine {
             state == MiningState::Disabled
         } else if self.paused_count() > 1 {
             state == MiningState::Shutdown
-        } else if !self.role_compose && state == MiningState::Composing {
-            false
-        } else if !self.role_guess && state == MiningState::Guessing {
-            false
         } else {
             let state = status.state();
             let allowed_states: &[MiningState] =
