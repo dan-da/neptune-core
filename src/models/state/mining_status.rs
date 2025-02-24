@@ -63,7 +63,7 @@ impl Display for MiningEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter)]
 #[repr(u8)]
 pub enum MiningState {
     // ---- happy path ----
@@ -78,6 +78,29 @@ pub enum MiningState {
     Paused = 7, // Rpc, SyncBlocks, NeedConnection
     Disabled = 8,
     Shutdown = 9,
+}
+
+impl MiningState {
+    fn name(&self) -> &str {
+        match *self {
+            Self::Disabled => "disabled",
+            Self::Init => "initializing",
+            Self::Paused => "paused",
+            Self::AwaitBlockProposal => "await block proposal",
+            Self::AwaitBlock => "await block",
+            Self::Composing => "composing",
+            Self::Guessing => "guessing",
+            Self::NewTipBlock => "new tip block",
+            Self::ComposeError => "composer error",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
+impl Display for MiningState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
 }
 
 #[rustfmt::skip]
@@ -217,11 +240,7 @@ impl MiningStateMachine {
             .find(|(prev, _)| **prev == old_state)
             .map(|(_, next)| next)
         {
-            let new_status =
-                MiningStatus::try_from(*state).map_err(|_| InvalidStateTransition {
-                    old_state,
-                    new_state: *state,
-                })?;
+            let new_status = MiningStatus::from(*state);
             self.advance_to(new_status)?;
 
             // take role(s) into account (composer, guesser)
@@ -292,7 +311,7 @@ impl MiningStateMachine {
         );
 
         // special handling for pause.
-        if let MiningStatus::Paused(ref reasons) = new_status {
+        if let MiningStatus::Paused(_, ref reasons) = new_status {
             assert!(!reasons.is_empty());
             for reason in reasons {
                 self.pause(reason)
@@ -328,12 +347,15 @@ impl MiningStateMachine {
 
     fn merge_set_paused_status(&mut self, new_status: MiningStatus) {
         let merged_status = match (self.status.clone(), new_status) {
-            (MiningStatus::Paused(mut old_reasons), MiningStatus::Paused(mut new_reasons)) => {
-                // todo: ensure unique
+            (
+                MiningStatus::Paused(old_time, mut old_reasons),
+                MiningStatus::Paused(_, mut new_reasons),
+            ) => {
                 old_reasons.append(&mut new_reasons);
-                MiningStatus::Paused(old_reasons)
+                // ensure unique
+                MiningStatus::Paused(old_time, old_reasons.into_iter().unique().collect())
             }
-            (_, MiningStatus::Paused(reasons)) => MiningStatus::Paused(reasons),
+            (_, MiningStatus::Paused(t, reasons)) => MiningStatus::Paused(t, reasons),
             _ => panic!("attempted to merge status other than Paused"),
         };
         self.set_new_status(merged_status);
@@ -341,9 +363,9 @@ impl MiningStateMachine {
 
     fn pause(&mut self, reason: &MiningPausedReason) {
         match reason {
-            MiningPausedReason::Rpc(_) => self.pause_by_rpc(),
-            MiningPausedReason::SyncBlocks(_) => self.pause_while_syncing(),
-            MiningPausedReason::NeedConnection(_) => self.pause_need_connection(),
+            MiningPausedReason::Rpc => self.pause_by_rpc(),
+            MiningPausedReason::SyncBlocks => self.pause_while_syncing(),
+            MiningPausedReason::NeedConnection => self.pause_need_connection(),
         };
     }
 
@@ -365,7 +387,7 @@ impl MiningStateMachine {
     }
 
     fn pause_need_connection(&mut self) {
-        let reason = MiningPausedReason::need_connection();
+        let reason = MiningPausedReason::NeedConnection;
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
@@ -382,7 +404,7 @@ impl MiningStateMachine {
     }
 
     fn pause_by_rpc(&mut self) {
-        let reason = MiningPausedReason::rpc();
+        let reason = MiningPausedReason::Rpc;
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
@@ -416,7 +438,7 @@ impl MiningStateMachine {
     }
 
     fn pause_while_syncing(&mut self) {
-        let reason = MiningPausedReason::sync_blocks();
+        let reason = MiningPausedReason::SyncBlocks;
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
@@ -501,44 +523,24 @@ impl MiningStateMachine {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, strum::EnumIter)]
 pub enum MiningPausedReason {
     /// paused by rpc. (user)
-    Rpc(SystemTime),
+    Rpc,
 
     /// syncing blocks
-    SyncBlocks(SystemTime),
+    SyncBlocks,
 
     /// need peer connections
-    NeedConnection(SystemTime),
+    NeedConnection,
 }
 
 impl MiningPausedReason {
-    pub(crate) fn rpc() -> Self {
-        Self::Rpc(SystemTime::now())
-    }
-
-    pub(crate) fn sync_blocks() -> Self {
-        Self::SyncBlocks(SystemTime::now())
-    }
-
-    pub(crate) fn need_connection() -> Self {
-        Self::NeedConnection(SystemTime::now())
-    }
-
-    pub fn since(&self) -> SystemTime {
-        match *self {
-            Self::Rpc(i) => i,
-            Self::SyncBlocks(i) => i,
-            Self::NeedConnection(i) => i,
-        }
-    }
-
     pub fn description(&self) -> &str {
         match self {
-            Self::Rpc(_) => "user",
-            Self::SyncBlocks(_) => "syncing blocks",
-            Self::NeedConnection(_) => "await connections",
+            Self::Rpc => "user",
+            Self::SyncBlocks => "syncing blocks",
+            Self::NeedConnection => "await connections",
         }
     }
 }
@@ -546,16 +548,9 @@ impl MiningPausedReason {
 impl Display for MiningPausedReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let desc = self.description();
-        let elapsed = self.since().elapsed();
-        write!(f, "{} for {}", desc, human_duration_secs(&elapsed))
+        write!(f, "{}", desc)
     }
 }
-
-// impl Display for MiningPausedReasons {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(f, "{}", self.join(", "))
-//     }
-// }
 
 /// normal operation state transitions:
 ///
@@ -576,7 +571,7 @@ impl Display for MiningPausedReason {
 pub enum MiningStatus {
     Disabled(SystemTime),
     Init(SystemTime),
-    Paused(Vec<MiningPausedReason>), // Rpc, SyncBlocks, NeedConnection
+    Paused(SystemTime, Vec<MiningPausedReason>), // Rpc, SyncBlocks, NeedConnection
     AwaitBlockProposal(SystemTime),
     AwaitBlock(SystemTime),
     Composing(SystemTime),
@@ -586,16 +581,14 @@ pub enum MiningStatus {
     Shutdown(SystemTime),
 }
 
-impl TryFrom<MiningState> for MiningStatus {
-    type Error = anyhow::Error; // todo: make a real error
-
+impl From<MiningState> for MiningStatus {
     /// note that:
     ///
     ///   1. MiningStatus::Guessing will not have any work info.
     ///      It should only be used for unit-tests
-    ///   2. MiningStatus::Paused cannot be generated.
-    fn try_from(state: MiningState) -> anyhow::Result<Self> {
-        Ok(match state {
+    ///   2. MiningStatus::Paused will use MiningPausedReason::Rpc
+    fn from(state: MiningState) -> Self {
+        match state {
             MiningState::Disabled => MiningStatus::disabled(),
             MiningState::Init => MiningStatus::init(),
             MiningState::AwaitBlockProposal => MiningStatus::await_block_proposal(),
@@ -605,10 +598,8 @@ impl TryFrom<MiningState> for MiningStatus {
             MiningState::NewTipBlock => MiningStatus::new_tip_block(),
             MiningState::ComposeError => MiningStatus::compose_error(),
             MiningState::Shutdown => MiningStatus::shutdown(),
-            MiningState::Paused => {
-                anyhow::bail!("cannot instantiate MiningStatus from {:?}", state)
-            }
-        })
+            MiningState::Paused => MiningStatus::paused(MiningPausedReason::Rpc),
+        }
     }
 }
 
@@ -622,7 +613,7 @@ impl MiningStatus {
     }
 
     pub fn paused(reason: MiningPausedReason) -> Self {
-        Self::Paused(vec![reason])
+        Self::Paused(SystemTime::now(), vec![reason])
     }
 
     pub fn await_block_proposal() -> Self {
@@ -697,7 +688,7 @@ impl MiningStatus {
         match *self {
             Self::Disabled(_) => MiningState::Disabled,
             Self::Init(_) => MiningState::Init,
-            Self::Paused(_) => MiningState::Paused,
+            Self::Paused(..) => MiningState::Paused,
             Self::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
             Self::AwaitBlock(_) => MiningState::AwaitBlock,
             Self::Composing(_) => MiningState::Composing,
@@ -708,26 +699,15 @@ impl MiningStatus {
         }
     }
 
-    pub(crate) fn name(&self) -> &str {
-        match *self {
-            Self::Disabled(_) => "disabled",
-            Self::Init(_) => "initializing",
-            Self::Paused(_) => "paused",
-            Self::AwaitBlockProposal(_) => "await block proposal",
-            Self::AwaitBlock(_) => "await block",
-            Self::Composing(_) => "composing",
-            Self::Guessing(..) => "guessing",
-            Self::NewTipBlock(_) => "new tip block",
-            Self::ComposeError(_) => "composer error",
-            Self::Shutdown(_) => "shutdown",
-        }
+    pub(crate) fn name(&self) -> String {
+        self.state().name().to_owned()
     }
 
     pub fn since(&self) -> SystemTime {
         match *self {
             Self::Disabled(t) => t,
             Self::Init(t) => t,
-            Self::Paused(ref reasons) => reasons.iter().map(|r| r.since()).min().unwrap(),
+            Self::Paused(t, _) => t,
             Self::AwaitBlockProposal(t) => t,
             Self::AwaitBlock(t) => t,
             Self::Composing(t) => t,
@@ -757,10 +737,10 @@ impl Display for MiningStatus {
 
         let work_type_and_duration = match self {
             MiningStatus::Disabled(_) => self.name().to_string(),
-            MiningStatus::Paused(reasons) => {
+            MiningStatus::Paused(t, reasons) => {
                 format!(
                     "paused for {}  ({})",
-                    human_duration_secs(&self.since().elapsed()),
+                    human_duration_secs(&t.elapsed()),
                     reasons.iter().map(|r| r.description()).join(", ")
                 )
             }
@@ -804,11 +784,11 @@ mod state_machine_tests {
         MiningEvent::PauseRpc,
         MiningEvent::PauseSyncBlock,
     ];
-    // const UNPAUSE_EVENTS: &[MiningEvent] = &[
-    //     MiningEvent::UnPauseNeedConnection,
-    //     MiningEvent::UnPauseRpc,
-    //     MiningEvent::UnPauseSyncBlock,
-    // ];
+    const UNPAUSE_EVENTS: &[MiningEvent] = &[
+        MiningEvent::UnPauseNeedConnection,
+        MiningEvent::UnPauseRpc,
+        MiningEvent::UnPauseSyncBlock,
+    ];
 
     mod states {
         use super::*;
@@ -840,22 +820,210 @@ mod state_machine_tests {
             Ok(())
         }
 
+        #[test]
+        fn can_pause_during_every_state() -> anyhow::Result<()> {
+            // test that all pause events can occur during every state
+            for pause_event in PAUSE_EVENTS {
+                worker::can_pause_during_every_state(*pause_event)?;
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn pause_changes_only_certain_states() -> anyhow::Result<()> {
+            // test that all pause events only change correct states
+            for pause_event in PAUSE_EVENTS {
+                worker::pause_changes_only_certain_states(*pause_event)?;
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn unpause_changes_only_certain_states() -> anyhow::Result<()> {
+            // test that all pause events only change correct states
+            for (pause_event, unpause_event) in worker::all_pause_and_unpause_events().into_iter() {
+                worker::unpause_changes_only_certain_states(pause_event, unpause_event)?;
+            }
+            Ok(())
+        }
+
+        #[test]
+        fn mixed_pause_unpause_types() -> anyhow::Result<()> {
+            worker::mixed_pause_unpause_types()
+        }
+
         mod worker {
+            use rand::rng;
+            use rand::seq::SliceRandom;
+            use strum::IntoEnumIterator;
+
             use super::*;
 
-            pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStatus> {
-                vec![
-                    MiningStatus::init(),
-                    MiningStatus::await_block_proposal(),
-                    MiningStatus::composing(),
-                    MiningStatus::await_block(),
-                    MiningStatus::guessing(None),
-                    MiningStatus::new_tip_block(),
-                    MiningStatus::init(),
-                ]
+            pub fn all_pause_and_unpause_events() -> Vec<(MiningEvent, MiningEvent)> {
+                PAUSE_EVENTS
+                    .into_iter()
+                    .copied()
+                    .zip(UNPAUSE_EVENTS.into_iter().copied())
+                    .collect()
             }
 
-            pub(super) fn can_pause_all_along_happy_path(pause_event: MiningEvent) -> anyhow::Result<()> {
+            pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStatus> {
+                HAPPY_PATH_STATE_TRANSITIONS
+                    .iter()
+                    .cycle()
+                    .take(HAPPY_PATH_STATE_TRANSITIONS.len() + 1)
+                    .map(|s| MiningStatus::try_from(*s).unwrap())
+                    .collect_vec()
+            }
+
+            pub(super) fn can_pause_during_every_state(
+                pause_event: MiningEvent,
+            ) -> anyhow::Result<()> {
+                // for each state, we make a new state-machine and force it
+                // to the target state, then pause it.
+                let mut machine = MiningStateMachine::new(true, true);
+                for status in all_status() {
+                    machine.status = status;
+                    machine.handle_event(pause_event)?;
+                }
+                Ok(())
+            }
+
+            pub(super) fn pause_changes_only_certain_states(
+                pause_event: MiningEvent,
+            ) -> anyhow::Result<()> {
+                // for each state, we make a new state-machine and force it
+                // to the target state, then pause it.
+                let mut machine = MiningStateMachine::new(true, true);
+                for status in all_status() {
+                    machine.status = status.clone();
+                    machine.handle_event(pause_event)?;
+
+                    let ss = status.state();
+                    let ms = machine.status.state();
+                    let ps = MiningState::Paused;
+
+                    // certain states should not switch to Paused state.
+                    // (although the machine updates the appropiate pause
+                    // flag internally)
+
+                    match ss {
+                        MiningState::Init => assert_eq!(ms, ps),
+                        MiningState::AwaitBlockProposal => assert_eq!(ms, ps),
+                        MiningState::Composing => assert_eq!(ms, ps),
+                        MiningState::AwaitBlock => assert_eq!(ms, ps),
+                        MiningState::Guessing => assert_eq!(ms, ps),
+                        MiningState::NewTipBlock => assert_eq!(ms, ps),
+                        MiningState::ComposeError => assert_eq!(ms, ss),
+                        MiningState::Paused => assert_eq!(ms, ps),
+                        MiningState::Disabled => assert_eq!(ms, ss),
+                        MiningState::Shutdown => assert_eq!(ms, ss),
+                    }
+                }
+                Ok(())
+            }
+
+            pub(super) fn unpause_changes_only_certain_states(
+                pause_event: MiningEvent,
+                unpause_event: MiningEvent,
+            ) -> anyhow::Result<()> {
+                // for each state, we make a new state-machine and force it
+                // to the target state, then pause and unpause it.
+                let mut machine = MiningStateMachine::new(true, true);
+                for status in all_status() {
+                    machine.status = status.clone();
+                    machine.handle_event(pause_event)?;
+                    machine.handle_event(unpause_event)?;
+
+                    let ss = status.state();
+                    let ms = machine.status.state();
+                    let is = MiningState::Init;
+
+                    // certain states should not switch state after UnPause
+                    // (although the machine updates the appropiate pause
+                    // flag internally)
+
+                    match ss {
+                        MiningState::Init => assert_eq!(ms, is),
+                        MiningState::AwaitBlockProposal => assert_eq!(ms, is),
+                        MiningState::Composing => assert_eq!(ms, is),
+                        MiningState::AwaitBlock => assert_eq!(ms, is),
+                        MiningState::Guessing => assert_eq!(ms, is),
+                        MiningState::NewTipBlock => assert_eq!(ms, is),
+                        MiningState::ComposeError => assert_eq!(ms, ss),
+                        MiningState::Paused => assert_eq!(ms, is),
+                        MiningState::Disabled => assert_eq!(ms, ss),
+                        MiningState::Shutdown => assert_eq!(ms, ss),
+                    }
+                }
+                Ok(())
+            }
+
+            pub(super) fn mixed_pause_unpause_types() -> anyhow::Result<()> {
+                // for each state, we make a new state-machine and force it
+                // to the target state, then pause and unpause it.
+                let mut machine = MiningStateMachine::new(true, true);
+
+                let mut paused_by_rpc = false;
+                let mut paused_while_syncing = false;
+                let mut paused_need_connection = false;
+
+                let mut status = all_status();
+                let mut events = all_pause_and_unpause_events()
+                    .into_iter()
+                    .flat_map(|(a, b)| [a, b])
+                    .collect_vec();
+
+                for _ in 0..50 {
+                    status.shuffle(&mut rng());
+                    events.shuffle(&mut rng());
+
+                    // force to this random status.  (not allowed by API)
+                    machine.status = status.iter().cloned().next().unwrap();
+
+                    for event in events.iter() {
+                        match *event {
+                            MiningEvent::PauseNeedConnection => paused_need_connection = true,
+                            MiningEvent::UnPauseNeedConnection => paused_need_connection = false,
+                            MiningEvent::PauseRpc => paused_by_rpc = true,
+                            MiningEvent::UnPauseRpc => paused_by_rpc = false,
+                            MiningEvent::PauseSyncBlock => paused_while_syncing = true,
+                            MiningEvent::UnPauseSyncBlock => paused_while_syncing = false,
+                            _ => {}
+                        }
+                        machine.handle_event(*event)?;
+                    }
+                }
+
+                // verify that machine pause flags match ours.
+                assert_eq!(paused_by_rpc, machine.paused_by_rpc);
+                assert_eq!(paused_while_syncing, machine.paused_while_syncing);
+                assert_eq!(paused_need_connection, machine.paused_need_connection);
+
+                let paused_count =
+                    paused_by_rpc as u8 + paused_while_syncing as u8 + paused_need_connection as u8;
+                assert_eq!(paused_count, machine.paused_count());
+
+                Ok(())
+            }
+
+            fn all_status() -> Vec<MiningStatus> {
+                let mut ms: Vec<_> = vec![];
+                for state in MiningState::iter() {
+                    if state == MiningState::Paused {
+                        for reason in MiningPausedReason::iter() {
+                            ms.push(MiningStatus::paused(reason))
+                        }
+                    } else {
+                        ms.push(MiningStatus::try_from(state).unwrap());
+                    }
+                }
+                ms
+            }
+
+            pub(super) fn can_pause_all_along_happy_path(
+                pause_event: MiningEvent,
+            ) -> anyhow::Result<()> {
                 // for each status in happy path, we make a new state-machine and advance it
                 // to the target state, then pause it.
                 for status in compose_and_guess_happy_path() {
