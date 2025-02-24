@@ -822,14 +822,10 @@ mod state_machine_tests {
                 machine.exec_states(worker::compose_and_guess_happy_path())?;
 
                 let mut machine = MiningStateMachine::new_strict(true, false);
-                assert!(machine
-                    .exec_states(worker::compose_and_guess_happy_path())
-                    .is_err());
+                machine.exec_states(worker::compose_and_guess_happy_path())?;
 
                 let mut machine = MiningStateMachine::new_strict(false, true);
-                assert!(machine
-                    .exec_states(worker::compose_and_guess_happy_path())
-                    .is_err());
+                machine.exec_states(worker::compose_and_guess_happy_path())?;
 
                 Ok(())
             }
