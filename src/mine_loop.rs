@@ -709,7 +709,7 @@ pub(crate) async fn mine(
             if machine.can_start_guessing() {
                 // AwaitBlock --> Guessing
                 machine
-                    .advance_to(MiningStatus::guessing(Some(maybe_proposal.unwrap().into())))
+                    .advance_with(MiningStatus::guessing(Some(maybe_proposal.unwrap().into())))
                     .unwrap();
             }
         } else if machine.can_start_composing() {
