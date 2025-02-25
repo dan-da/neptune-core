@@ -840,17 +840,17 @@ pub(crate) async fn mine(
                     MainToMiner::Continue => {
                         machine.handle_event(MiningEvent::Init).unwrap();
                     }
-                    MainToMiner::StopMining => {
-                        machine.handle_event(MiningEvent::PauseRpc).unwrap();
+                    MainToMiner::PauseByRpc => {
+                        machine.handle_event(MiningEvent::PauseByRpc).unwrap();
                     }
-                    MainToMiner::StartMining => {
-                        machine.handle_event(MiningEvent::UnPauseRpc).unwrap();
+                    MainToMiner::UnPauseByRpc => {
+                        machine.handle_event(MiningEvent::UnPauseByRpc).unwrap();
                     }
-                    MainToMiner::StartSyncing => {
-                        machine.handle_event(MiningEvent::PauseSyncBlock).unwrap();
+                    MainToMiner::PauseBySyncBlocks => {
+                        machine.handle_event(MiningEvent::PauseBySyncBlocks).unwrap();
                     }
-                    MainToMiner::StopSyncing => {
-                        machine.handle_event(MiningEvent::UnPauseSyncBlock).unwrap();
+                    MainToMiner::UnPauseBySyncBlocks => {
+                        machine.handle_event(MiningEvent::UnPauseBySyncBlocks).unwrap();
                     }
                 }
             }

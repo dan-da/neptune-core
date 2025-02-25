@@ -33,10 +33,11 @@ pub(crate) enum MainToMiner {
     /// proposal from the miner, and that miner can start a new task.
     Continue,
 
-    StopMining,
-    StartMining,
-    StartSyncing,
-    StopSyncing,
+    PauseByRpc,
+    UnPauseByRpc,
+
+    PauseBySyncBlocks,
+    UnPauseBySyncBlocks,
     // SetCoinbasePubkey,
 }
 
@@ -48,10 +49,10 @@ impl MainToMiner {
             MainToMiner::NewBlockProposal => "new block proposal",
             MainToMiner::WaitForContinue => "wait for continue",
             MainToMiner::Continue => "continue",
-            MainToMiner::StopMining => "stop mining",
-            MainToMiner::StartMining => "start mining",
-            MainToMiner::StartSyncing => "start syncing",
-            MainToMiner::StopSyncing => "stop syncing",
+            MainToMiner::PauseByRpc => "pause mining (rpc)",
+            MainToMiner::UnPauseByRpc => "unpause mining (rpc)",
+            MainToMiner::PauseBySyncBlocks => "pause mining (syncing blocks)",
+            MainToMiner::UnPauseBySyncBlocks => "unpause mining (synced blocks)",
         }
     }
 }

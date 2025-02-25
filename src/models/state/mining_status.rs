@@ -40,14 +40,14 @@ pub enum MiningEvent {
 
     Init,
 
-    PauseRpc,
-    UnPauseRpc,
+    PauseByRpc,
+    UnPauseByRpc,
 
-    PauseSyncBlock,
-    UnPauseSyncBlock,
+    PauseBySyncBlocks,
+    UnPauseBySyncBlocks,
 
-    PauseNeedConnection,
-    UnPauseNeedConnection,
+    PauseByNeedConnection,
+    UnPauseByNeedConnection,
 
     NewBlockProposal,
     NewTipBlock,
@@ -304,14 +304,14 @@ impl MiningStateMachine {
 
             MiningEvent::Init => self.advance_with(MiningStatus::init())?,
 
-            MiningEvent::PauseRpc => self.pause_by_rpc(),
-            MiningEvent::UnPauseRpc => self.unpause_by_rpc(),
+            MiningEvent::PauseByRpc => self.pause_by_rpc(),
+            MiningEvent::UnPauseByRpc => self.unpause_by_rpc(),
 
-            MiningEvent::PauseSyncBlock => self.pause_while_syncing(),
-            MiningEvent::UnPauseSyncBlock => self.unpause_while_syncing(),
+            MiningEvent::PauseBySyncBlocks => self.pause_by_sync_blocks(),
+            MiningEvent::UnPauseBySyncBlocks => self.unpause_by_sync_blocks(),
 
-            MiningEvent::PauseNeedConnection => self.pause_need_connection(),
-            MiningEvent::UnPauseNeedConnection => self.unpause_need_connection(),
+            MiningEvent::PauseByNeedConnection => self.pause_by_need_connection(),
+            MiningEvent::UnPauseByNeedConnection => self.unpause_by_need_connection(),
 
             MiningEvent::NewBlockProposal => self.advance_with(MiningStatus::await_block())?,
             MiningEvent::NewTipBlock => self.advance_with(MiningStatus::new_tip_block())?,
@@ -387,29 +387,29 @@ impl MiningStateMachine {
     fn pause(&mut self, reason: &MiningPausedReason) {
         match reason {
             MiningPausedReason::Rpc => self.pause_by_rpc(),
-            MiningPausedReason::SyncBlocks => self.pause_while_syncing(),
-            MiningPausedReason::NeedConnection => self.pause_need_connection(),
+            MiningPausedReason::SyncBlocks => self.pause_by_sync_blocks(),
+            MiningPausedReason::NeedConnection => self.pause_by_need_connection(),
         };
     }
 
     /// shortcut for:
     ///
     /// if need_connection {
-    ///   ::handle_event(MiningEvent::PauseNeedConnection)
+    ///   ::handle_event(MiningEvent::PauseByNeedConnection)
     /// } else {
-    ///   ::handle_event(MiningEvent::UnPauseNeedConnection)
+    ///   ::handle_event(MiningEvent::UnPauseByNeedConnection)
     /// }
     pub fn set_need_connection(&mut self, need_connection: bool) {
         if self.paused_need_connection != need_connection {
             if need_connection {
-                self.pause_need_connection()
+                self.pause_by_need_connection()
             } else {
-                self.unpause_need_connection()
+                self.unpause_by_need_connection()
             }
         }
     }
 
-    fn pause_need_connection(&mut self) {
+    fn pause_by_need_connection(&mut self) {
         let reason = MiningPausedReason::NeedConnection;
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
@@ -418,7 +418,7 @@ impl MiningStateMachine {
         self.paused_need_connection = true;
     }
 
-    fn unpause_need_connection(&mut self) {
+    fn unpause_by_need_connection(&mut self) {
         let new_status = MiningStatus::init();
         if self.allowed(&new_status) {
             self.set_new_status(new_status);
@@ -446,21 +446,21 @@ impl MiningStateMachine {
     /// shortcut for:
     ///
     /// if sync_blocks {
-    ///   ::handle_event(MiningEvent::PauseSyncBlocks)
+    ///   ::handle_event(MiningEvent::PauseBySyncBlocks)
     /// } else {
-    ///   ::handle_event(MiningEvent::UnPauseSyncBlocks)
+    ///   ::handle_event(MiningEvent::UnPauseBySyncBlocks)
     /// }
     pub fn set_syncing(&mut self, syncing: bool) {
         if self.paused_while_syncing != syncing {
             if syncing {
-                self.pause_while_syncing()
+                self.pause_by_sync_blocks()
             } else {
-                self.unpause_while_syncing()
+                self.unpause_by_sync_blocks()
             }
         }
     }
 
-    fn pause_while_syncing(&mut self) {
+    fn pause_by_sync_blocks(&mut self) {
         let reason = MiningPausedReason::SyncBlocks;
         let new_status = MiningStatus::paused(reason);
         if self.allowed(&new_status) {
@@ -469,7 +469,7 @@ impl MiningStateMachine {
         self.paused_while_syncing = true;
     }
 
-    fn unpause_while_syncing(&mut self) {
+    fn unpause_by_sync_blocks(&mut self) {
         let new_status = MiningStatus::init();
         if self.allowed(&new_status) {
             self.set_new_status(new_status);
@@ -799,14 +799,14 @@ mod state_machine_tests {
     use super::*;
 
     const PAUSE_EVENTS: &[MiningEvent] = &[
-        MiningEvent::PauseNeedConnection,
-        MiningEvent::PauseRpc,
-        MiningEvent::PauseSyncBlock,
+        MiningEvent::PauseByNeedConnection,
+        MiningEvent::PauseByRpc,
+        MiningEvent::PauseBySyncBlocks,
     ];
     const UNPAUSE_EVENTS: &[MiningEvent] = &[
-        MiningEvent::UnPauseNeedConnection,
-        MiningEvent::UnPauseRpc,
-        MiningEvent::UnPauseSyncBlock,
+        MiningEvent::UnPauseByNeedConnection,
+        MiningEvent::UnPauseByRpc,
+        MiningEvent::UnPauseBySyncBlocks,
     ];
 
     // for tests with strict-mode enabled.
@@ -1004,14 +1004,14 @@ mod state_machine_tests {
 
                         for event in events.iter() {
                             match *event {
-                                MiningEvent::PauseNeedConnection => paused_need_connection = true,
-                                MiningEvent::UnPauseNeedConnection => {
+                                MiningEvent::PauseByNeedConnection => paused_need_connection = true,
+                                MiningEvent::UnPauseByNeedConnection => {
                                     paused_need_connection = false
                                 }
-                                MiningEvent::PauseRpc => paused_by_rpc = true,
-                                MiningEvent::UnPauseRpc => paused_by_rpc = false,
-                                MiningEvent::PauseSyncBlock => paused_while_syncing = true,
-                                MiningEvent::UnPauseSyncBlock => paused_while_syncing = false,
+                                MiningEvent::PauseByRpc => paused_by_rpc = true,
+                                MiningEvent::UnPauseByRpc => paused_by_rpc = false,
+                                MiningEvent::PauseBySyncBlocks => paused_while_syncing = true,
+                                MiningEvent::UnPauseBySyncBlocks => paused_while_syncing = false,
                                 _ => {}
                             }
                             machine.handle_event(*event)?;
