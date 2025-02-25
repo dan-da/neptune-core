@@ -734,7 +734,7 @@ impl MainLoopHandler {
                     );
                     global_state_mut.net.sync_anchor =
                         Some(SyncAnchor::new(claimed_cumulative_pow, claimed_block_mmra));
-                    self.main_to_miner_tx.send(MainToMiner::StartSyncing);
+                    self.main_to_miner_tx.send(MainToMiner::PauseBySyncBlocks);
                 }
             }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
@@ -762,7 +762,7 @@ impl MainLoopHandler {
                         info!("Exiting sync mode");
                         global_state_mut.net.sync_anchor = None;
 
-                        self.main_to_miner_tx.send(MainToMiner::StopSyncing);
+                        self.main_to_miner_tx.send(MainToMiner::UnPauseBySyncBlocks);
                     }
                 }
             }
@@ -1138,7 +1138,7 @@ impl MainLoopHandler {
                 .net
                 .sync_anchor = None;
 
-            self.main_to_miner_tx.send(MainToMiner::StopSyncing);
+            self.main_to_miner_tx.send(MainToMiner::UnPauseBySyncBlocks);
 
             let peers_to_punish = main_loop_state
                 .sync_state
@@ -1685,12 +1685,12 @@ impl MainLoopHandler {
             RPCServerToMain::PauseMiner => {
                 info!("Received RPC request to stop miner");
 
-                self.main_to_miner_tx.send(MainToMiner::StopMining);
+                self.main_to_miner_tx.send(MainToMiner::PauseByRpc);
                 Ok(false)
             }
             RPCServerToMain::RestartMiner => {
                 info!("Received RPC request to start miner");
-                self.main_to_miner_tx.send(MainToMiner::StartMining);
+                self.main_to_miner_tx.send(MainToMiner::UnPauseByRpc);
                 Ok(false)
             }
             RPCServerToMain::Shutdown => {
