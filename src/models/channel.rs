@@ -206,6 +206,6 @@ pub(crate) struct ClaimUtxoData {
 pub(crate) enum RPCServerToMain {
     BroadcastTx(Box<Transaction>),
     Shutdown,
-    PauseMiner,
-    RestartMiner,
+    MinerPauseByRpc,
+    MinerUnPauseByRpc,
 }
