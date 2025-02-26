@@ -1682,14 +1682,14 @@ impl MainLoopHandler {
                 // do not shut down
                 Ok(false)
             }
-            RPCServerToMain::PauseMiner => {
-                info!("Received RPC request to stop miner");
+            RPCServerToMain::MinerPauseByRpc => {
+                info!("Received RPC request to pause miner");
 
                 self.main_to_miner_tx.send(MainToMiner::PauseByRpc);
                 Ok(false)
             }
-            RPCServerToMain::RestartMiner => {
-                info!("Received RPC request to start miner");
+            RPCServerToMain::MinerUnPauseByRpc => {
+                info!("Received RPC request to unpause miner");
                 self.main_to_miner_tx.send(MainToMiner::UnPauseByRpc);
                 Ok(false)
             }

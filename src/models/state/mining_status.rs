@@ -278,7 +278,14 @@ impl MiningStateMachine {
 
             Ok(())
         } else {
-            unreachable!();
+            // advance only applies to the happy path.
+            // so we ignore this request.
+            tracing::debug!(
+                "advance request ignored because present state '{}' is not on the mining happy path",
+                old_state
+            );
+            // todo: return an error if strict mode enabled.
+            Ok(())
         }
     }
 
