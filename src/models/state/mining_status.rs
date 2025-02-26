@@ -144,7 +144,6 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
 
     // MiningState::Guessing
     &[
-        MiningState::AwaitBlock,   // if a new block-proposal arrives
         MiningState::NewTipBlock,
         MiningState::Paused,
         MiningState::Shutdown,
