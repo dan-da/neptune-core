@@ -1,6 +1,7 @@
 pub(crate) mod composer_parameters;
 
 use std::cmp::max;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::bail;
@@ -640,7 +641,7 @@ pub(crate) async fn mine(
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
-    let mut maybe_proposal = BlockProposal::none();
+    // let mut maybe_proposal = BlockProposal::none();
     loop {
         // Ensure restart timer doesn't resolve again, without guesser
         // task actually being spawned.
@@ -648,17 +649,17 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let (gs_mining_status, proposal_block_hash) = {
+        let (gs_mining_status, maybe_proposal) = {
             // todo: remove this read-lock acquisition which slows us down and can
             // potentially interfere with guessing if write-lock is held somewhere.
             // instead this information could be sent to us via channel msgs.
-            let (need_connection, syncing, mining_status, proposal_block_hash) = global_state_lock
+            let (need_connection, syncing, mining_status, maybe_proposal) = global_state_lock
                 .lock(|s| {
                     (
                         s.net.peer_map.is_empty(),
                         s.net.sync_anchor.is_some(),
                         s.mining_status.clone(),
-                        s.block_proposal.block_hash(), // option
+                        s.block_proposal.clone(), // Arc
                     )
                 })
                 .await;
@@ -673,7 +674,7 @@ pub(crate) async fn mine(
                 continue;
             }
 
-            (mining_status, proposal_block_hash)
+            (mining_status, maybe_proposal)
         };
 
         // if mining_status::init, then we need to get into either
@@ -681,28 +682,13 @@ pub(crate) async fn mine(
         if machine.mining_status().is_init() {
             machine.advance().unwrap(); // Init --> AwaitBlockProposal
 
-            if proposal_block_hash.is_some() {
-                machine.handle_event(MiningEvent::NewBlockProposal)?;
+            if maybe_proposal.is_some() {
+                machine.handle_event(MiningEvent::NewBlockProposal(maybe_proposal.clone()))?;
             }
         }
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
-
-        // optimization: only fetch proposal from global state if block hash has changed.
-        // this avoids a read-lock and expensive clone for most common path.
-        let fetch_new_proposal = match (maybe_proposal.block_hash(), proposal_block_hash) {
-            (Some(current), Some(latest)) => current != latest,
-            (None, Some(_)) => true,
-            (Some(_), None) => {
-                maybe_proposal = BlockProposal::none();
-                false
-            }
-            (None, None) => false,
-        };
-        if fetch_new_proposal {
-            maybe_proposal = global_state_lock.lock_guard().await.block_proposal.clone();
-        }
 
         if maybe_proposal.is_some() {
             if machine.can_start_guessing() {
@@ -717,54 +703,55 @@ pub(crate) async fn mine(
         }
 
         // update global-state status if different.
+        // todo: send a message instead of acquiring lock.
         if gs_mining_status != *machine.mining_status() {
             global_state_lock
                 .set_mining_status(machine.mining_status().to_owned())
                 .await;
         }
 
-        let guesser_task: Option<JoinHandle<()>> = if machine.can_guess() {
+        let guesser_task: Option<JoinHandle<()>> =
+            if machine.can_guess() && maybe_proposal.is_some() {
+                // safe because above `is_some`
+                let proposal = maybe_proposal.unwrap();
 
-            // safe because above `is_some`
-            let proposal = maybe_proposal.unwrap();
+                let (guesser_key, latest_block_header) = {
+                    let state = global_state_lock.lock_guard().await;
+                    let key = state
+                        .wallet_state
+                        .wallet_secret
+                        .guesser_spending_key(proposal.header().prev_block_digest);
+                    let tip_header = state.chain.light_state().header().to_owned();
+                    (key, tip_header)
+                };
 
-            let (guesser_key, latest_block_header) = {
-                let state = global_state_lock.lock_guard().await;
-                let key = state
-                    .wallet_state
-                    .wallet_secret
-                    .guesser_spending_key(proposal.header().prev_block_digest);
-                let tip_header = state.chain.light_state().header().to_owned();
-                (key, tip_header)
+                let guesser_task = guess_nonce(
+                    proposal.to_owned(),
+                    latest_block_header,
+                    guesser_tx,
+                    guesser_key,
+                    GuessingConfiguration {
+                        sleepy_guessing: cli.sleepy_guessing,
+                        num_guesser_threads: cli.guesser_threads,
+                    },
+                    None, // use default TARGET_BLOCK_INTERVAL
+                );
+
+                // Only run for N seconds to allow for updating of block's timestamp
+                // and difficulty.
+                guess_restart_timer
+                    .as_mut()
+                    .reset(tokio::time::Instant::now() + guess_restart_interval);
+
+                Some(
+                    tokio::task::Builder::new()
+                        .name("guesser")
+                        .spawn(guesser_task)
+                        .expect("Failed to spawn guesser task"),
+                )
+            } else {
+                None
             };
-
-            let guesser_task = guess_nonce(
-                proposal.to_owned(),
-                latest_block_header,
-                guesser_tx,
-                guesser_key,
-                GuessingConfiguration {
-                    sleepy_guessing: cli.sleepy_guessing,
-                    num_guesser_threads: cli.guesser_threads,
-                },
-                None, // use default TARGET_BLOCK_INTERVAL
-            );
-
-            // Only run for N seconds to allow for updating of block's timestamp
-            // and difficulty.
-            guess_restart_timer
-                .as_mut()
-                .reset(tokio::time::Instant::now() + guess_restart_interval);
-
-            Some(
-                tokio::task::Builder::new()
-                    .name("guesser")
-                    .spawn(guesser_task)
-                    .expect("Failed to spawn guesser task"),
-            )
-        } else {
-            None
-        };
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
@@ -830,8 +817,8 @@ pub(crate) async fn mine(
 
                         info!("Miner task received notification about new block");
                     }
-                    MainToMiner::NewBlockProposal => {
-                        machine.handle_event(MiningEvent::NewBlockProposal).unwrap();
+                    MainToMiner::NewBlockProposal(proposal) => {
+                        machine.handle_event(MiningEvent::NewBlockProposal(proposal)).unwrap();
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
@@ -891,9 +878,9 @@ pub(crate) async fn mine(
                             machine.advance().unwrap(); // Guessing    --> NewTipBlock
                             machine.advance().unwrap(); // NewTipBlock --> Init
 
-                            // temp hack: unset block proposal.
-                            // todo: new block proposals should be sent to miner over channel
-                            global_state_lock.lock_guard_mut().await.block_proposal = BlockProposal::none();
+                            // hack: unset block proposal in global state.
+                            // todo: new block proposals should always be sent to miner over channel
+                            global_state_lock.lock_guard_mut().await.block_proposal = Arc::new(BlockProposal::none());
 
                             info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;

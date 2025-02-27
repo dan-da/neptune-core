@@ -8,6 +8,7 @@ use serde::Serialize;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
+use crate::models::state::BlockProposal;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GuessingWorkInfo {
@@ -34,8 +35,8 @@ impl GuessingWorkInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum MiningEvent {
+#[derive(Debug, Clone)]
+pub(crate) enum MiningEvent {
     Advance,
 
     Init,
@@ -49,7 +50,7 @@ pub enum MiningEvent {
     PauseByNeedConnection,
     UnPauseByNeedConnection,
 
-    NewBlockProposal,
+    NewBlockProposal(std::sync::Arc<BlockProposal>),
     NewTipBlock,
 
     ComposeError,
@@ -298,7 +299,10 @@ impl MiningStateMachine {
     /// `::set_syncing()` can be used to pause/unpause because of SyncBlocks
     ///
     /// `::set_need_connection()` can be used to pause/unpause because of connection status.
-    pub fn handle_event(&mut self, event: MiningEvent) -> Result<(), InvalidStateTransition> {
+    pub(crate) fn handle_event(
+        &mut self,
+        event: MiningEvent,
+    ) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "handle_event: old_state: {}, event: {}",
             self.status.name(),
@@ -319,7 +323,21 @@ impl MiningStateMachine {
             MiningEvent::PauseByNeedConnection => self.pause_by_need_connection(),
             MiningEvent::UnPauseByNeedConnection => self.unpause_by_need_connection(),
 
-            MiningEvent::NewBlockProposal => self.advance_with(MiningStatus::await_block())?,
+            // if new-block-proposal arrives while we are guessing, then we need
+            // to update the existing mining status, rather than advance to next
+            // state.  (without this special case, if we just advance, it still
+            // works, but guessing time resets to time of latest block proposal,
+            // instead of when guessing actually started.)
+            MiningEvent::NewBlockProposal(proposal)
+                if proposal.is_some() && self.status.state() == MiningState::Guessing =>
+            {
+                self.advance_with(MiningStatus::Guessing(
+                    self.status.since(),
+                    Some(proposal.unwrap().into()),
+                ))?;
+            }
+            MiningEvent::NewBlockProposal(_) => self.advance_with(MiningStatus::await_block())?,
+
             MiningEvent::NewTipBlock => self.advance_with(MiningStatus::new_tip_block())?,
 
             MiningEvent::ComposeError => self.advance_with(MiningStatus::compose_error())?,
