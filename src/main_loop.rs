@@ -2,6 +2,7 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -570,18 +571,23 @@ impl MainLoopHandler {
                     );
                 }
 
+                // Use block proposal and add expected UTXOs from this
+                // proposal.
+                let proposal = Arc::new(BlockProposal::own_proposal(
+                    block.clone(),
+                    expected_utxos.clone(),
+                ));
+
                 {
-                    // Use block proposal and add expected UTXOs from this
-                    // proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
-                    state.block_proposal =
-                        BlockProposal::own_proposal(block.clone(), expected_utxos.clone());
+                    state.block_proposal = proposal.clone();
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
 
                 // Indicate to miner that block proposal was successfully
                 // received by main-loop.
-                self.main_to_miner_tx.send(MainToMiner::Continue);
+                self.main_to_miner_tx
+                    .send(MainToMiner::NewBlockProposal(proposal));
             }
             MinerToMain::Shutdown(exit_code) => {
                 return Ok(Some(exit_code));
@@ -827,7 +833,7 @@ impl MainLoopHandler {
                 // validity, since that was done in peer loop.
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
-                {
+                let (proposal, proposal_notification) = {
                     info!("Received new favorable block proposal for mining operation.");
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
@@ -839,15 +845,20 @@ impl MainLoopHandler {
                         return Ok(());
                     }
 
-                    global_state_mut.block_proposal =
-                        BlockProposal::foreign_proposal(*block.clone());
-                }
+                    let proposal_notification =
+                        MainToPeerTask::BlockProposalNotification((&*block).into());
+
+                    let proposal = std::sync::Arc::new(BlockProposal::foreign_proposal(*block));
+                    global_state_mut.block_proposal = proposal.clone();
+
+                    (proposal, proposal_notification)
+                };
 
                 // Notify all peers of the block proposal we just accepted
-                self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::BlockProposalNotification((&*block).into()))?;
+                self.main_to_peer_broadcast_tx.send(proposal_notification)?;
 
-                self.main_to_miner_tx.send(MainToMiner::NewBlockProposal);
+                self.main_to_miner_tx
+                    .send(MainToMiner::NewBlockProposal(proposal));
             }
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
                 let global_state = self.global_state_lock.lock_guard().await;
