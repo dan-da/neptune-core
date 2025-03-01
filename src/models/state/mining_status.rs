@@ -871,7 +871,7 @@ mod state_machine_tests {
             fn can_pause_all_along_happy_path() -> anyhow::Result<()> {
                 // test that all pause events can occur along happy path.
                 for pause_event in PAUSE_EVENTS {
-                    worker::can_pause_all_along_happy_path(*pause_event)?;
+                    worker::can_pause_all_along_happy_path(pause_event.to_owned())?;
                 }
                 Ok(())
             }
@@ -880,7 +880,7 @@ mod state_machine_tests {
             fn can_pause_during_every_state() -> anyhow::Result<()> {
                 // test that all pause events can occur during every state
                 for pause_event in PAUSE_EVENTS {
-                    worker::can_pause_during_every_state(*pause_event)?;
+                    worker::can_pause_during_every_state(pause_event.to_owned())?;
                 }
                 Ok(())
             }
@@ -889,7 +889,7 @@ mod state_machine_tests {
             fn pause_changes_only_certain_states() -> anyhow::Result<()> {
                 // test that all pause events only change correct states
                 for pause_event in PAUSE_EVENTS {
-                    worker::pause_changes_only_certain_states(*pause_event)?;
+                    worker::pause_changes_only_certain_states(pause_event.to_owned())?;
                 }
                 Ok(())
             }
@@ -920,8 +920,8 @@ mod state_machine_tests {
                 pub fn all_pause_and_unpause_events() -> Vec<(MiningEvent, MiningEvent)> {
                     PAUSE_EVENTS
                         .into_iter()
-                        .copied()
-                        .zip(UNPAUSE_EVENTS.into_iter().copied())
+                        .cloned()
+                        .zip(UNPAUSE_EVENTS.into_iter().cloned())
                         .collect()
                 }
 
@@ -942,7 +942,7 @@ mod state_machine_tests {
                     let mut machine = MiningStateMachine::new_strict(true, true);
                     for status in all_status() {
                         machine.status = status;
-                        machine.handle_event(pause_event)?;
+                        machine.handle_event(pause_event.clone())?;
                     }
                     Ok(())
                 }
@@ -955,7 +955,7 @@ mod state_machine_tests {
                     let mut machine = MiningStateMachine::new_strict(true, true);
                     for status in all_status() {
                         machine.status = status.clone();
-                        machine.handle_event(pause_event)?;
+                        machine.handle_event(pause_event.clone())?;
 
                         let ss = status.state();
                         let ms = machine.status.state();
@@ -974,6 +974,7 @@ mod state_machine_tests {
                             MiningState::NewTipBlock => assert_eq!(ms, ps),
                             MiningState::ComposeError => assert_eq!(ms, ss),
                             MiningState::Paused => assert_eq!(ms, ps),
+                            MiningState::UnPaused => assert_eq!(ms, ss),
                             MiningState::Disabled => assert_eq!(ms, ss),
                             MiningState::Shutdown => assert_eq!(ms, ss),
                         }
@@ -990,8 +991,8 @@ mod state_machine_tests {
                     let mut machine = MiningStateMachine::new_strict(true, true);
                     for status in all_status() {
                         machine.status = status.clone();
-                        machine.handle_event(pause_event)?;
-                        machine.handle_event(unpause_event)?;
+                        machine.handle_event(pause_event.clone())?;
+                        machine.handle_event(unpause_event.clone())?;
 
                         let ss = status.state();
                         let ms = machine.status.state();
@@ -1010,6 +1011,7 @@ mod state_machine_tests {
                             MiningState::NewTipBlock => assert_eq!(ms, is),
                             MiningState::ComposeError => assert_eq!(ms, ss),
                             MiningState::Paused => assert_eq!(ms, is),
+                            MiningState::UnPaused => assert_eq!(ms, is),
                             MiningState::Disabled => assert_eq!(ms, ss),
                             MiningState::Shutdown => assert_eq!(ms, ss),
                         }
@@ -1051,7 +1053,7 @@ mod state_machine_tests {
                                 MiningEvent::UnPauseBySyncBlocks => paused_while_syncing = false,
                                 _ => {}
                             }
-                            machine.handle_event(*event)?;
+                            machine.handle_event(event.clone())?;
                         }
                     }
 
@@ -1090,7 +1092,7 @@ mod state_machine_tests {
                     for status in compose_and_guess_happy_path() {
                         let mut machine = MiningStateMachine::new_strict(true, true);
                         advance_init_to_status(&mut machine, status.state())?;
-                        machine.handle_event(pause_event)?;
+                        machine.handle_event(pause_event.clone())?;
                     }
                     Ok(())
                 }
