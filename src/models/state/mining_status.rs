@@ -76,9 +76,10 @@ pub enum MiningState {
     NewTipBlock = 5,
     // ---- end happy path ----
     ComposeError = 6,
-    Paused = 7, // Rpc, SyncBlocks, NeedConnection
-    Disabled = 8,
-    Shutdown = 9,
+    Paused = 7,   // Rpc, SyncBlocks, NeedConnection
+    UnPaused = 8, // transitional state.
+    Disabled = 9,
+    Shutdown = 10,
 }
 
 impl MiningState {
@@ -87,6 +88,7 @@ impl MiningState {
             Self::Disabled => "disabled",
             Self::Init => "initializing",
             Self::Paused => "paused",
+            Self::UnPaused => "unpaused",
             Self::AwaitBlockProposal => "await block proposal",
             Self::AwaitBlock => "await block",
             Self::Composing => "composing",
@@ -105,7 +107,7 @@ impl Display for MiningState {
 }
 
 #[rustfmt::skip]
-const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
+const MINING_STATE_TRANSITIONS: [&[MiningState]; 11] = [
 
     // ----- start happy path -----
 
@@ -165,6 +167,12 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 10] = [
     ],
 
     // MiningState::Paused
+    &[
+        MiningState::UnPaused,
+        MiningState::Shutdown
+    ],
+
+    // MiningState::UnPaused
     &[
         MiningState::Init,
         MiningState::Shutdown
@@ -443,10 +451,9 @@ impl MiningStateMachine {
     }
 
     fn unpause_by_need_connection(&mut self) {
-        let new_status = MiningStatus::init();
-        if self.allowed(&new_status) {
-            self.set_new_status(new_status);
-        }
+        let _ = self.advance_with(MiningStatus::unpaused());
+        let _ = self.advance_with(MiningStatus::init());
+
         self.paused_need_connection = false;
     }
 
@@ -460,10 +467,9 @@ impl MiningStateMachine {
     }
 
     fn unpause_by_rpc(&mut self) {
-        let new_status = MiningStatus::init();
-        if self.allowed(&new_status) {
-            self.set_new_status(new_status);
-        }
+        let _ = self.advance_with(MiningStatus::unpaused());
+        let _ = self.advance_with(MiningStatus::init());
+
         self.paused_by_rpc = false;
     }
 
@@ -494,10 +500,9 @@ impl MiningStateMachine {
     }
 
     fn unpause_by_sync_blocks(&mut self) {
-        let new_status = MiningStatus::init();
-        if self.allowed(&new_status) {
-            self.set_new_status(new_status);
-        }
+        let _ = self.advance_with(MiningStatus::unpaused());
+        let _ = self.advance_with(MiningStatus::init());
+
         self.paused_while_syncing = false;
     }
 
@@ -615,6 +620,7 @@ pub enum MiningStatus {
     Disabled(SystemTime),
     Init(SystemTime),
     Paused(SystemTime, Vec<MiningPausedReason>), // Rpc, SyncBlocks, NeedConnection
+    UnPaused(SystemTime),
     AwaitBlockProposal(SystemTime),
     AwaitBlock(SystemTime),
     Composing(SystemTime),
@@ -642,6 +648,7 @@ impl From<MiningState> for MiningStatus {
             MiningState::ComposeError => MiningStatus::compose_error(),
             MiningState::Shutdown => MiningStatus::shutdown(),
             MiningState::Paused => MiningStatus::paused(MiningPausedReason::Rpc),
+            MiningState::UnPaused => MiningStatus::unpaused(),
         }
     }
 }
@@ -657,6 +664,10 @@ impl MiningStatus {
 
     pub fn paused(reason: MiningPausedReason) -> Self {
         Self::Paused(SystemTime::now(), vec![reason])
+    }
+
+    pub fn unpaused() -> Self {
+        Self::UnPaused(SystemTime::now())
     }
 
     pub fn await_block_proposal() -> Self {
@@ -732,6 +743,7 @@ impl MiningStatus {
             Self::Disabled(_) => MiningState::Disabled,
             Self::Init(_) => MiningState::Init,
             Self::Paused(..) => MiningState::Paused,
+            Self::UnPaused(_) => MiningState::UnPaused,
             Self::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
             Self::AwaitBlock(_) => MiningState::AwaitBlock,
             Self::Composing(_) => MiningState::Composing,
@@ -751,6 +763,7 @@ impl MiningStatus {
             Self::Disabled(t) => t,
             Self::Init(t) => t,
             Self::Paused(t, _) => t,
+            Self::UnPaused(t) => t,
             Self::AwaitBlockProposal(t) => t,
             Self::AwaitBlock(t) => t,
             Self::Composing(t) => t,
