@@ -824,6 +824,8 @@ fn human_duration_secs(duration_exact: &Result<Duration, std::time::SystemTimeEr
 #[cfg(test)]
 mod state_machine_tests {
 
+    use tracing_test::traced_test;
+
     use super::*;
 
     const PAUSE_EVENTS: &[MiningEvent] = &[
