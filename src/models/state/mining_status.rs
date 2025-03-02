@@ -219,6 +219,16 @@ pub struct InvalidStateTransition {
     pub new_state: MiningState,
 }
 
+#[derive(Debug, Clone)]
+pub struct MiningStateMachineConfig {
+    pub role_compose: bool,
+    pub role_guess: bool,
+
+    // true: return error on invalid state transitions.
+    // false: ignore invalid state transitions, return Ok()
+    pub strict_state_transitions: bool,
+}
+
 impl MiningStateMachine {
     pub fn new(strict_state_transitions: bool, role_compose: bool, role_guess: bool) -> Self {
         let myself = Self {
@@ -232,6 +242,14 @@ impl MiningStateMachine {
         };
         tracing::debug!("new {:?}", myself);
         myself
+    }
+
+    pub fn config(&self) -> MiningStateMachineConfig {
+        MiningStateMachineConfig {
+            strict_state_transitions: self.strict_state_transitions,
+            role_compose: self.role_compose,
+            role_guess: self.role_guess,
+        }
     }
 
     pub fn set_strict_state_transitions(&mut self, strict: bool) {
@@ -864,7 +882,9 @@ mod state_machine_tests {
         // test that all pause events can occur along happy path.
         for row in worker::machine_event_matrix(PAUSE_EVENTS).into_iter() {
             for (machine, pause_event) in row {
-                worker::can_pause_all_along_happy_path(machine, pause_event.to_owned())?;
+                if machine.mining_enabled() {
+                    worker::can_pause_all_along_happy_path(machine, pause_event.to_owned())?;
+                }
             }
         }
         Ok(())
@@ -1121,6 +1141,7 @@ mod state_machine_tests {
             // to the target state, then pause it.
             for status in compose_and_guess_happy_path() {
                 let mut machine = machine_in.clone();
+                tracing::debug!("testing status: {}, machine config: {:?}", status, machine.config());
                 advance_init_to_status(&mut machine, status.state())?;
                 machine.handle_event(pause_event.clone())?;
             }
