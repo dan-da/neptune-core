@@ -1014,7 +1014,7 @@ mod state_machine_tests {
         ) -> anyhow::Result<()> {
             // for each state, we make a new state-machine and force it
             // to the target state, then pause it.
-            for status in all_status() {
+            for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
                 machine.status = status;
                 machine.handle_event(pause_event.clone())?;
@@ -1027,7 +1027,7 @@ mod state_machine_tests {
             pause_event: MiningEvent,
         ) -> anyhow::Result<()> {
             // for each state, we make a new machine and force it to the target state, then pause it.
-            for status in all_status() {
+            for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
                 machine.status = status.clone();
                 machine.handle_event(pause_event.clone())?;
@@ -1064,7 +1064,7 @@ mod state_machine_tests {
         ) -> anyhow::Result<()> {
             // for each state, we make a new state-machine and force it
             // to the target state, then pause and unpause it.
-            for status in all_status() {
+            for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
                 machine.status = status.clone();
                 machine.handle_event(pause_event.clone())?;
@@ -1104,7 +1104,7 @@ mod state_machine_tests {
             let mut paused_while_syncing = false;
             let mut paused_need_connection = false;
 
-            let mut status = all_status();
+            let mut status = all_reachable_status(&machine);
             let mut events = all_pause_and_unpause_events()
                 .into_iter()
                 .flat_map(|(a, b)| [a, b])
@@ -1143,9 +1143,17 @@ mod state_machine_tests {
             Ok(())
         }
 
-        fn all_status() -> Vec<MiningStatus> {
+        fn all_reachable_status(machine: &MiningStateMachine) -> Vec<MiningStatus> {
+            if machine.mining_enabled() {
+                all_enabled_status()
+            } else {
+                vec![MiningStatus::disabled()]
+            }
+        }
+
+        fn all_enabled_status() -> Vec<MiningStatus> {
             let mut ms: Vec<_> = vec![];
-            for state in MiningState::iter() {
+            for state in MiningState::iter().filter(|s| *s != MiningState::Disabled) {
                 if state == MiningState::Paused {
                     for reason in MiningPausedReason::iter() {
                         ms.push(MiningStatus::paused(reason))
