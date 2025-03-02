@@ -837,6 +837,7 @@ mod state_machine_tests {
         MiningEvent::UnPauseBySyncBlocks,
     ];
 
+    #[traced_test]
     #[test]
     fn compose_and_guess_happy_path() -> anyhow::Result<()> {
         let test = |strict, composing, guessing| -> Result<(), InvalidStateTransition> {
@@ -855,6 +856,7 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn can_pause_all_along_happy_path() -> anyhow::Result<()> {
         // test that all pause events can occur along happy path.
@@ -866,6 +868,7 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn can_pause_during_every_state() -> anyhow::Result<()> {
         // test that all pause events can occur during every state
@@ -875,6 +878,7 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn pause_changes_only_certain_states() -> anyhow::Result<()> {
         // test that all pause events only change correct states
@@ -884,6 +888,7 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn unpause_changes_only_certain_states() -> anyhow::Result<()> {
         // test that all pause events only change correct states
@@ -893,11 +898,13 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn mixed_pause_unpause_types() -> anyhow::Result<()> {
         worker::mixed_pause_unpause_types()
     }
 
+    #[traced_test]
     #[test]
     fn events_compose_and_guess_happy_path() -> anyhow::Result<()> {
         let mut machine = MiningStateMachine::new(true, true, true);
@@ -905,6 +912,7 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn compose_happy_path() -> anyhow::Result<()> {
         let mut machine = MiningStateMachine::new(true, true, true);
@@ -912,6 +920,7 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
     #[test]
     fn guess_happy_path() -> anyhow::Result<()> {
         let mut machine = MiningStateMachine::new(true, true, true);
