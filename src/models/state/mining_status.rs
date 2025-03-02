@@ -389,7 +389,10 @@ impl MiningStateMachine {
     }
 
     #[cfg(test)]
-    pub fn exec_states(&mut self, states: Vec<MiningStatus>) -> Result<(), InvalidStateTransition> {
+    pub(crate) fn exec_states(
+        &mut self,
+        states: Vec<MiningStatus>,
+    ) -> Result<(), InvalidStateTransition> {
         for state in states {
             self.advance_with(state)?
         }
@@ -397,7 +400,10 @@ impl MiningStateMachine {
     }
 
     #[cfg(test)]
-    pub fn exec_events(&mut self, events: Vec<MiningEvent>) -> Result<(), InvalidStateTransition> {
+    pub(crate) fn exec_events(
+        &mut self,
+        events: Vec<MiningEvent>,
+    ) -> Result<(), InvalidStateTransition> {
         for event in events {
             self.handle_event(event)?
         }
@@ -860,17 +866,8 @@ mod state_machine_tests {
     #[traced_test]
     #[test]
     fn compose_and_guess_happy_path() -> anyhow::Result<()> {
-        let test = |strict, composing, guessing| -> Result<(), InvalidStateTransition> {
-            MiningStateMachine::new(strict, composing, guessing)
-                .exec_states(worker::compose_and_guess_happy_path())
-        };
-
-        let bool_iter = [true, false];
-
-        for ((strict, composing), guessing) in
-            bool_iter.iter().zip(bool_iter.iter()).zip(bool_iter.iter())
-        {
-            test(*strict, *composing, *guessing)?;
+        for mut machine in worker::machine_matrix() {
+            machine.exec_states(worker::compose_and_guess_happy_path())?;
         }
 
         Ok(())
@@ -880,11 +877,9 @@ mod state_machine_tests {
     #[test]
     fn can_pause_all_along_happy_path() -> anyhow::Result<()> {
         // test that all pause events can occur along happy path.
-        for row in worker::machine_event_matrix(PAUSE_EVENTS).into_iter() {
-            for (machine, pause_event) in row {
-                if machine.mining_enabled() {
-                    worker::can_pause_all_along_happy_path(machine, pause_event.to_owned())?;
-                }
+        for (machine, pause_event) in worker::machine_event_matrix(PAUSE_EVENTS) {
+            if machine.mining_enabled() {
+                worker::can_pause_all_along_happy_path(machine, pause_event.to_owned())?;
             }
         }
         Ok(())
@@ -894,8 +889,8 @@ mod state_machine_tests {
     #[test]
     fn can_pause_during_every_state() -> anyhow::Result<()> {
         // test that all pause events can occur during every state
-        for pause_event in PAUSE_EVENTS {
-            worker::can_pause_during_every_state(pause_event.to_owned())?;
+        for (machine, pause_event) in worker::machine_event_matrix(PAUSE_EVENTS) {
+            worker::can_pause_during_every_state(machine, pause_event.to_owned())?;
         }
         Ok(())
     }
@@ -904,8 +899,8 @@ mod state_machine_tests {
     #[test]
     fn pause_changes_only_certain_states() -> anyhow::Result<()> {
         // test that all pause events only change correct states
-        for pause_event in PAUSE_EVENTS {
-            worker::pause_changes_only_certain_states(pause_event.to_owned())?;
+        for (machine, pause_event) in worker::machine_event_matrix(PAUSE_EVENTS) {
+            worker::pause_changes_only_certain_states(machine, pause_event.to_owned())?;
         }
         Ok(())
     }
@@ -914,8 +909,10 @@ mod state_machine_tests {
     #[test]
     fn unpause_changes_only_certain_states() -> anyhow::Result<()> {
         // test that all pause events only change correct states
-        for (pause_event, unpause_event) in worker::all_pause_and_unpause_events().into_iter() {
-            worker::unpause_changes_only_certain_states(pause_event, unpause_event)?;
+        for (machine, pause_event, unpause_event) in
+            worker::machine_dual_event_matrix(PAUSE_EVENTS, UNPAUSE_EVENTS)
+        {
+            worker::unpause_changes_only_certain_states(machine, pause_event, unpause_event)?;
         }
         Ok(())
     }
@@ -923,30 +920,36 @@ mod state_machine_tests {
     #[traced_test]
     #[test]
     fn mixed_pause_unpause_types() -> anyhow::Result<()> {
-        worker::mixed_pause_unpause_types()
+        for machine in worker::machine_matrix() {
+            worker::mixed_pause_unpause_types(machine)?;
+        }
+        Ok(())
     }
 
     #[traced_test]
     #[test]
     fn events_compose_and_guess_happy_path() -> anyhow::Result<()> {
-        let mut machine = MiningStateMachine::new(true, true, true);
-        machine.exec_events(worker::events_compose_and_guess_happy_path())?;
+        for mut machine in worker::machine_matrix() {
+            machine.exec_events(worker::events_compose_and_guess_happy_path())?;
+        }
         Ok(())
     }
 
     #[traced_test]
     #[test]
     fn compose_happy_path() -> anyhow::Result<()> {
-        let mut machine = MiningStateMachine::new(true, true, true);
-        machine.exec_events(worker::events_compose_happy_path())?;
+        for mut machine in worker::machine_matrix() {
+            machine.exec_events(worker::events_compose_happy_path())?;
+        }
         Ok(())
     }
 
     #[traced_test]
     #[test]
     fn guess_happy_path() -> anyhow::Result<()> {
-        let mut machine = MiningStateMachine::new(true, true, true);
-        machine.exec_events(worker::events_guess_happy_path())?;
+        for mut machine in worker::machine_matrix() {
+            machine.exec_events(worker::events_guess_happy_path())?;
+        }
         Ok(())
     }
 
@@ -957,17 +960,34 @@ mod state_machine_tests {
 
         use super::*;
 
+        pub fn machine_matrix() -> Vec<MiningStateMachine> {
+            let iter_bool = [true, false];
+            itertools::iproduct!(iter_bool, iter_bool, iter_bool)
+                .map(|(strict, composing, guessing)| {
+                    vec![MiningStateMachine::new(strict, composing, guessing)]
+                })
+                .flatten()
+                .collect()
+        }
+
         pub fn machine_event_matrix(
             iter_event: &[MiningEvent],
-        ) -> Vec<Vec<(MiningStateMachine, MiningEvent)>> {
-            let iter_bool = [true, false];
-            itertools::iproduct!(iter_bool, iter_bool, iter_bool, iter_event)
-                .map(|(strict, composing, guessing, &ref event)| {
-                    vec![(
-                        MiningStateMachine::new(strict, composing, guessing),
-                        event.clone(),
-                    )]
+        ) -> Vec<(MiningStateMachine, MiningEvent)> {
+            itertools::iproduct!(machine_matrix(), iter_event)
+                .map(|(machine, &ref event)| vec![(machine, event.clone())])
+                .flatten()
+                .collect()
+        }
+
+        pub fn machine_dual_event_matrix(
+            iter_event1: &[MiningEvent],
+            iter_event2: &[MiningEvent],
+        ) -> Vec<(MiningStateMachine, MiningEvent, MiningEvent)> {
+            itertools::iproduct!(machine_matrix(), iter_event1, iter_event2)
+                .map(|(machine, &ref event1, &ref event2)| {
+                    vec![(machine, event1.clone(), event2.clone())]
                 })
+                .flatten()
                 .collect()
         }
 
@@ -988,11 +1008,14 @@ mod state_machine_tests {
                 .collect_vec()
         }
 
-        pub(super) fn can_pause_during_every_state(pause_event: MiningEvent) -> anyhow::Result<()> {
+        pub(super) fn can_pause_during_every_state(
+            machine_in: MiningStateMachine,
+            pause_event: MiningEvent,
+        ) -> anyhow::Result<()> {
             // for each state, we make a new state-machine and force it
             // to the target state, then pause it.
-            let mut machine = MiningStateMachine::new(true, true, true);
             for status in all_status() {
+                let mut machine = machine_in.clone();
                 machine.status = status;
                 machine.handle_event(pause_event.clone())?;
             }
@@ -1000,12 +1023,12 @@ mod state_machine_tests {
         }
 
         pub(super) fn pause_changes_only_certain_states(
+            machine_in: MiningStateMachine,
             pause_event: MiningEvent,
         ) -> anyhow::Result<()> {
-            // for each state, we make a new state-machine and force it
-            // to the target state, then pause it.
-            let mut machine = MiningStateMachine::new(true, true, true);
+            // for each state, we make a new machine and force it to the target state, then pause it.
             for status in all_status() {
+                let mut machine = machine_in.clone();
                 machine.status = status.clone();
                 machine.handle_event(pause_event.clone())?;
 
@@ -1035,13 +1058,14 @@ mod state_machine_tests {
         }
 
         pub(super) fn unpause_changes_only_certain_states(
+            machine_in: MiningStateMachine,
             pause_event: MiningEvent,
             unpause_event: MiningEvent,
         ) -> anyhow::Result<()> {
             // for each state, we make a new state-machine and force it
             // to the target state, then pause and unpause it.
-            let mut machine = MiningStateMachine::new(true, true, true);
             for status in all_status() {
+                let mut machine = machine_in.clone();
                 machine.status = status.clone();
                 machine.handle_event(pause_event.clone())?;
                 machine.handle_event(unpause_event.clone())?;
@@ -1071,10 +1095,10 @@ mod state_machine_tests {
             Ok(())
         }
 
-        pub(super) fn mixed_pause_unpause_types() -> anyhow::Result<()> {
-            // for each state, we make a new state-machine and force it
-            // to the target state, then pause and unpause it.
-            let mut machine = MiningStateMachine::new(true, true, true);
+        pub(super) fn mixed_pause_unpause_types(
+            mut machine: MiningStateMachine,
+        ) -> anyhow::Result<()> {
+            // for each state, we force machine to the target state, then pause and unpause it.
 
             let mut paused_by_rpc = false;
             let mut paused_while_syncing = false;
@@ -1141,7 +1165,11 @@ mod state_machine_tests {
             // to the target state, then pause it.
             for status in compose_and_guess_happy_path() {
                 let mut machine = machine_in.clone();
-                tracing::debug!("testing status: {}, machine config: {:?}", status, machine.config());
+                tracing::debug!(
+                    "testing status: {}, machine config: {:?}",
+                    status,
+                    machine.config()
+                );
                 advance_init_to_status(&mut machine, status.state())?;
                 machine.handle_event(pause_event.clone())?;
             }
