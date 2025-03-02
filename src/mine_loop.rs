@@ -624,7 +624,7 @@ pub(crate) async fn mine(
     mut global_state_lock: GlobalStateLock,
 ) -> Result<()> {
     let cli = global_state_lock.cli().clone();
-    let mut machine = MiningStateMachine::new(cli.compose, cli.guess);
+    let mut machine = MiningStateMachine::new(false, cli.compose, cli.guess);
 
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
