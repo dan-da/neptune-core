@@ -936,7 +936,7 @@ impl Display for MiningStatus {
         };
 
         let work_type_and_duration = match self {
-            Self::Disabled(_) => MiningState::from(self).name().to_string(),
+            Self::Disabled(_) => MiningState::from(self).to_string(),
             Self::Paused(t, reasons) => {
                 format!(
                     "paused for {}  ({})",
@@ -946,7 +946,7 @@ impl Display for MiningStatus {
             }
             _ => format!(
                 "{} for {}",
-                MiningState::from(self).name(),
+                MiningState::from(self),
                 human_duration_secs(&self.since().elapsed()),
             ),
         };
@@ -1199,7 +1199,11 @@ mod state_machine_tests {
             // to the target state, then pause it.
             for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
-                tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
+                tracing::debug!(
+                    "status: {}, machine config: {:?}",
+                    status.state(),
+                    machine.config()
+                );
                 machine.state_data = status;
                 machine.handle_event(pause_event.clone())?;
             }
@@ -1215,7 +1219,11 @@ mod state_machine_tests {
             // for each state, we make a new machine and force it to the target state, then pause it.
             for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
-                tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
+                tracing::debug!(
+                    "status: {}, machine config: {:?}",
+                    status.state(),
+                    machine.config()
+                );
                 machine.state_data = status.clone();
                 machine.handle_event(pause_event.clone())?;
 
@@ -1255,7 +1263,11 @@ mod state_machine_tests {
             // to the target state, then pause and unpause it.
             for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
-                tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
+                tracing::debug!(
+                    "status: {}, machine config: {:?}",
+                    status.state(),
+                    machine.config()
+                );
                 machine.state_data = status.clone();
                 machine.handle_event(pause_event.clone())?;
                 machine.handle_event(unpause_event.clone())?;
@@ -1374,7 +1386,11 @@ mod state_machine_tests {
             // to the target state, then pause it.
             for status in compose_and_guess_happy_path() {
                 let mut machine = machine_in.clone();
-                tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
+                tracing::debug!(
+                    "status: {}, machine config: {:?}",
+                    status.state(),
+                    machine.config()
+                );
                 advance_init_to_status(&mut machine, status.state())?;
                 machine.handle_event(pause_event.clone())?;
             }
