@@ -863,6 +863,8 @@ mod state_machine_tests {
         MiningEvent::UnPauseBySyncBlocks,
     ];
 
+    // verifies that machine can progress through all states in the mining happy path.
+    // for every combination of machine config
     #[traced_test]
     #[test]
     fn compose_and_guess_happy_path() -> anyhow::Result<()> {
@@ -873,12 +875,14 @@ mod state_machine_tests {
                 assert!(result.is_err());
             } else {
                 assert!(result.is_ok());
-            }            
+            }
         }
 
         Ok(())
     }
 
+    // verifies that pause event can occur during every state in the mining
+    // happy path, for every combination of machine config and pause event
     #[traced_test]
     #[test]
     fn can_pause_all_along_happy_path() -> anyhow::Result<()> {
@@ -891,6 +895,8 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // verifies that every pause event can occur during every reachable state
+    // for every combination of machine config and pause event
     #[traced_test]
     #[test]
     fn can_pause_during_every_state() -> anyhow::Result<()> {
@@ -901,6 +907,9 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // verifies that pause events only cause a mining status change for
+    // certain starting states -- for every possible combination of machine
+    // config and pause event
     #[traced_test]
     #[test]
     fn pause_changes_only_certain_states() -> anyhow::Result<()> {
@@ -911,6 +920,9 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // verifies that unpause events only cause a mining status change for
+    // certain starting states -- for every possible combination of machine
+    // config, pause event, and unpause event
     #[traced_test]
     #[test]
     fn unpause_changes_only_certain_states() -> anyhow::Result<()> {
@@ -923,6 +935,8 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // verifies that all pause/unpause events work in any order for any state
+    // for every possible machine config.
     #[traced_test]
     #[test]
     fn mixed_pause_unpause_types() -> anyhow::Result<()> {
@@ -932,6 +946,9 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // executes all events in composer+guesser role happy path and verifies no
+    // errors unless the machine is not mining and in strict_state_transitions
+    // mode.
     #[traced_test]
     #[test]
     fn events_compose_and_guess_happy_path() -> anyhow::Result<()> {
@@ -947,6 +964,8 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // executes all events in composer role happy path and verifies no errors
+    // unless the machine is not mining and in strict_state_transitions mode.
     #[traced_test]
     #[test]
     fn compose_happy_path() -> anyhow::Result<()> {
@@ -962,6 +981,8 @@ mod state_machine_tests {
         Ok(())
     }
 
+    // executes all events in guesser role happy path and verifies no errors
+    // unless the machine is not mining and in strict_state_transitions mode.
     #[traced_test]
     #[test]
     fn guess_happy_path() -> anyhow::Result<()> {
@@ -984,6 +1005,7 @@ mod state_machine_tests {
 
         use super::*;
 
+        // returns a list of MiningStateMachine, one for every possible configuration.
         pub fn machine_matrix() -> Vec<MiningStateMachine> {
             let iter_bool = [true, false];
             itertools::iproduct!(iter_bool, iter_bool, iter_bool)
@@ -994,6 +1016,8 @@ mod state_machine_tests {
                 .collect()
         }
 
+        // returns a list (matrix) of every possible machine config
+        // and every event from input list.
         pub fn machine_event_matrix(
             iter_event: &[MiningEvent],
         ) -> Vec<(MiningStateMachine, MiningEvent)> {
@@ -1003,6 +1027,8 @@ mod state_machine_tests {
                 .collect()
         }
 
+        // returns a list (matrix) of every possible machine config
+        // and every event from each input list of events.
         pub fn machine_dual_event_matrix(
             iter_event1: &[MiningEvent],
             iter_event2: &[MiningEvent],
@@ -1015,6 +1041,7 @@ mod state_machine_tests {
                 .collect()
         }
 
+        // returns a list of every pause event with its matching unpause event.
         pub fn all_pause_and_unpause_events() -> Vec<(MiningEvent, MiningEvent)> {
             PAUSE_EVENTS
                 .into_iter()
@@ -1023,6 +1050,7 @@ mod state_machine_tests {
                 .collect()
         }
 
+        // returns all MiningStatus in the happy path for compose+guess role.
         pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStatus> {
             HAPPY_PATH_STATE_TRANSITIONS
                 .iter()
@@ -1032,6 +1060,8 @@ mod state_machine_tests {
                 .collect_vec()
         }
 
+        // verifies that input pause event succeeds without error for every
+        // reachable starting-state, for provided machine.
         pub(super) fn can_pause_during_every_state(
             machine_in: MiningStateMachine,
             pause_event: MiningEvent,
@@ -1047,6 +1077,8 @@ mod state_machine_tests {
             Ok(())
         }
 
+        // verifies that pausing only causes mining status to change for
+        // selected starting states.
         pub(super) fn pause_changes_only_certain_states(
             machine_in: MiningStateMachine,
             pause_event: MiningEvent,
@@ -1083,6 +1115,8 @@ mod state_machine_tests {
             Ok(())
         }
 
+        // verifies that unpausing only causes mining status to change for
+        // selected starting states.
         pub(super) fn unpause_changes_only_certain_states(
             machine_in: MiningStateMachine,
             pause_event: MiningEvent,
@@ -1122,6 +1156,13 @@ mod state_machine_tests {
             Ok(())
         }
 
+        // verifies that all pause/unpause events work in any order for any state
+        // for a given state machine (config).
+        //
+        // puts machine into random states and then handles all possible pause and unpause
+        // events in random order.
+        //
+        // verifies that machine's pause flags and count match our own.
         pub(super) fn mixed_pause_unpause_types(
             mut machine: MiningStateMachine,
         ) -> anyhow::Result<()> {
@@ -1170,6 +1211,7 @@ mod state_machine_tests {
             Ok(())
         }
 
+        // returns all status variants that can be reached by the input machine.
         fn all_reachable_status(machine: &MiningStateMachine) -> Vec<MiningStatus> {
             if machine.mining_enabled() {
                 all_enabled_status()
@@ -1178,6 +1220,8 @@ mod state_machine_tests {
             }
         }
 
+        // returns all status, including different pause reasons, that can be reached
+        // by a machine with mining enabled. (role_compose or role_guess)
         fn all_enabled_status() -> Vec<MiningStatus> {
             let mut ms: Vec<_> = vec![];
             for state in MiningState::iter().filter(|s| *s != MiningState::Disabled) {
@@ -1192,6 +1236,7 @@ mod state_machine_tests {
             ms
         }
 
+        // attempts to handle input pause event for every state in the happy path.
         pub(super) fn can_pause_all_along_happy_path(
             machine_in: MiningStateMachine,
             pause_event: MiningEvent,
@@ -1207,6 +1252,8 @@ mod state_machine_tests {
             Ok(())
         }
 
+        // advances along the happy path from current status (which should be init)
+        // to a target status using the ::advance_with() method.
         fn advance_init_to_status(
             machine: &mut MiningStateMachine,
             target: MiningState,
@@ -1221,6 +1268,8 @@ mod state_machine_tests {
             Ok(())
         }
 
+        // return list of events for composer to advance along happy path
+        // from init all the way back to init.
         pub(super) fn events_compose_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init        --> AwaitBlockProposal --> Composing
@@ -1230,6 +1279,8 @@ mod state_machine_tests {
             ]
         }
 
+        // return list of events for guesser to advance along happy path
+        // from init all the way back to init.
         pub(super) fn events_guess_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init               --> AwaitBlockProposal
@@ -1239,6 +1290,8 @@ mod state_machine_tests {
             ]
         }
 
+        // return list of events for composer and guesser node to advance along
+        // happy path from init all the way back to init.
         pub(super) fn events_compose_and_guess_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init               --> AwaitBlockProposal  --> Composing
