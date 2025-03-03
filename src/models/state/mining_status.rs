@@ -325,10 +325,12 @@ impl MiningStateMachine {
             .map(|(_, next)| next)
         {
             let new_status = match (*state, &self.state_data) {
-                (MiningState::AwaitBlock, _) => return Err(InvalidStateTransition {
-                    old_state,
-                    new_state: MiningState::AwaitBlock,
-                }),
+                (MiningState::AwaitBlock, _) => {
+                    return Err(InvalidStateTransition {
+                        old_state,
+                        new_state: MiningState::AwaitBlock,
+                    })
+                }
                 (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal))
                     if proposal.is_some() =>
                 {
@@ -1088,6 +1090,7 @@ mod state_machine_tests {
     #[test]
     fn events_compose_and_guess_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
+            tracing::debug!("machine config: {:?}", machine.config());
             let result = machine.exec_events(worker::events_compose_and_guess_happy_path());
 
             if !machine.mining_enabled() && machine.strict_state_transitions {
@@ -1105,6 +1108,7 @@ mod state_machine_tests {
     #[test]
     fn compose_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
+            tracing::debug!("machine config: {:?}", machine.config());
             let result = machine.exec_events(worker::events_compose_happy_path());
 
             if !machine.mining_enabled() && machine.strict_state_transitions {
@@ -1122,6 +1126,7 @@ mod state_machine_tests {
     #[test]
     fn guess_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
+            tracing::debug!("machine config: {:?}", machine.config());
             let result = machine.exec_events(worker::events_guess_happy_path());
 
             if !machine.mining_enabled() && machine.strict_state_transitions {
