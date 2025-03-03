@@ -17,7 +17,6 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::bail;
@@ -281,7 +280,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     /// The block proposal to which guessers contribute proof-of-work.
-    pub(crate) block_proposal: Arc<BlockProposal>,
+    pub(crate) block_proposal: BlockProposal,
 
     /// Indicates whether the guessing or composing task is running, and if so,
     /// since when.
@@ -298,9 +297,9 @@ impl GlobalState {
         mempool: Mempool,
     ) -> Self {
         let mining_status = if Self::mining_enabled(&cli) {
-            MiningStatus::init()
+            MiningStatus::Init(SystemTime::now())
         } else {
-            MiningStatus::disabled()
+            MiningStatus::Disabled(SystemTime::now())
         };
 
         Self {
@@ -309,7 +308,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
-            block_proposal: Arc::new(BlockProposal::default()),
+            block_proposal: BlockProposal::default(),
             mining_status,
         }
     }
@@ -1494,7 +1493,7 @@ impl GlobalState {
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip.
-        self.block_proposal = Arc::new(BlockProposal::none());
+        self.block_proposal = BlockProposal::none();
 
         // Flush databases
         self.flush_databases().await?;

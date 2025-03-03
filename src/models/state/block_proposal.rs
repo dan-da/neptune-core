@@ -10,20 +10,20 @@ use crate::models::state::BlockHeight;
 /// Block proposals have valid correctness proofs, but do not have proof-of-work
 /// (yet). Guessers can contribute proof-of-work to a block proposal and, if
 /// successful, the block proposal becomes a block.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum BlockProposal {
-    OwnComposition((Block, Vec<ExpectedUtxo>)),
-    ForeignComposition(Block),
+    OwnComposition((Box<Block>, Vec<ExpectedUtxo>)),
+    ForeignComposition(Box<Block>),
     #[default]
     None,
 }
 
 impl BlockProposal {
-    pub(crate) fn own_proposal(block: Block, expected_utxos: Vec<ExpectedUtxo>) -> Self {
+    pub(crate) fn own_proposal(block: Box<Block>, expected_utxos: Vec<ExpectedUtxo>) -> Self {
         Self::OwnComposition((block, expected_utxos))
     }
 
-    pub(crate) fn foreign_proposal(block: Block) -> Self {
+    pub(crate) fn foreign_proposal(block: Box<Block>) -> Self {
         Self::ForeignComposition(block)
     }
 
@@ -35,7 +35,15 @@ impl BlockProposal {
         !matches!(*self, Self::None)
     }
 
-    pub(crate) fn unwrap(&self) -> &Block {
+    pub(crate) fn unwrap(&self) -> &Box<Block> {
+        match self {
+            BlockProposal::OwnComposition((block, _)) => block,
+            BlockProposal::ForeignComposition(block) => block,
+            BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
+        }
+    }
+
+    pub(crate) fn unwrap_into(self) -> Box<Block> {
         match self {
             BlockProposal::OwnComposition((block, _)) => block,
             BlockProposal::ForeignComposition(block) => block,

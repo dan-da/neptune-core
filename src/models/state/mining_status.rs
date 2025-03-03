@@ -10,28 +10,78 @@ use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::state::BlockProposal;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GuessingWorkInfo {
-    num_inputs: usize,
-    num_outputs: usize,
-    total_coinbase: NativeCurrencyAmount,
-    total_guesser_fee: NativeCurrencyAmount,
-}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuessingWorkInfo(Box<Block>);
 
-impl From<&Block> for GuessingWorkInfo {
-    fn from(block: &Block) -> Self {
+impl From<Box<Block>> for GuessingWorkInfo {
+    fn from(block: Box<Block>) -> Self {
         Self::new(block)
     }
 }
 
 impl GuessingWorkInfo {
-    pub(crate) fn new(block: &Block) -> Self {
+    pub(crate) fn new(block: Box<Block>) -> Self {
+        Self(block)
+    }
+
+    pub fn block(&self) -> &Block {
+        &self.0
+    }
+
+    pub fn num_inputs(&self) -> usize {
+        self.0.body().transaction_kernel.inputs.len()
+    }
+
+    pub fn num_outputs(&self) -> usize {
+        self.0.body().transaction_kernel.outputs.len()
+    }
+
+    pub fn total_coinbase(&self) -> NativeCurrencyAmount {
+        self.0
+            .body()
+            .transaction_kernel
+            .coinbase
+            .unwrap_or_default()
+    }
+
+    pub fn total_guesser_fee(&self) -> NativeCurrencyAmount {
+        self.0.body().transaction_kernel.fee
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct BlockSummary {
+    pub num_inputs: usize,
+    pub num_outputs: usize,
+    pub total_coinbase: NativeCurrencyAmount,
+    pub total_guesser_fee: NativeCurrencyAmount,
+}
+
+impl From<&Block> for BlockSummary {
+    fn from(b: &Block) -> Self {
         Self {
-            num_inputs: block.body().transaction_kernel.inputs.len(),
-            num_outputs: block.body().transaction_kernel.outputs.len(),
-            total_coinbase: block.body().transaction_kernel.coinbase.unwrap_or_default(),
-            total_guesser_fee: block.body().transaction_kernel.fee,
+            num_inputs: b.body().transaction_kernel.inputs.len(),
+            num_outputs: b.body().transaction_kernel.outputs.len(),
+            total_coinbase: b.body().transaction_kernel.coinbase.unwrap_or_default(),
+            total_guesser_fee: b.body().transaction_kernel.fee,
         }
+    }
+}
+
+impl From<&GuessingWorkInfo> for BlockSummary {
+    fn from(w: &GuessingWorkInfo) -> Self {
+        Self {
+            num_inputs: w.num_inputs(),
+            num_outputs: w.num_outputs(),
+            total_coinbase: w.total_coinbase(),
+            total_guesser_fee: w.total_guesser_fee(),
+        }
+    }
+}
+
+impl From<GuessingWorkInfo> for BlockSummary {
+    fn from(w: GuessingWorkInfo) -> Self {
+        Self::from(&w)
     }
 }
 
@@ -50,7 +100,7 @@ pub(crate) enum MiningEvent {
     PauseByNeedConnection,
     UnPauseByNeedConnection,
 
-    NewBlockProposal(std::sync::Arc<BlockProposal>),
+    NewBlockProposal(BlockProposal),
     NewTipBlock,
 
     ComposeError,
@@ -198,7 +248,7 @@ const HAPPY_PATH_STATE_TRANSITIONS: &[MiningState] = &[
 
 #[derive(Debug, Clone)]
 pub struct MiningStateMachine {
-    status: MiningStatus, // holds a MiningState.
+    state_data: MiningStateData, // holds a MiningState.
 
     paused_while_syncing: bool,
     paused_by_rpc: bool,
@@ -232,7 +282,7 @@ pub struct MiningStateMachineConfig {
 impl MiningStateMachine {
     pub fn new(strict_state_transitions: bool, role_compose: bool, role_guess: bool) -> Self {
         let myself = Self {
-            status: MiningStatus::init(),
+            state_data: MiningStateData::init(),
             paused_while_syncing: false,
             paused_by_rpc: false,
             paused_need_connection: false,
@@ -256,8 +306,8 @@ impl MiningStateMachine {
         self.strict_state_transitions = strict;
     }
 
-    pub fn mining_status(&self) -> &MiningStatus {
-        &self.status
+    pub(crate) fn state_data(&self) -> &MiningStateData {
+        &self.state_data
     }
 
     /// advances to next state in the happy path, taking role into account.
@@ -266,9 +316,9 @@ impl MiningStateMachine {
     ///
     /// important: this method should never be called when moving to the
     /// `Guessing` state. If so, the `Guessing` work-info will not be present.
-    /// Instead use advance_with() and supply a `MiningStatus::Guessing(Some(_))`.
+    /// Instead use advance_with() and supply a `MiningStateData::Guessing(Some(_))`.
     pub fn advance(&mut self) -> Result<(), InvalidStateTransition> {
-        let old_state = self.status.state();
+        let old_state = self.state_data.state();
 
         // finds happy-path state that is after our current state, if any.
         // cycles to beginning of happy-path if necessary.
@@ -278,7 +328,7 @@ impl MiningStateMachine {
             .find(|(prev, _)| **prev == old_state)
             .map(|(_, next)| next)
         {
-            let new_status = MiningStatus::from(*state);
+            let new_status = MiningStateData::from(*state);
             self.advance_with(new_status)?;
 
             // take role(s) into account (composer, guesser)
@@ -322,14 +372,14 @@ impl MiningStateMachine {
     ) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "handle_event: old_state: {}, event: {}",
-            self.status.name(),
+            self.state_data.name(),
             event,
         );
 
         match event {
             MiningEvent::Advance => self.advance()?,
 
-            MiningEvent::Init => self.advance_with(MiningStatus::init())?,
+            MiningEvent::Init => self.advance_with(MiningStateData::init())?,
 
             MiningEvent::PauseByRpc => self.pause_by_rpc(),
             MiningEvent::UnPauseByRpc => self.unpause_by_rpc(),
@@ -346,34 +396,39 @@ impl MiningStateMachine {
             // works, but guessing time resets to time of latest block proposal,
             // instead of when guessing actually started.)
             MiningEvent::NewBlockProposal(proposal)
-                if proposal.is_some() && self.status.state() == MiningState::Guessing =>
+                if proposal.is_some() && self.state_data.state() == MiningState::Guessing =>
             {
-                self.advance_with(MiningStatus::Guessing(
-                    self.status.since(),
-                    Some(proposal.unwrap().into()),
+                self.advance_with(MiningStateData::Guessing(
+                    self.state_data.since(),
+                    Some(proposal.unwrap_into().into()),
                 ))?;
             }
-            MiningEvent::NewBlockProposal(_) => self.advance_with(MiningStatus::await_block())?,
+            MiningEvent::NewBlockProposal(proposal) => {
+                self.advance_with(MiningStateData::await_block(proposal))?
+            }
 
-            MiningEvent::NewTipBlock => self.advance_with(MiningStatus::new_tip_block())?,
+            MiningEvent::NewTipBlock => self.advance_with(MiningStateData::new_tip_block())?,
 
-            MiningEvent::ComposeError => self.advance_with(MiningStatus::compose_error())?,
+            MiningEvent::ComposeError => self.advance_with(MiningStateData::compose_error())?,
 
-            MiningEvent::Shutdown => self.advance_with(MiningStatus::shutdown())?,
+            MiningEvent::Shutdown => self.advance_with(MiningStateData::shutdown())?,
         }
         Ok(())
     }
 
     /// prefer advance() and handle_event() instead.
-    pub fn advance_with(&mut self, new_status: MiningStatus) -> Result<(), InvalidStateTransition> {
+    pub(crate) fn advance_with(
+        &mut self,
+        new_status: MiningStateData,
+    ) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "advance_with: old_state: {}, new_state: {}",
-            self.status.name(),
+            self.state_data.name(),
             new_status.name()
         );
 
         // special handling for pause.
-        if let MiningStatus::Paused(_, ref reasons) = new_status {
+        if let MiningStateData::Paused(_, ref reasons) = new_status {
             assert!(!reasons.is_empty());
             for reason in reasons {
                 self.pause(reason)
@@ -391,7 +446,7 @@ impl MiningStateMachine {
     #[cfg(test)]
     pub(crate) fn exec_states(
         &mut self,
-        states: Vec<MiningStatus>,
+        states: Vec<MiningStateData>,
     ) -> Result<(), InvalidStateTransition> {
         for state in states {
             self.advance_with(state)?
@@ -410,22 +465,22 @@ impl MiningStateMachine {
         Ok(())
     }
 
-    fn set_new_status(&mut self, new_status: MiningStatus) {
-        self.status = new_status;
-        tracing::debug!("set new state: {}", self.status.name());
+    fn set_new_status(&mut self, new_status: MiningStateData) {
+        self.state_data = new_status;
+        tracing::debug!("set new state: {}", self.state_data.name());
     }
 
-    fn merge_set_paused_status(&mut self, new_status: MiningStatus) {
-        let merged_status = match (self.status.clone(), new_status) {
+    fn merge_set_paused_status(&mut self, new_status: MiningStateData) {
+        let merged_status = match (self.state_data.clone(), new_status) {
             (
-                MiningStatus::Paused(old_time, mut old_reasons),
-                MiningStatus::Paused(_, mut new_reasons),
+                MiningStateData::Paused(old_time, mut old_reasons),
+                MiningStateData::Paused(_, mut new_reasons),
             ) => {
                 old_reasons.append(&mut new_reasons);
                 // ensure unique
-                MiningStatus::Paused(old_time, old_reasons.into_iter().unique().collect())
+                MiningStateData::Paused(old_time, old_reasons.into_iter().unique().collect())
             }
-            (_, MiningStatus::Paused(t, reasons)) => MiningStatus::Paused(t, reasons),
+            (_, MiningStateData::Paused(t, reasons)) => MiningStateData::Paused(t, reasons),
             _ => panic!("attempted to merge status other than Paused"),
         };
         self.set_new_status(merged_status);
@@ -458,7 +513,7 @@ impl MiningStateMachine {
 
     fn pause_by_need_connection(&mut self) {
         let reason = MiningPausedReason::NeedConnection;
-        let new_status = MiningStatus::paused(reason);
+        let new_status = MiningStateData::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
         }
@@ -466,15 +521,15 @@ impl MiningStateMachine {
     }
 
     fn unpause_by_need_connection(&mut self) {
-        let _ = self.advance_with(MiningStatus::unpaused());
-        let _ = self.advance_with(MiningStatus::init());
+        let _ = self.advance_with(MiningStateData::unpaused());
+        let _ = self.advance_with(MiningStateData::init());
 
         self.paused_need_connection = false;
     }
 
     fn pause_by_rpc(&mut self) {
         let reason = MiningPausedReason::Rpc;
-        let new_status = MiningStatus::paused(reason);
+        let new_status = MiningStateData::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
         }
@@ -482,8 +537,8 @@ impl MiningStateMachine {
     }
 
     fn unpause_by_rpc(&mut self) {
-        let _ = self.advance_with(MiningStatus::unpaused());
-        let _ = self.advance_with(MiningStatus::init());
+        let _ = self.advance_with(MiningStateData::unpaused());
+        let _ = self.advance_with(MiningStateData::init());
 
         self.paused_by_rpc = false;
     }
@@ -507,7 +562,7 @@ impl MiningStateMachine {
 
     fn pause_by_sync_blocks(&mut self) {
         let reason = MiningPausedReason::SyncBlocks;
-        let new_status = MiningStatus::paused(reason);
+        let new_status = MiningStateData::paused(reason);
         if self.allowed(&new_status) {
             self.merge_set_paused_status(new_status);
         }
@@ -515,22 +570,22 @@ impl MiningStateMachine {
     }
 
     fn unpause_by_sync_blocks(&mut self) {
-        let _ = self.advance_with(MiningStatus::unpaused());
-        let _ = self.advance_with(MiningStatus::init());
+        let _ = self.advance_with(MiningStateData::unpaused());
+        let _ = self.advance_with(MiningStateData::init());
 
         self.paused_while_syncing = false;
     }
 
-    pub fn allowed(&self, status: &MiningStatus) -> bool {
+    pub(crate) fn allowed(&self, status: &MiningStateData) -> bool {
         let state = status.state();
 
         // we normally don't allow state equality since status variant data (eg
-        // timestamps) can differ between 2 MiningStatus with same state.
+        // timestamps) can differ between 2 MiningStateData with same state.
         // We make an exception for Init because otherwise it can't be
         // manually set.
-        if state == self.status.state() && state == MiningState::Init {
+        if state == self.state_data.state() && state == MiningState::Init {
             true
-        } else if *status == self.status {
+        } else if *status == self.state_data {
             true
         } else if !self.mining_enabled() {
             state == MiningState::Disabled
@@ -539,7 +594,7 @@ impl MiningStateMachine {
         } else {
             let state = status.state();
             let allowed_states: &[MiningState] =
-                MINING_STATE_TRANSITIONS[self.status.state() as usize];
+                MINING_STATE_TRANSITIONS[self.state_data.state() as usize];
             allowed_states.iter().any(|v| *v == state)
         }
     }
@@ -550,12 +605,16 @@ impl MiningStateMachine {
             + self.paused_need_connection as u8
     }
 
-    fn ensure_allowed(&self, new_status: &MiningStatus) -> Result<(), InvalidStateTransition> {
+    pub fn paused_need_connection(&self) -> bool {
+        self.paused_need_connection
+    }
+
+    fn ensure_allowed(&self, new_status: &MiningStateData) -> Result<(), InvalidStateTransition> {
         if self.allowed(new_status) {
             Ok(())
         } else {
             Err(InvalidStateTransition {
-                old_state: self.status.state(),
+                old_state: self.state_data.state(),
                 new_state: new_status.state(),
             })
         }
@@ -570,19 +629,19 @@ impl MiningStateMachine {
     // }
 
     pub(crate) fn can_start_guessing(&self) -> bool {
-        self.role_guess && self.status.state() == MiningState::AwaitBlock
+        self.role_guess && self.state_data.state() == MiningState::AwaitBlock
     }
 
     pub(crate) fn can_guess(&self) -> bool {
-        self.role_guess && self.status.state() == MiningState::Guessing
+        self.role_guess && self.state_data.state() == MiningState::Guessing
     }
 
     pub(crate) fn can_start_composing(&self) -> bool {
-        self.role_compose && self.status.state() == MiningState::AwaitBlockProposal
+        self.role_compose && self.state_data.state() == MiningState::AwaitBlockProposal
     }
 
     pub(crate) fn can_compose(&self) -> bool {
-        self.role_compose && self.status.state() == MiningState::Composing
+        self.role_compose && self.state_data.state() == MiningState::Composing
     }
 }
 
@@ -630,14 +689,14 @@ impl Display for MiningPausedReason {
 ///      Guessing --> Inactive(AwaitBlockProposal) --> Guessing ...
 ///
 /// Disabled --> none.  (final)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MiningStatus {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MiningStateData {
     Disabled(SystemTime),
     Init(SystemTime),
     Paused(SystemTime, Vec<MiningPausedReason>), // Rpc, SyncBlocks, NeedConnection
     UnPaused(SystemTime),
     AwaitBlockProposal(SystemTime),
-    AwaitBlock(SystemTime),
+    AwaitBlock(SystemTime, BlockProposal),
     Composing(SystemTime),
     Guessing(SystemTime, Option<GuessingWorkInfo>),
     NewTipBlock(SystemTime),
@@ -645,30 +704,82 @@ pub enum MiningStatus {
     Shutdown(SystemTime),
 }
 
-impl From<MiningState> for MiningStatus {
-    /// note that:
-    ///
-    ///   1. MiningStatus::Guessing will not have any work info.
-    ///      It should only be used for unit-tests
-    ///   2. MiningStatus::Paused will use MiningPausedReason::Rpc
-    fn from(state: MiningState) -> Self {
-        match state {
-            MiningState::Disabled => MiningStatus::disabled(),
-            MiningState::Init => MiningStatus::init(),
-            MiningState::AwaitBlockProposal => MiningStatus::await_block_proposal(),
-            MiningState::AwaitBlock => MiningStatus::await_block(),
-            MiningState::Composing => MiningStatus::composing(),
-            MiningState::Guessing => MiningStatus::Guessing(SystemTime::now(), None),
-            MiningState::NewTipBlock => MiningStatus::new_tip_block(),
-            MiningState::ComposeError => MiningStatus::compose_error(),
-            MiningState::Shutdown => MiningStatus::shutdown(),
-            MiningState::Paused => MiningStatus::paused(MiningPausedReason::Rpc),
-            MiningState::UnPaused => MiningStatus::unpaused(),
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MiningStatus {
+    Disabled(SystemTime),
+    Init(SystemTime),
+    Paused(SystemTime, Vec<MiningPausedReason>), // Rpc, SyncBlocks, NeedConnection
+    UnPaused(SystemTime),
+    AwaitBlockProposal(SystemTime),
+    AwaitBlock(SystemTime, BlockSummary),
+    Composing(SystemTime),
+    Guessing(SystemTime, BlockSummary),
+    NewTipBlock(SystemTime),
+    ComposeError(SystemTime),
+    Shutdown(SystemTime),
+}
+
+impl From<&MiningStateData> for MiningStatus {
+    fn from(ms: &MiningStateData) -> Self {
+        match ms {
+            MiningStateData::Disabled(t) => Self::Disabled(*t),
+            MiningStateData::Init(t) => Self::Init(*t),
+            MiningStateData::Paused(t, r) => Self::Paused(*t, r.clone()),
+            MiningStateData::UnPaused(t) => Self::UnPaused(*t),
+            MiningStateData::AwaitBlockProposal(t) => Self::AwaitBlockProposal(*t),
+            MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p.unwrap()).into()),
+            MiningStateData::Composing(t) => Self::Composing(*t),
+            MiningStateData::Guessing(t, Some(b)) => Self::Guessing(*t, b.into()),
+            MiningStateData::Guessing(_, None) => unreachable!(),
+            MiningStateData::NewTipBlock(t) => Self::NewTipBlock(*t),
+            MiningStateData::ComposeError(t) => Self::ComposeError(*t),
+            MiningStateData::Shutdown(t) => Self::Shutdown(*t),
         }
     }
 }
 
-impl MiningStatus {
+impl From<MiningState> for MiningStateData {
+    /// note that:
+    ///
+    ///   1. MiningStateData::Guessing will not have any work info.
+    ///      It should only be used for unit-tests
+    ///   2. MiningStateData::Paused will use MiningPausedReason::Rpc
+    fn from(state: MiningState) -> Self {
+        match state {
+            MiningState::Disabled => MiningStateData::disabled(),
+            MiningState::Init => MiningStateData::init(),
+            MiningState::AwaitBlockProposal => MiningStateData::await_block_proposal(),
+            MiningState::AwaitBlock => MiningStateData::await_block(BlockProposal::None),
+            MiningState::Composing => MiningStateData::composing(),
+            MiningState::Guessing => MiningStateData::Guessing(SystemTime::now(), None),
+            MiningState::NewTipBlock => MiningStateData::new_tip_block(),
+            MiningState::ComposeError => MiningStateData::compose_error(),
+            MiningState::Shutdown => MiningStateData::shutdown(),
+            MiningState::Paused => MiningStateData::paused(MiningPausedReason::Rpc),
+            MiningState::UnPaused => MiningStateData::unpaused(),
+        }
+    }
+}
+
+impl From<&MiningStatus> for MiningState {
+    fn from(s: &MiningStatus) -> MiningState {
+        match *s {
+            MiningStatus::Disabled(_) => MiningState::Disabled,
+            MiningStatus::Init(_) => MiningState::Init,
+            MiningStatus::Paused(..) => MiningState::Paused,
+            MiningStatus::UnPaused(_) => MiningState::UnPaused,
+            MiningStatus::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
+            MiningStatus::AwaitBlock(..) => MiningState::AwaitBlock,
+            MiningStatus::Composing(_) => MiningState::Composing,
+            MiningStatus::Guessing(..) => MiningState::Guessing,
+            MiningStatus::NewTipBlock(_) => MiningState::NewTipBlock,
+            MiningStatus::ComposeError(_) => MiningState::ComposeError,
+            MiningStatus::Shutdown(_) => MiningState::Shutdown,
+        }
+    }
+}
+
+impl MiningStateData {
     pub fn disabled() -> Self {
         Self::Disabled(SystemTime::now())
     }
@@ -689,17 +800,17 @@ impl MiningStatus {
         Self::AwaitBlockProposal(SystemTime::now())
     }
 
-    pub fn await_block() -> Self {
-        Self::AwaitBlock(SystemTime::now())
+    pub fn await_block(block_proposal: BlockProposal) -> Self {
+        Self::AwaitBlock(SystemTime::now(), block_proposal)
     }
 
     pub fn composing() -> Self {
         Self::Composing(SystemTime::now())
     }
 
-    pub fn guessing(work_info: Option<GuessingWorkInfo>) -> Self {
-        Self::Guessing(SystemTime::now(), work_info)
-    }
+    // pub fn guessing(work_info: Option<GuessingWorkInfo>) -> Self {
+    //     Self::Guessing(SystemTime::now(), work_info)
+    // }
 
     pub fn new_tip_block() -> Self {
         Self::NewTipBlock(SystemTime::now())
@@ -713,25 +824,25 @@ impl MiningStatus {
         Self::Shutdown(SystemTime::now())
     }
 
-    pub fn is_disabled(&self) -> bool {
-        self.state() == MiningState::Disabled
-    }
+    // pub fn is_disabled(&self) -> bool {
+    //     self.state() == MiningState::Disabled
+    // }
 
     pub fn is_init(&self) -> bool {
         self.state() == MiningState::Init
     }
 
-    pub fn is_paused(&self) -> bool {
-        self.state() == MiningState::Paused
-    }
+    // pub fn is_paused(&self) -> bool {
+    //     self.state() == MiningState::Paused
+    // }
 
-    pub fn is_await_block_proposal(&self) -> bool {
-        self.state() == MiningState::AwaitBlockProposal
-    }
+    // pub fn is_await_block_proposal(&self) -> bool {
+    //     self.state() == MiningState::AwaitBlockProposal
+    // }
 
-    pub fn is_await_block(&self) -> bool {
-        self.state() == MiningState::AwaitBlock
-    }
+    // pub fn is_await_block(&self) -> bool {
+    //     self.state() == MiningState::AwaitBlock
+    // }
 
     pub fn is_composing(&self) -> bool {
         self.state() == MiningState::Composing
@@ -741,13 +852,13 @@ impl MiningStatus {
         self.state() == MiningState::Guessing
     }
 
-    pub fn is_new_tip_block(&self) -> bool {
-        self.state() == MiningState::NewTipBlock
-    }
+    // pub fn is_new_tip_block(&self) -> bool {
+    //     self.state() == MiningState::NewTipBlock
+    // }
 
-    pub fn is_compose_error(&self) -> bool {
-        self.state() == MiningState::ComposeError
-    }
+    // pub fn is_compose_error(&self) -> bool {
+    //     self.state() == MiningState::ComposeError
+    // }
 
     pub fn is_shutdown(&self) -> bool {
         self.state() == MiningState::Shutdown
@@ -760,7 +871,7 @@ impl MiningStatus {
             Self::Paused(..) => MiningState::Paused,
             Self::UnPaused(_) => MiningState::UnPaused,
             Self::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
-            Self::AwaitBlock(_) => MiningState::AwaitBlock,
+            Self::AwaitBlock(..) => MiningState::AwaitBlock,
             Self::Composing(_) => MiningState::Composing,
             Self::Guessing(..) => MiningState::Guessing,
             Self::NewTipBlock(_) => MiningState::NewTipBlock,
@@ -780,7 +891,7 @@ impl MiningStatus {
             Self::Paused(t, _) => t,
             Self::UnPaused(t) => t,
             Self::AwaitBlockProposal(t) => t,
-            Self::AwaitBlock(t) => t,
+            Self::AwaitBlock(t, _) => t,
             Self::Composing(t) => t,
             Self::Guessing(t, _) => t,
             Self::NewTipBlock(t) => t,
@@ -797,18 +908,36 @@ impl MiningStatus {
     // }
 }
 
+impl MiningStatus {
+    pub fn since(&self) -> SystemTime {
+        match *self {
+            Self::Disabled(t) => t,
+            Self::Init(t) => t,
+            Self::Paused(t, _) => t,
+            Self::UnPaused(t) => t,
+            Self::AwaitBlockProposal(t) => t,
+            Self::AwaitBlock(t, _) => t,
+            Self::Composing(t) => t,
+            Self::Guessing(t, _) => t,
+            Self::NewTipBlock(t) => t,
+            Self::ComposeError(t) => t,
+            Self::Shutdown(t) => t,
+        }
+    }
+}
+
 impl Display for MiningStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let input_output_info = match self {
-            MiningStatus::Guessing(_, Some(info)) => {
+            Self::Guessing(_, info) => {
                 format!(" {}/{}", info.num_inputs, info.num_outputs)
             }
             _ => String::default(),
         };
 
         let work_type_and_duration = match self {
-            MiningStatus::Disabled(_) => self.name().to_string(),
-            MiningStatus::Paused(t, reasons) => {
+            Self::Disabled(_) => MiningState::from(self).name().to_string(),
+            Self::Paused(t, reasons) => {
                 format!(
                     "paused for {}  ({})",
                     human_duration_secs(&t.elapsed()),
@@ -817,14 +946,14 @@ impl Display for MiningStatus {
             }
             _ => format!(
                 "{} for {}",
-                self.name(),
+                MiningState::from(self).name(),
                 human_duration_secs(&self.since().elapsed()),
             ),
         };
         let reward = match self {
-            MiningStatus::Guessing(_, Some(block_work_info)) => format!(
+            Self::Guessing(_, block_summary) => format!(
                 "; total guesser reward: {}",
-                block_work_info.total_guesser_fee
+                block_summary.total_guesser_fee
             ),
             _ => String::default(),
         };
@@ -1050,13 +1179,13 @@ mod state_machine_tests {
                 .collect()
         }
 
-        // returns all MiningStatus in the happy path for compose+guess role.
-        pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStatus> {
+        // returns all MiningStateData in the happy path for compose+guess role.
+        pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStateData> {
             HAPPY_PATH_STATE_TRANSITIONS
                 .iter()
                 .cycle()
                 .take(HAPPY_PATH_STATE_TRANSITIONS.len() + 1)
-                .map(|s| MiningStatus::try_from(*s).unwrap())
+                .map(|s| MiningStateData::try_from(*s).unwrap())
                 .collect_vec()
         }
 
@@ -1071,7 +1200,7 @@ mod state_machine_tests {
             for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
                 tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
-                machine.status = status;
+                machine.state_data = status;
                 machine.handle_event(pause_event.clone())?;
             }
             Ok(())
@@ -1087,11 +1216,11 @@ mod state_machine_tests {
             for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
                 tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
-                machine.status = status.clone();
+                machine.state_data = status.clone();
                 machine.handle_event(pause_event.clone())?;
 
                 let ss = status.state();
-                let ms = machine.status.state();
+                let ms = machine.state_data.state();
                 let ps = MiningState::Paused;
 
                 // certain states should not switch to Paused state.
@@ -1127,12 +1256,12 @@ mod state_machine_tests {
             for status in all_reachable_status(&machine_in) {
                 let mut machine = machine_in.clone();
                 tracing::debug!("status: {}, machine config: {:?}", status, machine.config());
-                machine.status = status.clone();
+                machine.state_data = status.clone();
                 machine.handle_event(pause_event.clone())?;
                 machine.handle_event(unpause_event.clone())?;
 
                 let ss = status.state();
-                let ms = machine.status.state();
+                let ms = machine.state_data.state();
                 let is = MiningState::Init;
 
                 // certain states should not switch state after UnPause
@@ -1183,7 +1312,7 @@ mod state_machine_tests {
                 events.shuffle(&mut rng());
 
                 // force to this random status.  (not allowed by API)
-                machine.status = status.iter().cloned().next().unwrap();
+                machine.state_data = status.iter().cloned().next().unwrap();
 
                 for event in events.iter() {
                     match *event {
@@ -1212,25 +1341,25 @@ mod state_machine_tests {
         }
 
         // returns all status variants that can be reached by the input machine.
-        fn all_reachable_status(machine: &MiningStateMachine) -> Vec<MiningStatus> {
+        fn all_reachable_status(machine: &MiningStateMachine) -> Vec<MiningStateData> {
             if machine.mining_enabled() {
                 all_enabled_status()
             } else {
-                vec![MiningStatus::disabled()]
+                vec![MiningStateData::disabled()]
             }
         }
 
         // returns all status, including different pause reasons, that can be reached
         // by a machine with mining enabled. (role_compose or role_guess)
-        fn all_enabled_status() -> Vec<MiningStatus> {
+        fn all_enabled_status() -> Vec<MiningStateData> {
             let mut ms: Vec<_> = vec![];
             for state in MiningState::iter().filter(|s| *s != MiningState::Disabled) {
                 if state == MiningState::Paused {
                     for reason in MiningPausedReason::iter() {
-                        ms.push(MiningStatus::paused(reason))
+                        ms.push(MiningStateData::paused(reason))
                     }
                 } else {
-                    ms.push(MiningStatus::try_from(state).unwrap());
+                    ms.push(MiningStateData::try_from(state).unwrap());
                 }
             }
             ms

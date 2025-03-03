@@ -13,6 +13,7 @@ use super::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmoun
 use super::peer::transaction_notification::TransactionNotification;
 use super::proof_abstractions::mast_hash::MastHash;
 use super::state::block_proposal::BlockProposal;
+use super::state::mining_status::MiningStatus;
 use super::state::wallet::expected_utxo::ExpectedUtxo;
 use super::state::wallet::monitored_utxo::MonitoredUtxo;
 
@@ -24,7 +25,7 @@ pub(crate) enum MainToMiner {
     Shutdown,
 
     /// Communicates to miner that it should work on a new block proposal
-    NewBlockProposal(std::sync::Arc<BlockProposal>),
+    NewBlockProposal(BlockProposal),
 
     /// Main has received a new block or block proposal, and the miner should
     /// stop all work until it receives a [MainToMiner::Continue] message.
@@ -67,6 +68,8 @@ pub(crate) struct NewBlockFound {
 pub(crate) enum MinerToMain {
     NewBlockFound(NewBlockFound),
     BlockProposal(Box<(Block, Vec<ExpectedUtxo>)>),
+
+    StatusChange(MiningStatus),
 
     /// Request main loop to shut down entire application and return the
     /// indicated exit code.

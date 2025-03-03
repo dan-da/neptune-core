@@ -2,7 +2,6 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -533,6 +532,11 @@ impl MainLoopHandler {
                 self.spawn_mempool_txs_update_job(main_loop_state, update_jobs)
                     .await;
             }
+            MinerToMain::StatusChange(mining_status) => {
+                self.global_state_lock
+                    .set_mining_status(mining_status)
+                    .await;
+            }
             MinerToMain::BlockProposal(boxed_proposal) => {
                 let (block, expected_utxos) = *boxed_proposal;
 
@@ -573,10 +577,7 @@ impl MainLoopHandler {
 
                 // Use block proposal and add expected UTXOs from this
                 // proposal.
-                let proposal = Arc::new(BlockProposal::own_proposal(
-                    block.clone(),
-                    expected_utxos.clone(),
-                ));
+                let proposal = BlockProposal::own_proposal(Box::new(block), expected_utxos.clone());
 
                 {
                     let mut state = self.global_state_lock.lock_guard_mut().await;
@@ -848,7 +849,7 @@ impl MainLoopHandler {
                     let proposal_notification =
                         MainToPeerTask::BlockProposalNotification((&*block).into());
 
-                    let proposal = std::sync::Arc::new(BlockProposal::foreign_proposal(*block));
+                    let proposal = BlockProposal::foreign_proposal(block);
                     global_state_mut.block_proposal = proposal.clone();
 
                     (proposal, proposal_notification)

@@ -1,7 +1,6 @@
 pub(crate) mod composer_parameters;
 
 use std::cmp::max;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::bail;
@@ -44,10 +43,9 @@ use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
-use crate::models::state::block_proposal::BlockProposal;
 use crate::models::state::mining_status::MiningEvent;
+use crate::models::state::mining_status::MiningStateData;
 use crate::models::state::mining_status::MiningStateMachine;
-use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -621,7 +619,7 @@ pub(crate) async fn create_block_transaction_from(
 pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
-    mut global_state_lock: GlobalStateLock,
+    global_state_lock: GlobalStateLock,
 ) -> Result<()> {
     let cli = global_state_lock.cli().clone();
     let mut machine = MiningStateMachine::new(false, cli.compose, cli.guess);
@@ -641,80 +639,90 @@ pub(crate) async fn mine(
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
-    // let mut maybe_proposal = BlockProposal::none();
+    // let maybe_proposal = {
+    //     let (need_connection, syncing, maybe_proposal) = global_state_lock
+    //         .lock(|s| {
+    //             (
+    //                 s.net.peer_map.is_empty(),
+    //                 s.net.sync_anchor.is_some(),
+    //                 s.mining_status.clone(),
+    //                 s.block_proposal.clone(), // Arc
+    //             )
+    //         })
+    //         .await;
+
+    //     machine.set_need_connection(need_connection);
+    //     machine.set_syncing(syncing);
+    // };
+
     loop {
+        let mut status_tmp = machine.state_data().clone();
+
         // Ensure restart timer doesn't resolve again, without guesser
         // task actually being spawned.
         guess_restart_timer
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        let (gs_mining_status, maybe_proposal) = {
-            // todo: remove this read-lock acquisition which slows us down and can
-            // potentially interfere with guessing if write-lock is held somewhere.
-            // instead this information could be sent to us via channel msgs.
-            let (need_connection, syncing, mining_status, maybe_proposal) = global_state_lock
-                .lock(|s| {
-                    (
-                        s.net.peer_map.is_empty(),
-                        s.net.sync_anchor.is_some(),
-                        s.mining_status.clone(),
-                        s.block_proposal.clone(), // Arc
-                    )
-                })
-                .await;
+        // let (gs_mining_status, maybe_proposal) = {
+        //     // todo: remove this read-lock acquisition which slows us down and can
+        //     // potentially interfere with guessing if write-lock is held somewhere.
+        //     // instead this information could be sent to us via channel msgs.
+        //     let (need_connection, syncing, mining_status, maybe_proposal) = global_state_lock
+        //         .lock(|s| {
+        //             (
+        //                 s.net.peer_map.is_empty(),
+        //                 s.net.sync_anchor.is_some(),
+        //                 s.mining_status.clone(),
+        //                 s.block_proposal.clone(), // Arc
+        //             )
+        //         })
+        //         .await;
 
-            machine.set_need_connection(need_connection);
-            machine.set_syncing(syncing);
+        //     machine.set_need_connection(need_connection);
+        //     machine.set_syncing(syncing);
 
-            if need_connection {
-                warn!("Not mining because client has no connections");
-                const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
-                sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
-                continue;
-            }
+        //     (mining_status, maybe_proposal)
+        // };
 
-            (mining_status, maybe_proposal)
-        };
+        if machine.paused_need_connection() {
+            warn!("Not mining because client has no connections");
+            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
+            sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
+            continue;
+        }
 
         // if mining_status::init, then we need to get into either
         // await_block or await_block_proposal state.
-        if machine.mining_status().is_init() {
+        if machine.state_data().is_init() {
             machine.advance().unwrap(); // Init --> AwaitBlockProposal
 
-            if maybe_proposal.is_some() {
-                machine.handle_event(MiningEvent::NewBlockProposal(maybe_proposal.clone()))?;
-            }
+            // if maybe_proposal.is_some() {
+            //     machine.handle_event(MiningEvent::NewBlockProposal(maybe_proposal.clone()))?;
+            // }
         }
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
 
-        if maybe_proposal.is_some() {
-            if machine.can_start_guessing() {
-                // AwaitBlock --> Guessing
-                machine
-                    .advance_with(MiningStatus::guessing(Some(maybe_proposal.unwrap().into())))
-                    .unwrap();
-            }
-        } else if machine.can_start_composing() {
-            // AwaitBlockProposal --> Composing
-            machine.advance().unwrap();
+        if machine.can_start_guessing() || machine.can_start_composing() {
+            machine.advance().unwrap()
         }
 
-        // update global-state status if different.
-        // todo: send a message instead of acquiring lock.
-        if gs_mining_status != *machine.mining_status() {
-            global_state_lock
-                .set_mining_status(machine.mining_status().to_owned())
-                .await;
+        // notify main if status has changed since start of loop.
+        if status_tmp != *machine.state_data() {
+            to_main
+                .send(MinerToMain::StatusChange(machine.state_data().into()))
+                .await?;
+            status_tmp = machine.state_data().clone();
         }
 
-        let guesser_task: Option<JoinHandle<()>> =
-            if machine.can_guess() && maybe_proposal.is_some() {
-                // safe because above `is_some`
-                let proposal = maybe_proposal.unwrap();
+        let guesser_task: Option<JoinHandle<()>> = if machine.can_guess() {
+            // safe because above `is_some`
+            if let MiningStateData::Guessing(_, Some(work)) = machine.state_data() {
+                let proposal = work.block();
 
+                // todo: obtain these via channel msg instead of acquiring lock.
                 let (guesser_key, latest_block_header) = {
                     let state = global_state_lock.lock_guard().await;
                     let key = state
@@ -751,13 +759,17 @@ pub(crate) async fn mine(
                 )
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
         let can_compose = machine.can_compose();
 
         let mut composer_task = if can_compose {
+            // todo: obtain block via channel msg from main instead of acquiring lock.
             let latest_block = global_state_lock
                 .lock(|s| s.chain.light_state().to_owned())
                 .await;
@@ -878,10 +890,6 @@ pub(crate) async fn mine(
                             machine.advance().unwrap(); // Guessing    --> NewTipBlock
                             machine.advance().unwrap(); // NewTipBlock --> Init
 
-                            // hack: unset block proposal in global state.
-                            // todo: new block proposals should always be sent to miner over channel
-                            global_state_lock.lock_guard_mut().await.block_proposal = Arc::new(BlockProposal::none());
-
                             info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
                         }
@@ -890,11 +898,17 @@ pub(crate) async fn mine(
             }
         }
 
+        if status_tmp != *machine.state_data() {
+            to_main
+                .send(MinerToMain::StatusChange(machine.state_data().into()))
+                .await?;
+        }
+
         // global_state_lock
-        //     .set_mining_status(machine.mining_status().to_owned())
+        //     .set_mining_status(machine.state_data().to_owned())
         //     .await;
 
-        if !machine.mining_status().is_composing() && !composer_task.is_finished() {
+        if !machine.state_data().is_composing() && !composer_task.is_finished() {
             cancel_compose_tx.send(())?;
             debug!("Cancel signal sent to composer worker.");
         }
@@ -905,12 +919,12 @@ pub(crate) async fn mine(
             gt.abort();
             debug!("Abort-signal sent to guesser worker.");
 
-            if machine.mining_status().is_guessing() {
+            if machine.state_data().is_guessing() {
                 debug!("Restarting guesser task with new parameters");
             }
         }
 
-        if machine.mining_status().is_shutdown() {
+        if machine.state_data().is_shutdown() {
             break;
         }
     }
