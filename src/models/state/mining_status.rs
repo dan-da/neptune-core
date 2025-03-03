@@ -1135,6 +1135,7 @@ mod state_machine_tests {
         use strum::IntoEnumIterator;
 
         use super::*;
+        use crate::config_models::network::Network;
 
         // returns a list of MiningStateMachine, one for every possible configuration.
         pub fn machine_matrix() -> Vec<MiningStateMachine> {
@@ -1368,12 +1369,25 @@ mod state_machine_tests {
         fn all_enabled_status() -> Vec<MiningStateData> {
             let mut ms: Vec<_> = vec![];
             for state in MiningState::iter().filter(|s| *s != MiningState::Disabled) {
-                if state == MiningState::Paused {
-                    for reason in MiningPausedReason::iter() {
-                        ms.push(MiningStateData::paused(reason))
+                match state {
+                    MiningState::Paused => {
+                        for reason in MiningPausedReason::iter() {
+                            ms.push(MiningStateData::paused(reason))
+                        }
                     }
-                } else {
-                    ms.push(MiningStateData::try_from(state).unwrap());
+                    MiningState::AwaitBlock => {
+                        ms.push(MiningStateData::await_block(
+                            BlockProposal::foreign_proposal(Box::new(Block::genesis(
+                                Network::Main,
+                            ))),
+                        ));
+                    }
+                    MiningState::Guessing => {
+                        ms.push(MiningStateData::guessing(
+                            Box::new(Block::genesis(Network::Main)).into(),
+                        ));
+                    }
+                    _ => ms.push(MiningStateData::try_from(state).unwrap()),
                 }
             }
             ms
