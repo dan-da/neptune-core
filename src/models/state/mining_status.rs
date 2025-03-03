@@ -867,7 +867,13 @@ mod state_machine_tests {
     #[test]
     fn compose_and_guess_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
-            machine.exec_states(worker::compose_and_guess_happy_path())?;
+            let result = machine.exec_states(worker::compose_and_guess_happy_path());
+
+            if !machine.mining_enabled() && machine.strict_state_transitions {
+                assert!(result.is_err());
+            } else {
+                assert!(result.is_ok());
+            }            
         }
 
         Ok(())
@@ -932,10 +938,10 @@ mod state_machine_tests {
         for mut machine in worker::machine_matrix() {
             let result = machine.exec_events(worker::events_compose_and_guess_happy_path());
 
-            if machine.mining_enabled() {
-                assert!(result.is_ok());
-            } else {
+            if !machine.mining_enabled() && machine.strict_state_transitions {
                 assert!(result.is_err());
+            } else {
+                assert!(result.is_ok());
             }
         }
         Ok(())
@@ -947,10 +953,10 @@ mod state_machine_tests {
         for mut machine in worker::machine_matrix() {
             let result = machine.exec_events(worker::events_compose_happy_path());
 
-            if machine.mining_enabled() {
-                assert!(result.is_ok());
-            } else {
+            if !machine.mining_enabled() && machine.strict_state_transitions {
                 assert!(result.is_err());
+            } else {
+                assert!(result.is_ok());
             }
         }
         Ok(())
@@ -962,10 +968,10 @@ mod state_machine_tests {
         for mut machine in worker::machine_matrix() {
             let result = machine.exec_events(worker::events_guess_happy_path());
 
-            if machine.mining_enabled() {
-                assert!(result.is_ok());
-            } else {
+            if !machine.mining_enabled() && machine.strict_state_transitions {
                 assert!(result.is_err());
+            } else {
+                assert!(result.is_ok());
             }
         }
         Ok(())
