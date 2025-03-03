@@ -325,6 +325,10 @@ impl MiningStateMachine {
             .map(|(_, next)| next)
         {
             let new_status = match (*state, &self.state_data) {
+                (MiningState::AwaitBlock, _) => return Err(InvalidStateTransition {
+                    old_state,
+                    new_state: MiningState::AwaitBlock,
+                }),
                 (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal))
                     if proposal.is_some() =>
                 {
@@ -1429,12 +1433,16 @@ mod state_machine_tests {
             Ok(())
         }
 
+        pub fn fake_block_proposal() -> BlockProposal {
+            BlockProposal::foreign_proposal(Box::new(Block::genesis(Network::Main)))
+        }
+
         // return list of events for composer to advance along happy path
         // from init all the way back to init.
         pub(super) fn events_compose_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init        --> AwaitBlockProposal --> Composing
-                MiningEvent::Advance, // Composing   --> AwaitBlock
+                MiningEvent::NewBlockProposal(fake_block_proposal()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // AwaitBlock  --> Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock --> Init
             ]
@@ -1445,7 +1453,7 @@ mod state_machine_tests {
         pub(super) fn events_guess_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init               --> AwaitBlockProposal
-                MiningEvent::Advance, // AwaitBlockProposal --> Composing          --> AwaitBlock --> Guessing
+                MiningEvent::NewBlockProposal(fake_block_proposal()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock        --> Init
             ]
@@ -1456,7 +1464,7 @@ mod state_machine_tests {
         pub(super) fn events_compose_and_guess_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init               --> AwaitBlockProposal  --> Composing
-                MiningEvent::Advance, // Composing          --> AwaitBlock          --> Guessing
+                MiningEvent::NewBlockProposal(fake_block_proposal()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock        --> Init
             ]
