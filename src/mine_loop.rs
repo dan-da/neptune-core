@@ -664,6 +664,8 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
+        // todo: send need-connection messages from main-to-miner.
+
         // let (gs_mining_status, maybe_proposal) = {
         //     // todo: remove this read-lock acquisition which slows us down and can
         //     // potentially interfere with guessing if write-lock is held somewhere.
@@ -692,14 +694,10 @@ pub(crate) async fn mine(
             continue;
         }
 
-        // if mining_status::init, then we need to get into either
-        // await_block or await_block_proposal state.
+        // if mining_status::init, then we need to advance to
+        // await_block_proposal state.
         if machine.state_data().is_init() {
             machine.advance().unwrap(); // Init --> AwaitBlockProposal
-
-            // if maybe_proposal.is_some() {
-            //     machine.handle_event(MiningEvent::NewBlockProposal(maybe_proposal.clone()))?;
-            // }
         }
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
@@ -719,7 +717,7 @@ pub(crate) async fn mine(
 
         let guesser_task: Option<JoinHandle<()>> = if machine.can_guess() {
             // safe because above `is_some`
-            if let MiningStateData::Guessing(_, Some(work)) = machine.state_data() {
+            if let MiningStateData::Guessing(_, work) = machine.state_data() {
                 let proposal = work.block();
 
                 // todo: obtain these via channel msg instead of acquiring lock.
@@ -855,13 +853,15 @@ pub(crate) async fn mine(
             }
             new_composition = composer_rx => {
                 // Compose --> AwaitBlock
-                machine.advance().unwrap();
-
                 match new_composition {
                     Ok((new_block_proposal, composer_utxos)) => {
+                        // note: we do not handle NewBlockProposal event here, as Main will send it back to us.
                         to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
                     },
-                    Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
+                    Err(e) => {
+                        machine.handle_event(MiningEvent::ComposeError).unwrap();
+                        warn!("composing task was cancelled prematurely. Got: {}", e);
+                    }
                 };
             }
             new_block = guesser_rx => {
@@ -903,10 +903,6 @@ pub(crate) async fn mine(
                 .send(MinerToMain::StatusChange(machine.state_data().into()))
                 .await?;
         }
-
-        // global_state_lock
-        //     .set_mining_status(machine.state_data().to_owned())
-        //     .await;
 
         if !machine.state_data().is_composing() && !composer_task.is_finished() {
             cancel_compose_tx.send(())?;

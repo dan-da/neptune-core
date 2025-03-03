@@ -313,10 +313,6 @@ impl MiningStateMachine {
     /// advances to next state in the happy path, taking role into account.
     ///
     /// this is equivalent to `::handle_event(MiningEvent::Advance)`
-    ///
-    /// important: this method should never be called when moving to the
-    /// `Guessing` state. If so, the `Guessing` work-info will not be present.
-    /// Instead use advance_with() and supply a `MiningStateData::Guessing(Some(_))`.
     pub fn advance(&mut self) -> Result<(), InvalidStateTransition> {
         let old_state = self.state_data.state();
 
@@ -328,7 +324,14 @@ impl MiningStateMachine {
             .find(|(prev, _)| **prev == old_state)
             .map(|(_, next)| next)
         {
-            let new_status = MiningStateData::from(*state);
+            let new_status = match (*state, &self.state_data) {
+                (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal))
+                    if proposal.is_some() =>
+                {
+                    MiningStateData::guessing(proposal.to_owned().unwrap_into().into())
+                }
+                _ => MiningStateData::from(*state),
+            };
             self.advance_with(new_status)?;
 
             // take role(s) into account (composer, guesser)
@@ -400,7 +403,7 @@ impl MiningStateMachine {
             {
                 self.advance_with(MiningStateData::Guessing(
                     self.state_data.since(),
-                    Some(proposal.unwrap_into().into()),
+                    proposal.unwrap_into().into(),
                 ))?;
             }
             MiningEvent::NewBlockProposal(proposal) => {
@@ -698,7 +701,7 @@ pub(crate) enum MiningStateData {
     AwaitBlockProposal(SystemTime),
     AwaitBlock(SystemTime, BlockProposal),
     Composing(SystemTime),
-    Guessing(SystemTime, Option<GuessingWorkInfo>),
+    Guessing(SystemTime, GuessingWorkInfo),
     NewTipBlock(SystemTime),
     ComposeError(SystemTime),
     Shutdown(SystemTime),
@@ -729,8 +732,8 @@ impl From<&MiningStateData> for MiningStatus {
             MiningStateData::AwaitBlockProposal(t) => Self::AwaitBlockProposal(*t),
             MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p.unwrap()).into()),
             MiningStateData::Composing(t) => Self::Composing(*t),
-            MiningStateData::Guessing(t, Some(b)) => Self::Guessing(*t, b.into()),
-            MiningStateData::Guessing(_, None) => unreachable!(),
+            MiningStateData::Guessing(t, b) => Self::Guessing(*t, b.into()),
+            // MiningStateData::Guessing(_, None) => unreachable!(),
             MiningStateData::NewTipBlock(t) => Self::NewTipBlock(*t),
             MiningStateData::ComposeError(t) => Self::ComposeError(*t),
             MiningStateData::Shutdown(t) => Self::Shutdown(*t),
@@ -741,8 +744,7 @@ impl From<&MiningStateData> for MiningStatus {
 impl From<MiningState> for MiningStateData {
     /// note that:
     ///
-    ///   1. MiningStateData::Guessing will not have any work info.
-    ///      It should only be used for unit-tests
+    ///   1. MiningStateData::Guessing will panic.
     ///   2. MiningStateData::Paused will use MiningPausedReason::Rpc
     fn from(state: MiningState) -> Self {
         match state {
@@ -751,7 +753,7 @@ impl From<MiningState> for MiningStateData {
             MiningState::AwaitBlockProposal => MiningStateData::await_block_proposal(),
             MiningState::AwaitBlock => MiningStateData::await_block(BlockProposal::None),
             MiningState::Composing => MiningStateData::composing(),
-            MiningState::Guessing => MiningStateData::Guessing(SystemTime::now(), None),
+            MiningState::Guessing => panic!("unsupported usage"),
             MiningState::NewTipBlock => MiningStateData::new_tip_block(),
             MiningState::ComposeError => MiningStateData::compose_error(),
             MiningState::Shutdown => MiningStateData::shutdown(),
@@ -808,9 +810,9 @@ impl MiningStateData {
         Self::Composing(SystemTime::now())
     }
 
-    // pub fn guessing(work_info: Option<GuessingWorkInfo>) -> Self {
-    //     Self::Guessing(SystemTime::now(), work_info)
-    // }
+    pub fn guessing(work_info: GuessingWorkInfo) -> Self {
+        Self::Guessing(SystemTime::now(), work_info)
+    }
 
     pub fn new_tip_block() -> Self {
         Self::NewTipBlock(SystemTime::now())
