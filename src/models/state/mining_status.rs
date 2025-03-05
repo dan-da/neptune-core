@@ -1414,20 +1414,13 @@ mod state_machine_tests {
         // returns all status, including different pause reasons, that can be reached
         // by a machine with mining enabled. (role_compose or role_guess)
         fn all_enabled_status() -> Vec<MiningStateData> {
-            let mut ms: Vec<_> = vec![];
-            for state in MiningState::iter().filter(|s| *s != MiningState::Disabled) {
-                match state {
-                    MiningState::Paused => {
-                        for reason in MiningPausedReason::iter() {
-                            ms.push(MiningStateData::paused(reason))
-                        }
-                    }
-                    _ => {
-                        ms.push(state_to_state_data(state))
-                    }
-                }
-            }
-            ms
+            MiningState::iter()
+                .filter(|s| *s != MiningState::Disabled)
+                .flat_map(|state| match state {
+                    MiningState::Paused => MiningPausedReason::iter().map(MiningStateData::paused).collect_vec(),
+                    _ => vec![state_to_state_data(state)],
+                })
+                .collect()
         }
 
         // attempts to handle input pause event for every state in the happy path.
