@@ -580,8 +580,10 @@ impl MainLoopHandler {
                 {
                     // Use block proposal and add expected UTXOs from this proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
-                    state.block_proposal =
-                        BlockProposal::own_proposal(arc_block.clone(), expected_utxos.clone());
+                    state.block_proposal = Some(BlockProposal::own_proposal(
+                        arc_block.clone(),
+                        expected_utxos.clone(),
+                    ));
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
 
@@ -849,8 +851,9 @@ impl MainLoopHandler {
                     let proposal_notification =
                         MainToPeerTask::BlockProposalNotification((&*block).into());
 
+                    // note: block is an Arc<Block>
                     global_state_mut.block_proposal =
-                        BlockProposal::foreign_proposal(block.clone());
+                        Some(BlockProposal::foreign_proposal(block.clone()));
 
                     proposal_notification
                 };

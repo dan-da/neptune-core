@@ -280,7 +280,7 @@ pub struct GlobalState {
     pub mempool: Mempool,
 
     /// The block proposal to which guessers contribute proof-of-work.
-    pub(crate) block_proposal: BlockProposal,
+    pub(crate) block_proposal: Option<BlockProposal>,
 
     /// Indicates whether the guessing or composing task is running, and if so,
     /// since when.
@@ -308,7 +308,7 @@ impl GlobalState {
             net,
             cli,
             mempool,
-            block_proposal: BlockProposal::default(),
+            block_proposal: None,
             mining_status,
         }
     }
@@ -423,7 +423,10 @@ impl GlobalState {
             });
         }
 
-        let maybe_existing_fee = self.block_proposal.map(|x| x.total_guesser_reward());
+        let maybe_existing_fee = self
+            .block_proposal
+            .as_ref()
+            .map(|p| p.block().total_guesser_reward());
         if maybe_existing_fee.is_some_and(|current| current >= incoming_guesser_fee)
             || incoming_guesser_fee.is_zero()
         {
@@ -1493,7 +1496,7 @@ impl GlobalState {
 
         // Reset block proposal, as that field pertains to the block that
         // was just set as new tip.
-        self.block_proposal = BlockProposal::none();
+        self.block_proposal = None;
 
         // Flush databases
         self.flush_databases().await?;
@@ -2942,7 +2945,7 @@ mod global_state_tests {
         );
 
         state.block_proposal =
-            BlockProposal::foreign_proposal(Arc::new(small_guesser_fraction.clone())).into();
+            Some(BlockProposal::foreign_proposal(Arc::new(small_guesser_fraction.clone())).into());
         assert!(
             state
                 .favor_incoming_block_proposal(
@@ -2954,7 +2957,7 @@ mod global_state_tests {
         );
 
         state.block_proposal =
-            BlockProposal::foreign_proposal(Arc::new(big_guesser_fraction.clone())).into();
+            Some(BlockProposal::foreign_proposal(Arc::new(big_guesser_fraction.clone())).into());
         assert_eq!(
             BlockProposalRejectError::InsufficientFee {
                 current: Some(big_guesser_fraction.total_guesser_reward()),

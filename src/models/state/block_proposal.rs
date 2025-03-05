@@ -11,12 +11,10 @@ use crate::models::state::BlockHeight;
 /// Block proposals have valid correctness proofs, but do not have proof-of-work
 /// (yet). Guessers can contribute proof-of-work to a block proposal and, if
 /// successful, the block proposal becomes a block.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BlockProposal {
     OwnComposition((Arc<Block>, Vec<ExpectedUtxo>)),
     ForeignComposition(Arc<Block>),
-    #[default]
-    None,
 }
 
 impl BlockProposal {
@@ -28,28 +26,10 @@ impl BlockProposal {
         Self::ForeignComposition(block)
     }
 
-    pub(crate) fn none() -> Self {
-        Self::None
-    }
-
-    pub(crate) fn is_some(&self) -> bool {
-        !matches!(*self, Self::None)
-    }
-
-    pub(crate) fn unwrap(&self) -> Arc<Block> {
+    pub(crate) fn block(&self) -> Arc<Block> {
         match self {
             BlockProposal::OwnComposition((block, _)) => block.clone(),
             BlockProposal::ForeignComposition(block) => block.clone(),
-            BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
-        }
-    }
-
-    /// Map the inner block (if any) to some result
-    pub(crate) fn map<T, F: FnOnce(&Block) -> T>(&self, function: F) -> Option<T> {
-        match self {
-            BlockProposal::OwnComposition((block, _)) => Some(function(block)),
-            BlockProposal::ForeignComposition(block) => Some(function(block)),
-            BlockProposal::None => None,
         }
     }
 
@@ -70,7 +50,6 @@ impl BlockProposal {
                     None
                 }
             }
-            BlockProposal::None => None,
         }
     }
 }
