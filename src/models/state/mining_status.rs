@@ -342,10 +342,10 @@ impl MiningStateMachine {
             match *state {
                 // compose role skips over these 2 states
                 MiningState::AwaitBlockProposal if self.role_compose => self.advance()?,
-                MiningState::Guessing if self.role_compose => self.advance()?,
+                MiningState::Guessing if self.role_compose && !self.role_guessing => self.advance()?,
 
                 // guess role skips over Composing, AwaitBlock to Guessing.
-                MiningState::Composing if self.role_guess => {
+                MiningState::Composing if self.role_guess && !self.role_compose => {
                     return Err(InvalidStateTransition {
                         old_state,
                         new_state: *state,
