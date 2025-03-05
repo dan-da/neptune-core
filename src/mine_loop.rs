@@ -678,7 +678,7 @@ pub(crate) async fn mine(
             status_tmp = machine.state_data().clone();
         }
 
-        let guesser_task: Option<JoinHandle<()>> = if machine.can_guess() {
+        let guesser_task: Option<JoinHandle<()>> = if machine.is_guessing() {
             // safe because above `is_some`
             if let MiningStateData::Guessing(_, work) = machine.state_data() {
                 let proposal = work.block();
@@ -727,9 +727,7 @@ pub(crate) async fn mine(
 
         let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
-        let can_compose = machine.can_compose();
-
-        let mut composer_task = if can_compose {
+        let mut composer_task = if machine.is_composing() {
             // todo: obtain block via channel msg from main instead of acquiring lock.
             let latest_block = global_state_lock
                 .lock(|s| s.chain.light_state().to_owned())

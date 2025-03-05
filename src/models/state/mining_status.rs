@@ -87,7 +87,7 @@ impl From<GuessingWorkInfo> for BlockSummary {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) enum MiningEvent {
     Init,
     AwaitBlockProposal,
@@ -111,9 +111,37 @@ pub(crate) enum MiningEvent {
     Shutdown,
 }
 
+impl MiningEvent {
+    fn name(&self) -> &str {
+        match self {
+            Self::Init => "init",
+            Self::AwaitBlockProposal => "await-block-proposal",
+            Self::StartComposing => "start-composing",
+            Self::StartGuessing => "start-guessing",
+            Self::PauseByRpc => "pause-by-rpc",
+            Self::UnPauseByRpc => "unpause-by-rpc",
+            Self::PauseBySyncBlocks => "pause-by-sync-blocks",
+            Self::UnPauseBySyncBlocks => "unpause-by-sync-blocks",
+            Self::PauseByNeedConnection => "pause-by-need-connection",
+            Self::UnPauseByNeedConnection => "unpause-by-need-connection",
+            Self::NewBlockProposal(_) => "new-block-proposal",
+            Self::NewTipBlock => "new-tip-block",
+            Self::ComposeError => "compose-error",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
+// we impl Debug in order to prevent writing out entire block in log(s)
+impl std::fmt::Debug for MiningEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 impl Display for MiningEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{}", self.name())
     }
 }
 
@@ -366,7 +394,7 @@ impl MiningStateMachine {
                 ))?;
             }
             MiningEvent::NewBlockProposal(proposal) => {
-                self.advance_with(MiningStateData::await_block(proposal))?
+                self.advance_with(MiningStateData::await_block(proposal))?;
             }
 
             MiningEvent::NewTipBlock => self.advance_with(MiningStateData::new_tip_block())?,
@@ -572,7 +600,7 @@ impl MiningStateMachine {
         self.role_guess && self.state_data.state() == MiningState::AwaitBlock
     }
 
-    pub(crate) fn can_guess(&self) -> bool {
+    pub(crate) fn is_guessing(&self) -> bool {
         self.role_guess && self.state_data.state() == MiningState::Guessing
     }
 
@@ -580,7 +608,7 @@ impl MiningStateMachine {
         self.role_compose && self.state_data.state() == MiningState::AwaitBlockProposal
     }
 
-    pub(crate) fn can_compose(&self) -> bool {
+    pub(crate) fn is_composing(&self) -> bool {
         self.role_compose && self.state_data.state() == MiningState::Composing
     }
 }
@@ -1013,14 +1041,14 @@ mod state_machine_tests {
     }
 
     // verifies that unpause events only cause a mining status change for
-    // certain starting states -- for every possible combination of machine
-    // config, pause event, and unpause event
+    // certain starting states -- for every combination of machine and
+    // pause/unpause event pair.
     #[traced_test]
     #[test]
     fn unpause_changes_only_certain_states() -> anyhow::Result<()> {
-        // test that all pause events only change correct states
+        // test that all unpause events only change correct states
         for (machine, pause_event, unpause_event) in
-            worker::machine_dual_event_matrix(PAUSE_EVENTS, UNPAUSE_EVENTS)
+            worker::machine_matched_events_matrix(&worker::all_pause_and_unpause_events())
         {
             worker::unpause_changes_only_certain_states(machine, pause_event, unpause_event)?;
         }
@@ -1134,18 +1162,29 @@ mod state_machine_tests {
         }
 
         // returns a list (matrix) of every possible machine config
-        // and every event from each input list of events.
-        pub fn machine_dual_event_matrix(
-            iter_event1: &[MiningEvent],
-            iter_event2: &[MiningEvent],
+        // and every (MiningEvent, MiningEvent) from input list.
+        pub fn machine_matched_events_matrix(
+            matched_events: &[(MiningEvent, MiningEvent)],
         ) -> Vec<(MiningStateMachine, MiningEvent, MiningEvent)> {
-            itertools::iproduct!(machine_matrix(), iter_event1, iter_event2)
-                .map(|(machine, &ref event1, &ref event2)| {
-                    vec![(machine, event1.clone(), event2.clone())]
-                })
+            itertools::iproduct!(machine_matrix(), matched_events)
+                .map(|(machine, &ref events)| vec![(machine, events.0.clone(), events.1.clone())])
                 .flatten()
                 .collect()
         }
+
+        // returns a list (matrix) of every possible machine config
+        // and every event from each input list of events.
+        // pub fn machine_dual_event_matrix(
+        //     iter_event1: &[MiningEvent],
+        //     iter_event2: &[MiningEvent],
+        // ) -> Vec<(MiningStateMachine, MiningEvent, MiningEvent)> {
+        //     itertools::iproduct!(machine_matrix(), iter_event1, iter_event2)
+        //         .map(|(machine, &ref event1, &ref event2)| {
+        //             vec![(machine, event1.clone(), event2.clone())]
+        //         })
+        //         .flatten()
+        //         .collect()
+        // }
 
         // returns a list of every pause event with its matching unpause event.
         pub fn all_pause_and_unpause_events() -> Vec<(MiningEvent, MiningEvent)> {
