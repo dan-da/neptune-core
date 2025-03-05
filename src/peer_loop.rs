@@ -1481,8 +1481,7 @@ impl PeerLoopHandler {
                     .block_proposal
                     .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash);
                 if let Some(proposal) = matching_proposal {
-                    peer.send(PeerMessage::BlockProposal(proposal))
-                        .await?;
+                    peer.send(PeerMessage::BlockProposal(proposal)).await?;
                 } else {
                     self.punish(NegativePeerSanction::BlockProposalNotFound)
                         .await?;
@@ -3486,6 +3485,8 @@ mod peer_loop_tests {
     }
 
     mod block_proposals {
+        use std::sync::Arc;
+
         use super::*;
         use crate::tests::shared::get_dummy_handshake_data_for_genesis;
 
@@ -3549,7 +3550,7 @@ mod peer_loop_tests {
             .await;
 
             let mock = Mock::new(vec![
-                Action::Read(PeerMessage::BlockProposal(Box::new(block1))),
+                Action::Read(PeerMessage::BlockProposal(Arc::new(block1))),
                 Action::Read(PeerMessage::Bye),
             ]);
             peer_loop_handler

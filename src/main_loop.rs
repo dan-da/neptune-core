@@ -2,9 +2,9 @@ pub mod proof_upgrader;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
-use std::sync::Arc;
 
 use anyhow::Result;
 use itertools::Itertools;

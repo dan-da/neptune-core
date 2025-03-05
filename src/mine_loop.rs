@@ -1,8 +1,8 @@
 pub(crate) mod composer_parameters;
 
 use std::cmp::max;
-use std::time::Duration;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -1672,7 +1672,7 @@ pub(crate) mod mine_loop_tests {
                 .block
                 .has_proof_of_work(prev_block.header()));
 
-            prev_block = *mined_block_info.block;
+            prev_block = (*mined_block_info.block).clone();
 
             let block_time = start_st.elapsed()?.as_millis();
             println!(

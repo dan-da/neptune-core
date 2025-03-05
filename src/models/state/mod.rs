@@ -1708,6 +1708,8 @@ impl GlobalState {
 
 #[cfg(test)]
 mod global_state_tests {
+    use std::sync::Arc;
+
     use itertools::Itertools;
     use num_traits::Zero;
     use rand::random;

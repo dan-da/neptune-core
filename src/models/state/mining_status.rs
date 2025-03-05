@@ -1,7 +1,7 @@
 use std::fmt::Display;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use serde::Deserialize;

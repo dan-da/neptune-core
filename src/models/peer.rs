@@ -7,8 +7,8 @@ pub mod transfer_transaction;
 
 use std::fmt::Display;
 use std::net::SocketAddr;
-use std::time::SystemTime;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
