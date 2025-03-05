@@ -575,20 +575,18 @@ impl MainLoopHandler {
                     );
                 }
 
-                // Use block proposal and add expected UTXOs from this
-                // proposal.
-                let proposal = BlockProposal::own_proposal(Box::new(block), expected_utxos.clone());
-
+                let boxed_block = Box::new(block);
                 {
+                    // Use block proposal and add expected UTXOs from this proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
-                    state.block_proposal = proposal.clone();
+                    state.block_proposal = BlockProposal::own_proposal(boxed_block.clone(), expected_utxos.clone());
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
 
                 // Indicate to miner that block proposal was successfully
                 // received by main-loop.
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewBlockProposal(proposal));
+                    .send(MainToMiner::NewBlockProposal(boxed_block));
             }
             MinerToMain::Shutdown(exit_code) => {
                 return Ok(Some(exit_code));
@@ -834,7 +832,7 @@ impl MainLoopHandler {
                 // validity, since that was done in peer loop.
                 // To ensure atomicity, a write-lock must be held over global
                 // state while we check if this proposal is favorable.
-                let (proposal, proposal_notification) = {
+                let proposal_notification = {
                     info!("Received new favorable block proposal for mining operation.");
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let verdict = global_state_mut.favor_incoming_block_proposal(
@@ -849,17 +847,16 @@ impl MainLoopHandler {
                     let proposal_notification =
                         MainToPeerTask::BlockProposalNotification((&*block).into());
 
-                    let proposal = BlockProposal::foreign_proposal(block);
-                    global_state_mut.block_proposal = proposal.clone();
+                    global_state_mut.block_proposal = BlockProposal::foreign_proposal(block.clone());
 
-                    (proposal, proposal_notification)
+                    proposal_notification
                 };
 
                 // Notify all peers of the block proposal we just accepted
                 self.main_to_peer_broadcast_tx.send(proposal_notification)?;
 
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewBlockProposal(proposal));
+                    .send(MainToMiner::NewBlockProposal(block));
             }
             PeerTaskToMain::DisconnectFromLongestLivedPeer => {
                 let global_state = self.global_state_lock.lock_guard().await;

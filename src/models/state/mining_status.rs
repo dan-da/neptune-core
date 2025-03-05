@@ -8,7 +8,8 @@ use serde::Serialize;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::state::BlockProposal;
+
+type ProposedBlock = Box<Block>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GuessingWorkInfo(Box<Block>);
@@ -100,7 +101,7 @@ pub(crate) enum MiningEvent {
     PauseByNeedConnection,
     UnPauseByNeedConnection,
 
-    NewBlockProposal(BlockProposal),
+    NewBlockProposal(ProposedBlock),
     NewTipBlock,
 
     ComposeError,
@@ -331,22 +332,21 @@ impl MiningStateMachine {
                         new_state: MiningState::AwaitBlock,
                     })
                 }
-                (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal))
-                    if proposal.is_some() =>
+                (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal)) =>
                 {
-                    MiningStateData::guessing(proposal.to_owned().unwrap_into().into())
+                    MiningStateData::guessing(proposal.to_owned().into())
                 }
-                _ => MiningStateData::from(*state),
+                _ => MiningStateData::try_from(*state).unwrap(),
             };
             self.advance_with(new_status)?;
 
             // take role(s) into account (composer, guesser)
             match *state {
                 // compose role skips over these 2 states
-                MiningState::Guessing if self.role_compose => self.advance()?,
                 MiningState::AwaitBlockProposal if self.role_compose => self.advance()?,
+                MiningState::Guessing if self.role_compose => self.advance()?,
 
-                // guess role skips over these 2 states
+                // guess role skips over Composing, AwaitBlock to Guessing.
                 MiningState::Composing if self.role_guess => self.advance()?,
                 MiningState::AwaitBlock if self.role_guess => self.advance()?,
                 _ => {}
@@ -404,12 +404,11 @@ impl MiningStateMachine {
             // state.  (without this special case, if we just advance, it still
             // works, but guessing time resets to time of latest block proposal,
             // instead of when guessing actually started.)
-            MiningEvent::NewBlockProposal(proposal)
-                if proposal.is_some() && self.state_data.state() == MiningState::Guessing =>
+            MiningEvent::NewBlockProposal(proposal) if self.state_data.state() == MiningState::Guessing =>
             {
                 self.advance_with(MiningStateData::Guessing(
                     self.state_data.since(),
-                    proposal.unwrap_into().into(),
+                    proposal.into(),
                 ))?;
             }
             MiningEvent::NewBlockProposal(proposal) => {
@@ -705,7 +704,7 @@ pub(crate) enum MiningStateData {
     Paused(SystemTime, Vec<MiningPausedReason>), // Rpc, SyncBlocks, NeedConnection
     UnPaused(SystemTime),
     AwaitBlockProposal(SystemTime),
-    AwaitBlock(SystemTime, BlockProposal),
+    AwaitBlock(SystemTime, ProposedBlock),
     Composing(SystemTime),
     Guessing(SystemTime, GuessingWorkInfo),
     NewTipBlock(SystemTime),
@@ -736,7 +735,7 @@ impl From<&MiningStateData> for MiningStatus {
             MiningStateData::Paused(t, r) => Self::Paused(*t, r.clone()),
             MiningStateData::UnPaused(t) => Self::UnPaused(*t),
             MiningStateData::AwaitBlockProposal(t) => Self::AwaitBlockProposal(*t),
-            MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p.unwrap()).into()),
+            MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p).into()),
             MiningStateData::Composing(t) => Self::Composing(*t),
             MiningStateData::Guessing(t, b) => Self::Guessing(*t, b.into()),
             // MiningStateData::Guessing(_, None) => unreachable!(),
@@ -747,27 +746,51 @@ impl From<&MiningStateData> for MiningStatus {
     }
 }
 
-impl From<MiningState> for MiningStateData {
+impl TryFrom<MiningState> for MiningStateData {
+    type Error = anyhow::Error;
+
     /// note that:
     ///
     ///   1. MiningStateData::Guessing will panic.
     ///   2. MiningStateData::Paused will use MiningPausedReason::Rpc
-    fn from(state: MiningState) -> Self {
-        match state {
+    fn try_from(state: MiningState) -> Result<Self, Self::Error> {
+        Ok(match state {
             MiningState::Disabled => MiningStateData::disabled(),
             MiningState::Init => MiningStateData::init(),
             MiningState::AwaitBlockProposal => MiningStateData::await_block_proposal(),
-            MiningState::AwaitBlock => MiningStateData::await_block(BlockProposal::None),
+            MiningState::AwaitBlock => anyhow::bail!("unsupported usage"),
             MiningState::Composing => MiningStateData::composing(),
-            MiningState::Guessing => panic!("unsupported usage"),
+            MiningState::Guessing => anyhow::bail!("unsupported usage"),
             MiningState::NewTipBlock => MiningStateData::new_tip_block(),
             MiningState::ComposeError => MiningStateData::compose_error(),
             MiningState::Shutdown => MiningStateData::shutdown(),
             MiningState::Paused => MiningStateData::paused(MiningPausedReason::Rpc),
             MiningState::UnPaused => MiningStateData::unpaused(),
-        }
+        })
     }
 }
+
+// impl From<MiningState> for MiningStateData {
+//     /// note that:
+//     ///
+//     ///   1. MiningStateData::Guessing will panic.
+//     ///   2. MiningStateData::Paused will use MiningPausedReason::Rpc
+//     fn from(state: MiningState) -> Self {
+//         match state {
+//             MiningState::Disabled => MiningStateData::disabled(),
+//             MiningState::Init => MiningStateData::init(),
+//             MiningState::AwaitBlockProposal => MiningStateData::await_block_proposal(),
+//             MiningState::AwaitBlock => panic!("unsupported usage"),
+//             MiningState::Composing => MiningStateData::composing(),
+//             MiningState::Guessing => panic!("unsupported usage"),
+//             MiningState::NewTipBlock => MiningStateData::new_tip_block(),
+//             MiningState::ComposeError => MiningStateData::compose_error(),
+//             MiningState::Shutdown => MiningStateData::shutdown(),
+//             MiningState::Paused => MiningStateData::paused(MiningPausedReason::Rpc),
+//             MiningState::UnPaused => MiningStateData::unpaused(),
+//         }
+//     }
+// }
 
 impl From<&MiningStatus> for MiningState {
     fn from(s: &MiningStatus) -> MiningState {
@@ -808,8 +831,8 @@ impl MiningStateData {
         Self::AwaitBlockProposal(SystemTime::now())
     }
 
-    pub fn await_block(block_proposal: BlockProposal) -> Self {
-        Self::AwaitBlock(SystemTime::now(), block_proposal)
+    pub fn await_block(proposed_block: ProposedBlock) -> Self {
+        Self::AwaitBlock(SystemTime::now(), proposed_block)
     }
 
     pub fn composing() -> Self {
@@ -1386,14 +1409,12 @@ mod state_machine_tests {
                     }
                     MiningState::AwaitBlock => {
                         ms.push(MiningStateData::await_block(
-                            BlockProposal::foreign_proposal(Box::new(Block::genesis(
-                                Network::Main,
-                            ))),
+                            fake_proposed_block().into()
                         ));
                     }
                     MiningState::Guessing => {
                         ms.push(MiningStateData::guessing(
-                            Box::new(Block::genesis(Network::Main)).into(),
+                            fake_proposed_block().into()
                         ));
                     }
                     _ => ms.push(MiningStateData::try_from(state).unwrap()),
@@ -1438,8 +1459,8 @@ mod state_machine_tests {
             Ok(())
         }
 
-        pub fn fake_block_proposal() -> BlockProposal {
-            BlockProposal::foreign_proposal(Box::new(Block::genesis(Network::Main)))
+        pub fn fake_proposed_block() -> ProposedBlock {
+            Box::new(Block::genesis(Network::Main))
         }
 
         // return list of events for composer to advance along happy path
@@ -1447,7 +1468,7 @@ mod state_machine_tests {
         pub(super) fn events_compose_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init        --> AwaitBlockProposal --> Composing
-                MiningEvent::NewBlockProposal(fake_block_proposal()), // Composing   --> AwaitBlock
+                MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // AwaitBlock  --> Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock --> Init
             ]
@@ -1458,7 +1479,7 @@ mod state_machine_tests {
         pub(super) fn events_guess_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init               --> AwaitBlockProposal
-                MiningEvent::NewBlockProposal(fake_block_proposal()), // Composing   --> AwaitBlock
+                MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock        --> Init
             ]
@@ -1469,7 +1490,7 @@ mod state_machine_tests {
         pub(super) fn events_compose_and_guess_happy_path() -> Vec<MiningEvent> {
             vec![
                 MiningEvent::Advance, // Init               --> AwaitBlockProposal  --> Composing
-                MiningEvent::NewBlockProposal(fake_block_proposal()), // Composing   --> AwaitBlock
+                MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock        --> Init
             ]
