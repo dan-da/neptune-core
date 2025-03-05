@@ -24,7 +24,6 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time;
-use tokio::time::sleep;
 use tracing::*;
 use twenty_first::math::digest::Digest;
 
@@ -626,7 +625,9 @@ pub(crate) async fn mine(
     let mut machine = MiningStateMachine::new(false, cli.compose, cli.guess);
 
     // assume no connections at startup -- until we get an UnPauseByNeedConnection message.
-    machine.pause_by_need_connection();
+    machine
+        .handle_event(MiningEvent::PauseByNeedConnection)
+        .unwrap();
 
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
@@ -642,22 +643,6 @@ pub(crate) async fn mine(
     let infinite = Duration::from_secs(u32::MAX as u64);
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
-
-    // let maybe_proposal = {
-    //     let (need_connection, syncing, maybe_proposal) = global_state_lock
-    //         .lock(|s| {
-    //             (
-    //                 s.net.peer_map.is_empty(),
-    //                 s.net.sync_anchor.is_some(),
-    //                 s.mining_status.clone(),
-    //                 s.block_proposal.clone(), // Arc
-    //             )
-    //         })
-    //         .await;
-
-    //     machine.set_need_connection(need_connection);
-    //     machine.set_syncing(syncing);
-    // };
 
     loop {
         let mut status_tmp = machine.state_data().clone();

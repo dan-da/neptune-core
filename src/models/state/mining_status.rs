@@ -456,23 +456,6 @@ impl MiningStateMachine {
         };
     }
 
-    /// shortcut for:
-    ///
-    /// if need_connection {
-    ///   ::handle_event(MiningEvent::PauseByNeedConnection)
-    /// } else {
-    ///   ::handle_event(MiningEvent::UnPauseByNeedConnection)
-    /// }
-    pub fn set_need_connection(&mut self, need_connection: bool) {
-        if self.paused_need_connection != need_connection {
-            if need_connection {
-                self.pause_by_need_connection()
-            } else {
-                self.unpause_by_need_connection()
-            }
-        }
-    }
-
     fn pause_by_need_connection(&mut self) {
         if !self.paused_need_connection {
             let reason = MiningPausedReason::NeedConnection;
@@ -510,23 +493,6 @@ impl MiningStateMachine {
             let _ = self.advance_with(MiningStateData::init());
 
             self.paused_by_rpc = false;
-        }
-    }
-
-    /// shortcut for:
-    ///
-    /// if sync_blocks {
-    ///   ::handle_event(MiningEvent::PauseBySyncBlocks)
-    /// } else {
-    ///   ::handle_event(MiningEvent::UnPauseBySyncBlocks)
-    /// }
-    pub fn set_syncing(&mut self, syncing: bool) {
-        if self.paused_while_syncing != syncing {
-            if syncing {
-                self.pause_by_sync_blocks()
-            } else {
-                self.unpause_by_sync_blocks()
-            }
         }
     }
 
