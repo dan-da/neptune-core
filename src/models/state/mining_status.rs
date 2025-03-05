@@ -1434,9 +1434,9 @@ mod state_machine_tests {
             vec![
                 MiningEvent::Init,
                 MiningEvent::AwaitBlockProposal,
-                MiningEvent::Composing,
+                MiningEvent::StartComposing,
                 MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
-                MiningEvent::Guessing,
+                MiningEvent::StartGuessing,
                 MiningEvent::NewTipBlock,
                 MiningEvent::Init,
             ]
