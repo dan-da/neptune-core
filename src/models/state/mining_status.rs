@@ -173,7 +173,6 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 11] = [
     // MiningState::AwaitBlockProposal
     &[
         MiningState::Composing,
-        MiningState::AwaitBlock,
         MiningState::Paused,
         MiningState::Shutdown,
         MiningState::NewTipBlock,
@@ -325,14 +324,14 @@ impl MiningStateMachine {
             .find(|(prev, _)| **prev == old_state)
             .map(|(_, next)| next)
         {
-            let new_status = match (*state, &self.state_data) {
-                (MiningState::AwaitBlock, _) => {
+            let new_status = match (&self.state_data, *state) {
+                (_, MiningState::AwaitBlock) => {
                     return Err(InvalidStateTransition {
                         old_state,
                         new_state: MiningState::AwaitBlock,
                     })
                 }
-                (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal)) => {
+                (MiningStateData::AwaitBlock(_, proposal), MiningState::Guessing) => {
                     MiningStateData::guessing(proposal.to_owned().into())
                 }
                 _ => MiningStateData::try_from(*state).unwrap(),
@@ -346,7 +345,12 @@ impl MiningStateMachine {
                 MiningState::Guessing if self.role_compose => self.advance()?,
 
                 // guess role skips over Composing, AwaitBlock to Guessing.
-                MiningState::Composing if self.role_guess => self.advance()?,
+                MiningState::Composing if self.role_guess => {
+                    return Err(InvalidStateTransition {
+                        old_state,
+                        new_state: *state,
+                    })
+                }
                 MiningState::AwaitBlock if self.role_guess => self.advance()?,
                 _ => {}
             }
@@ -1417,7 +1421,9 @@ mod state_machine_tests {
             MiningState::iter()
                 .filter(|s| *s != MiningState::Disabled)
                 .flat_map(|state| match state {
-                    MiningState::Paused => MiningPausedReason::iter().map(MiningStateData::paused).collect_vec(),
+                    MiningState::Paused => MiningPausedReason::iter()
+                        .map(MiningStateData::paused)
+                        .collect_vec(),
                     _ => vec![state_to_state_data(state)],
                 })
                 .collect()
@@ -1478,7 +1484,7 @@ mod state_machine_tests {
         // from init all the way back to init.
         pub(super) fn events_guess_happy_path() -> Vec<MiningEvent> {
             vec![
-                MiningEvent::Advance, // Init               --> AwaitBlockProposal
+                MiningEvent::Advance, // Init               --> AwaitBlockProposal   --> Composing
                 MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
                 MiningEvent::Advance, // Guessing           --> NewTipBlock
                 MiningEvent::Advance, // NewTipBlock        --> Init
