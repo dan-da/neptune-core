@@ -854,6 +854,12 @@ pub(crate) async fn mine(
                     MainToMiner::UnPauseBySyncBlocks => {
                         machine.handle_event(MiningEvent::UnPauseBySyncBlocks).unwrap();
                     }
+                    MainToMiner::PauseByNeedConnection => {
+                        machine.handle_event(MiningEvent::PauseByNeedConnection).unwrap();
+                    }
+                    MainToMiner::UnPauseByNeedConnection => {
+                        machine.handle_event(MiningEvent::UnPauseByNeedConnection).unwrap();
+                    }
                 }
             }
             new_composition = composer_rx => {

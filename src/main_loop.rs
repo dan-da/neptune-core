@@ -746,6 +746,18 @@ impl MainLoopHandler {
                     self.main_to_miner_tx.send(MainToMiner::PauseBySyncBlocks);
                 }
             }
+            PeerTaskToMain::ConnectionCountChange {
+                old_count,
+                new_count,
+            } => {
+                if new_count == 0 {
+                    self.main_to_miner_tx
+                        .send(MainToMiner::PauseByNeedConnection);
+                } else if old_count == 0 && new_count > 0 {
+                    self.main_to_miner_tx
+                        .send(MainToMiner::UnPauseByNeedConnection);
+                }
+            }
             PeerTaskToMain::RemovePeerMaxBlockHeight(socket_addr) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::RemovePeerMaxBlockHeight");
 

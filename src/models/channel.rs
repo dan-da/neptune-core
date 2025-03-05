@@ -40,7 +40,9 @@ pub(crate) enum MainToMiner {
 
     PauseBySyncBlocks,
     UnPauseBySyncBlocks,
-    // SetCoinbasePubkey,
+
+    PauseByNeedConnection,
+    UnPauseByNeedConnection,
 }
 
 impl MainToMiner {
@@ -55,6 +57,8 @@ impl MainToMiner {
             MainToMiner::UnPauseByRpc => "unpause mining (rpc)",
             MainToMiner::PauseBySyncBlocks => "pause mining (syncing blocks)",
             MainToMiner::UnPauseBySyncBlocks => "unpause mining (synced blocks)",
+            MainToMiner::PauseByNeedConnection => "pause mining (need connection)",
+            MainToMiner::UnPauseByNeedConnection => "unpause mining (got connection)",
         }
     }
 }
@@ -166,6 +170,11 @@ pub(crate) enum PeerTaskToMain {
     },
     RemovePeerMaxBlockHeight(SocketAddr),
 
+    ConnectionCountChange {
+        old_count: usize,
+        new_count: usize,
+    },
+
     /// (\[(peer_listen_address)\], reported_by, distance)
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
 
@@ -189,6 +198,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
+            PeerTaskToMain::ConnectionCountChange{..} => "connection count change",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
         }
         .to_string()

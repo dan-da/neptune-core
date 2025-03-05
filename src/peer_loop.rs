@@ -1776,6 +1776,7 @@ impl PeerLoopHandler {
     pub(crate) async fn run_wrapper<S>(
         &mut self,
         mut peer: S,
+        peer_task_to_main_tx: mpsc::Sender<PeerTaskToMain>,
         from_main_rx: broadcast::Receiver<MainToPeerTask>,
     ) -> Result<()>
     where
@@ -1850,9 +1851,22 @@ impl PeerLoopHandler {
         }
         drop(global_state);
 
-        self.global_state_lock
-            .lock_mut(|s| s.net.peer_map.insert(self.peer_address, new_peer))
-            .await;
+        // todo: we should send some kind of PeerConnected msg to
+        // main instead of changing global state here.
+        let (old_count, new_count) = {
+            let mut gsm = self.global_state_lock.lock_guard_mut().await;
+            let old_count = gsm.net.peer_map.len();
+            gsm.net.peer_map.insert(self.peer_address, new_peer);
+            let new_count = gsm.net.peer_map.len();
+            (old_count, new_count)
+        };
+
+        peer_task_to_main_tx
+            .send(PeerTaskToMain::ConnectionCountChange {
+                old_count,
+                new_count,
+            })
+            .await?;
 
         // `MutablePeerState` contains the part of the peer-loop's state that is mutable
         let mut peer_state = MutablePeerState::new(self.peer_handshake_data.tip_header.height);
@@ -1949,9 +1963,9 @@ mod peer_loop_tests {
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
         let mut peer_loop_handler =
-            PeerLoopHandler::new(to_main_tx, state_lock.clone(), peer_address, hsd, true, 1);
+            PeerLoopHandler::new(to_main_tx.clone(), state_lock.clone(), peer_address, hsd, true, 1);
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx, from_main_rx_clone)
             .await?;
 
         assert_eq!(
@@ -2004,9 +2018,9 @@ mod peer_loop_tests {
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
 
         let mut peer_loop_handler =
-            PeerLoopHandler::new(to_main_tx, state_lock.clone(), sa2, hsd2, true, 0);
+            PeerLoopHandler::new(to_main_tx.clone(), state_lock.clone(), sa2, hsd2, true, 0);
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx, from_main_rx_clone)
             .await
             .unwrap();
 
@@ -2060,7 +2074,7 @@ mod peer_loop_tests {
             1,
         );
         let res = peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await;
         assert!(
             res.is_err(),
@@ -2184,7 +2198,7 @@ mod peer_loop_tests {
             block_without_valid_pow.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await
             .expect("sending (one) invalid block should not result in closed connection");
 
@@ -2264,7 +2278,7 @@ mod peer_loop_tests {
             block_1.header().timestamp,
         );
         alice_peer_loop_handler
-            .run_wrapper(mock_peer_messages, from_main_rx_clone)
+            .run_wrapper(mock_peer_messages, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         match to_main_rx1.recv().await {
@@ -2352,7 +2366,7 @@ mod peer_loop_tests {
             );
 
             peer_loop_handler
-                .run_wrapper(mock, from_main_rx_clone.resubscribe())
+                .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone.resubscribe())
                 .await
                 .unwrap();
         }
@@ -2431,7 +2445,7 @@ mod peer_loop_tests {
         );
 
         peer_loop_handler_1
-            .run_wrapper(mock, from_main_rx_clone.resubscribe())
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone.resubscribe())
             .await?;
 
         // Peer knows block 2_b, verify that canonical chain with 2_a is returned
@@ -2466,7 +2480,7 @@ mod peer_loop_tests {
         );
 
         peer_loop_handler_2
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         Ok(())
@@ -2556,7 +2570,7 @@ mod peer_loop_tests {
         );
 
         peer_loop_handler_2
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         Ok(())
@@ -2590,7 +2604,7 @@ mod peer_loop_tests {
         // This will return error if seen read/write order does not match that of the
         // mocked object.
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await
             .unwrap();
 
@@ -2662,7 +2676,7 @@ mod peer_loop_tests {
         // This will return error if seen read/write order does not match that of the
         // mocked object.
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         Ok(())
@@ -2698,7 +2712,7 @@ mod peer_loop_tests {
             block_1.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await
             .unwrap();
 
@@ -2748,7 +2762,7 @@ mod peer_loop_tests {
             1,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await
             .unwrap();
 
@@ -2784,7 +2798,7 @@ mod peer_loop_tests {
             block_1.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         // Verify that a block was sent to `main_loop`
@@ -2850,7 +2864,7 @@ mod peer_loop_tests {
             block_2.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         match to_main_rx1.recv().await {
@@ -2930,7 +2944,7 @@ mod peer_loop_tests {
             block_4.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         match to_main_rx1.recv().await {
@@ -3011,7 +3025,7 @@ mod peer_loop_tests {
             block_4.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await
             .unwrap();
 
@@ -3084,7 +3098,7 @@ mod peer_loop_tests {
             block_3.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         match to_main_rx1.recv().await {
@@ -3188,7 +3202,7 @@ mod peer_loop_tests {
             block_5.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         match to_main_rx1.recv().await {
@@ -3285,7 +3299,7 @@ mod peer_loop_tests {
         ]);
 
         let mut peer_loop_handler = PeerLoopHandler::with_mocked_time(
-            to_main_tx,
+            to_main_tx.clone(),
             state_lock.clone(),
             sa_1,
             hsd_1,
@@ -3294,7 +3308,7 @@ mod peer_loop_tests {
             block_4.header().timestamp,
         );
         peer_loop_handler
-            .run_wrapper(mock, from_main_rx_clone)
+            .run_wrapper(mock, to_main_tx.clone(), from_main_rx_clone)
             .await?;
 
         // Verify that blocks are sent to `main_loop` in expected ordering
@@ -3803,7 +3817,7 @@ mod peer_loop_tests {
                 1,
             );
             alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .run_wrapper(alice_p2p_messages, alice_peer_to_main_tx.clone(), alice_main_to_peer_rx)
                 .await
                 .unwrap();
 
@@ -3864,7 +3878,7 @@ mod peer_loop_tests {
                 1,
             );
             alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .run_wrapper(alice_p2p_messages, alice_peer_to_main_tx.clone(), alice_main_to_peer_rx)
                 .await
                 .unwrap();
 
@@ -3996,7 +4010,7 @@ mod peer_loop_tests {
             );
             alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
             alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_main_to_peer_rx)
+                .run_wrapper(alice_p2p_messages, alice_peer_to_main_tx.clone(), alice_main_to_peer_rx)
                 .await?;
 
             // AddPeerMaxBlockHeight message triggered *after* sync challenge
