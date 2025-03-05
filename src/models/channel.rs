@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,7 +25,7 @@ pub(crate) enum MainToMiner {
     Shutdown,
 
     /// Communicates to miner that it should work on a new block proposal
-    NewBlockProposal(Box<Block>),
+    NewBlockProposal(Arc<Block>),
 
     /// Main has received a new block or block proposal, and the miner should
     /// stop all work until it receives a [MainToMiner::Continue] message.
@@ -60,7 +61,7 @@ impl MainToMiner {
 
 #[derive(Clone, Debug)]
 pub(crate) struct NewBlockFound {
-    pub block: Box<Block>,
+    pub block: Arc<Block>,
 }
 
 #[derive(Clone, Debug)]
@@ -109,7 +110,7 @@ impl From<&Block> for BlockProposalNotification {
 
 #[derive(Clone, Debug)]
 pub(crate) enum MainToPeerTask {
-    Block(Box<Block>),
+    Block(Arc<Block>),
     BlockProposalNotification(BlockProposalNotification),
     RequestBlockBatch(MainToPeerTaskBatchBlockRequest),
 
@@ -169,7 +170,7 @@ pub(crate) enum PeerTaskToMain {
     PeerDiscoveryAnswer((Vec<(SocketAddr, u128)>, SocketAddr, u8)),
 
     Transaction(Box<PeerTaskToMainTransaction>),
-    BlockProposal(Box<Block>),
+    BlockProposal(Arc<Block>),
     DisconnectFromLongestLivedPeer,
 }
 

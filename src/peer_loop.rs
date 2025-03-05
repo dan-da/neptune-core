@@ -1479,10 +1479,9 @@ impl PeerLoopHandler {
                     .lock_guard()
                     .await
                     .block_proposal
-                    .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash)
-                    .map(|x| x.to_owned());
+                    .filter(|x| x.body().mast_hash() == block_proposal_request.body_mast_hash);
                 if let Some(proposal) = matching_proposal {
-                    peer.send(PeerMessage::BlockProposal(Box::new(proposal)))
+                    peer.send(PeerMessage::BlockProposal(proposal))
                         .await?;
                 } else {
                     self.punish(NegativePeerSanction::BlockProposalNotFound)

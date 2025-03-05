@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::Arc;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -12,18 +13,18 @@ use crate::models::state::BlockHeight;
 /// successful, the block proposal becomes a block.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum BlockProposal {
-    OwnComposition((Box<Block>, Vec<ExpectedUtxo>)),
-    ForeignComposition(Box<Block>),
+    OwnComposition((Arc<Block>, Vec<ExpectedUtxo>)),
+    ForeignComposition(Arc<Block>),
     #[default]
     None,
 }
 
 impl BlockProposal {
-    pub(crate) fn own_proposal(block: Box<Block>, expected_utxos: Vec<ExpectedUtxo>) -> Self {
+    pub(crate) fn own_proposal(block: Arc<Block>, expected_utxos: Vec<ExpectedUtxo>) -> Self {
         Self::OwnComposition((block, expected_utxos))
     }
 
-    pub(crate) fn foreign_proposal(block: Box<Block>) -> Self {
+    pub(crate) fn foreign_proposal(block: Arc<Block>) -> Self {
         Self::ForeignComposition(block)
     }
 
@@ -35,18 +36,10 @@ impl BlockProposal {
         !matches!(*self, Self::None)
     }
 
-    pub(crate) fn unwrap(&self) -> &Box<Block> {
+    pub(crate) fn unwrap(&self) -> Arc<Block> {
         match self {
-            BlockProposal::OwnComposition((block, _)) => block,
-            BlockProposal::ForeignComposition(block) => block,
-            BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
-        }
-    }
-
-    pub(crate) fn unwrap_into(self) -> Box<Block> {
-        match self {
-            BlockProposal::OwnComposition((block, _)) => block,
-            BlockProposal::ForeignComposition(block) => block,
+            BlockProposal::OwnComposition((block, _)) => block.clone(),
+            BlockProposal::ForeignComposition(block) => block.clone(),
             BlockProposal::None => panic!("Called unwrap on a BlockProposal value which was None"),
         }
     }
@@ -61,18 +54,18 @@ impl BlockProposal {
     }
 
     /// Map the inner block (if any) to None if the predicate does not hold
-    pub(crate) fn filter<F: FnOnce(&Block) -> bool>(&self, predicate: F) -> Option<&Block> {
+    pub(crate) fn filter<F: FnOnce(&Block) -> bool>(&self, predicate: F) -> Option<Arc<Block>> {
         match self {
             BlockProposal::OwnComposition((block, _)) => {
                 if predicate(block) {
-                    Some(block)
+                    Some(block.clone())
                 } else {
                     None
                 }
             }
             BlockProposal::ForeignComposition(block) => {
                 if predicate(block) {
-                    Some(block)
+                    Some(block.clone())
                 } else {
                     None
                 }

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
 use std::time::SystemTime;
+use std::sync::Arc;
 
 use anyhow::Result;
 use itertools::Itertools;
@@ -575,19 +576,19 @@ impl MainLoopHandler {
                     );
                 }
 
-                let boxed_block = Box::new(block);
+                let arc_block = Arc::new(block);
                 {
                     // Use block proposal and add expected UTXOs from this proposal.
                     let mut state = self.global_state_lock.lock_guard_mut().await;
                     state.block_proposal =
-                        BlockProposal::own_proposal(boxed_block.clone(), expected_utxos.clone());
+                        BlockProposal::own_proposal(arc_block.clone(), expected_utxos.clone());
                     state.wallet_state.add_expected_utxos(expected_utxos).await;
                 }
 
                 // Indicate to miner that block proposal was successfully
                 // received by main-loop.
                 self.main_to_miner_tx
-                    .send(MainToMiner::NewBlockProposal(boxed_block));
+                    .send(MainToMiner::NewBlockProposal(arc_block));
             }
             MinerToMain::Shutdown(exit_code) => {
                 return Ok(Some(exit_code));
@@ -610,14 +611,14 @@ impl MainLoopHandler {
             PeerTaskToMain::NewBlocks(blocks) => {
                 log_slow_scope!(fn_name!() + "::PeerTaskToMain::NewBlocks");
 
-                let last_block = blocks.last().unwrap().to_owned();
+                let arc_last_block = Arc::new(blocks.last().unwrap().to_owned());
                 let update_jobs = {
                     // The peer tasks also check this condition, if block is more canonical than current
                     // tip, but we have to check it again since the block update might have already been applied
                     // through a message from another peer (or from own miner).
                     let mut global_state_mut = self.global_state_lock.lock_guard_mut().await;
                     let new_canonical =
-                        global_state_mut.incoming_block_is_more_canonical(&last_block);
+                        global_state_mut.incoming_block_is_more_canonical(&arc_last_block);
 
                     if !new_canonical {
                         // The blocks are not canonical, but: if we are in sync
@@ -631,13 +632,13 @@ impl MainLoopHandler {
                         };
                         if sync_anchor
                             .champion
-                            .is_some_and(|(height, _)| height >= last_block.header().height)
+                            .is_some_and(|(height, _)| height >= arc_last_block.header().height)
                         {
                             warn!("Repeated blocks received in sync mode, not storing");
                             return Ok(());
                         }
 
-                        sync_anchor.catch_up(last_block.header().height, last_block.hash());
+                        sync_anchor.catch_up(arc_last_block.header().height, arc_last_block.hash());
 
                         for block in blocks {
                             global_state_mut.store_block_not_tip(block).await?;
@@ -648,8 +649,8 @@ impl MainLoopHandler {
 
                     info!(
                         "Last block from peer is new canonical tip: {}; height: {}",
-                        last_block.hash(),
-                        last_block.header().height
+                        arc_last_block.hash(),
+                        arc_last_block.header().height
                     );
 
                     // Ask miner to stop work until state update is completed
@@ -658,7 +659,7 @@ impl MainLoopHandler {
                     // Get out of sync mode if needed
                     if global_state_mut.net.sync_anchor.is_some() {
                         let stay_in_sync_mode = stay_in_sync_mode(
-                            &last_block.kernel.header,
+                            &arc_last_block.kernel.header,
                             &main_loop_state.sync_state,
                             cli_args.sync_mode_threshold,
                         );
@@ -695,7 +696,7 @@ impl MainLoopHandler {
 
                 // Inform all peers about new block
                 self.main_to_peer_broadcast_tx
-                    .send(MainToPeerTask::Block(Box::new(last_block.clone())))
+                    .send(MainToPeerTask::Block(arc_last_block.clone()))
                     .expect("Peer handler broadcast was closed. This should never happen");
 
                 // Spawn task to handle mempool tx-updating after new blocks.

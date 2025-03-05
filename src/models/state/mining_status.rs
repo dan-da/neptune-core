@@ -1,6 +1,7 @@
 use std::fmt::Display;
 use std::time::Duration;
 use std::time::SystemTime;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use serde::Deserialize;
@@ -9,19 +10,19 @@ use serde::Serialize;
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 
-type ProposedBlock = Box<Block>;
+type ProposedBlock = Arc<Block>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuessingWorkInfo(Box<Block>);
+pub struct GuessingWorkInfo(Arc<Block>);
 
-impl From<Box<Block>> for GuessingWorkInfo {
-    fn from(block: Box<Block>) -> Self {
+impl From<Arc<Block>> for GuessingWorkInfo {
+    fn from(block: Arc<Block>) -> Self {
         Self::new(block)
     }
 }
 
 impl GuessingWorkInfo {
-    pub(crate) fn new(block: Box<Block>) -> Self {
+    pub(crate) fn new(block: Arc<Block>) -> Self {
         Self(block)
     }
 
@@ -1425,7 +1426,7 @@ mod state_machine_tests {
         }
 
         pub fn fake_proposed_block() -> ProposedBlock {
-            Box::new(Block::genesis(Network::Main))
+            Arc::new(Block::genesis(Network::Main))
         }
 
         // return list of events for composer to advance along happy path

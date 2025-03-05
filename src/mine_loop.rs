@@ -2,6 +2,7 @@ pub(crate) mod composer_parameters;
 
 use std::cmp::max;
 use std::time::Duration;
+use std::sync::Arc;
 
 use anyhow::bail;
 use anyhow::Result;
@@ -294,7 +295,7 @@ Difficulty threshold: {threshold}
     );
 
     let new_block_found = NewBlockFound {
-        block: Box::new(block),
+        block: Arc::new(block),
     };
 
     sender

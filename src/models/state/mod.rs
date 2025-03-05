@@ -2940,7 +2940,7 @@ mod global_state_tests {
         );
 
         state.block_proposal =
-            BlockProposal::foreign_proposal(Box::new(small_guesser_fraction.clone())).into();
+            BlockProposal::foreign_proposal(Arc::new(small_guesser_fraction.clone())).into();
         assert!(
             state
                 .favor_incoming_block_proposal(
@@ -2952,7 +2952,7 @@ mod global_state_tests {
         );
 
         state.block_proposal =
-            BlockProposal::foreign_proposal(Box::new(big_guesser_fraction.clone())).into();
+            BlockProposal::foreign_proposal(Arc::new(big_guesser_fraction.clone())).into();
         assert_eq!(
             BlockProposalRejectError::InsufficientFee {
                 current: Some(big_guesser_fraction.total_guesser_reward()),

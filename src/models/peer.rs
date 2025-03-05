@@ -8,6 +8,7 @@ pub mod transfer_transaction;
 use std::fmt::Display;
 use std::net::SocketAddr;
 use std::time::SystemTime;
+use std::sync::Arc;
 
 use handshake_data::HandshakeData;
 use itertools::Itertools;
@@ -450,7 +451,7 @@ pub(crate) enum PeerMessage {
 
     BlockProposalRequest(BlockProposalRequest),
 
-    BlockProposal(Box<Block>),
+    BlockProposal(Arc<Block>),
 
     /// Send a full transaction object to a peer.
     Transaction(Box<TransferTransaction>),
