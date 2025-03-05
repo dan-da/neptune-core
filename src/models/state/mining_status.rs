@@ -351,7 +351,6 @@ impl MiningStateMachine {
         );
 
         match event {
-            // MiningEvent::Advance => self.advance()?,
             MiningEvent::Init => self.advance_with(MiningStateData::init())?,
 
             MiningEvent::AwaitBlockProposal => {
@@ -394,6 +393,10 @@ impl MiningStateMachine {
                 ))?;
             }
             MiningEvent::NewBlockProposal(proposal) => {
+                // guesser skips Composing state.
+                if self.role_guess && self.state_data.state() == MiningState::AwaitBlockProposal {
+                    self.advance_with(MiningStateData::composing())?;
+                }
                 self.advance_with(MiningStateData::await_block(proposal))?;
             }
 
@@ -406,11 +409,7 @@ impl MiningStateMachine {
         Ok(())
     }
 
-    /// prefer advance() and handle_event() instead.
-    pub(crate) fn advance_with(
-        &mut self,
-        new_status: MiningStateData,
-    ) -> Result<(), InvalidStateTransition> {
+    fn advance_with(&mut self, new_status: MiningStateData) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "advance_with: old_state: {}, new_state: {}",
             self.state_data.name(),
