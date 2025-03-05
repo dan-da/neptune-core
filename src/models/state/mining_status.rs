@@ -474,35 +474,43 @@ impl MiningStateMachine {
     }
 
     fn pause_by_need_connection(&mut self) {
-        let reason = MiningPausedReason::NeedConnection;
-        let new_status = MiningStateData::paused(reason);
-        if self.allowed(&new_status) {
-            self.merge_set_paused_status(new_status);
+        if !self.paused_need_connection {
+            let reason = MiningPausedReason::NeedConnection;
+            let new_status = MiningStateData::paused(reason);
+            if self.allowed(&new_status) {
+                self.merge_set_paused_status(new_status);
+            }
+            self.paused_need_connection = true;
         }
-        self.paused_need_connection = true;
     }
 
     fn unpause_by_need_connection(&mut self) {
-        let _ = self.advance_with(MiningStateData::unpaused());
-        let _ = self.advance_with(MiningStateData::init());
+        if self.paused_need_connection {
+            let _ = self.advance_with(MiningStateData::unpaused());
+            let _ = self.advance_with(MiningStateData::init());
 
-        self.paused_need_connection = false;
+            self.paused_need_connection = false;
+        }
     }
 
     fn pause_by_rpc(&mut self) {
-        let reason = MiningPausedReason::Rpc;
-        let new_status = MiningStateData::paused(reason);
-        if self.allowed(&new_status) {
-            self.merge_set_paused_status(new_status);
+        if !self.paused_by_rpc {
+            let reason = MiningPausedReason::Rpc;
+            let new_status = MiningStateData::paused(reason);
+            if self.allowed(&new_status) {
+                self.merge_set_paused_status(new_status);
+            }
+            self.paused_by_rpc = true;
         }
-        self.paused_by_rpc = true;
     }
 
     fn unpause_by_rpc(&mut self) {
-        let _ = self.advance_with(MiningStateData::unpaused());
-        let _ = self.advance_with(MiningStateData::init());
+        if self.paused_by_rpc {
+            let _ = self.advance_with(MiningStateData::unpaused());
+            let _ = self.advance_with(MiningStateData::init());
 
-        self.paused_by_rpc = false;
+            self.paused_by_rpc = false;
+        }
     }
 
     /// shortcut for:
@@ -523,19 +531,23 @@ impl MiningStateMachine {
     }
 
     fn pause_by_sync_blocks(&mut self) {
-        let reason = MiningPausedReason::SyncBlocks;
-        let new_status = MiningStateData::paused(reason);
-        if self.allowed(&new_status) {
-            self.merge_set_paused_status(new_status);
+        if !self.paused_while_syncing {
+            let reason = MiningPausedReason::SyncBlocks;
+            let new_status = MiningStateData::paused(reason);
+            if self.allowed(&new_status) {
+                self.merge_set_paused_status(new_status);
+            }
+            self.paused_while_syncing = true;
         }
-        self.paused_while_syncing = true;
     }
 
     fn unpause_by_sync_blocks(&mut self) {
-        let _ = self.advance_with(MiningStateData::unpaused());
-        let _ = self.advance_with(MiningStateData::init());
+        if self.paused_while_syncing {
+            let _ = self.advance_with(MiningStateData::unpaused());
+            let _ = self.advance_with(MiningStateData::init());
 
-        self.paused_while_syncing = false;
+            self.paused_while_syncing = false;
+        }
     }
 
     pub(crate) fn allowed(&self, status: &MiningStateData) -> bool {

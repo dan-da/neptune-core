@@ -1962,8 +1962,14 @@ mod peer_loop_tests {
 
         let peer_address = get_dummy_socket_address(2);
         let from_main_rx_clone = peer_broadcast_tx.subscribe();
-        let mut peer_loop_handler =
-            PeerLoopHandler::new(to_main_tx.clone(), state_lock.clone(), peer_address, hsd, true, 1);
+        let mut peer_loop_handler = PeerLoopHandler::new(
+            to_main_tx.clone(),
+            state_lock.clone(),
+            peer_address,
+            hsd,
+            true,
+            1,
+        );
         peer_loop_handler
             .run_wrapper(mock, to_main_tx, from_main_rx_clone)
             .await?;
@@ -3817,7 +3823,11 @@ mod peer_loop_tests {
                 1,
             );
             alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_peer_to_main_tx.clone(), alice_main_to_peer_rx)
+                .run_wrapper(
+                    alice_p2p_messages,
+                    alice_peer_to_main_tx.clone(),
+                    alice_main_to_peer_rx,
+                )
                 .await
                 .unwrap();
 
@@ -3878,7 +3888,11 @@ mod peer_loop_tests {
                 1,
             );
             alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_peer_to_main_tx.clone(), alice_main_to_peer_rx)
+                .run_wrapper(
+                    alice_p2p_messages,
+                    alice_peer_to_main_tx.clone(),
+                    alice_main_to_peer_rx,
+                )
                 .await
                 .unwrap();
 
@@ -4010,7 +4024,11 @@ mod peer_loop_tests {
             );
             alice_peer_loop_handler.set_rng(StdRng::from_seed(alice_rng_seed));
             alice_peer_loop_handler
-                .run_wrapper(alice_p2p_messages, alice_peer_to_main_tx.clone(), alice_main_to_peer_rx)
+                .run_wrapper(
+                    alice_p2p_messages,
+                    alice_peer_to_main_tx.clone(),
+                    alice_main_to_peer_rx,
+                )
                 .await?;
 
             // AddPeerMaxBlockHeight message triggered *after* sync challenge

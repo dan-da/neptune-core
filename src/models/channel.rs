@@ -198,7 +198,7 @@ impl PeerTaskToMain {
             PeerTaskToMain::PeerDiscoveryAnswer(_) => "peer discovery answer",
             PeerTaskToMain::Transaction(_) => "transaction",
             PeerTaskToMain::BlockProposal(_) => "block proposal",
-            PeerTaskToMain::ConnectionCountChange{..} => "connection count change",
+            PeerTaskToMain::ConnectionCountChange { .. } => "connection count change",
             PeerTaskToMain::DisconnectFromLongestLivedPeer => "disconnect from longest lived peer",
         }
         .to_string()

@@ -625,6 +625,9 @@ pub(crate) async fn mine(
     let cli = global_state_lock.cli().clone();
     let mut machine = MiningStateMachine::new(false, cli.compose, cli.guess);
 
+    // assume no connections at startup -- until we get an UnPauseByNeedConnection message.
+    machine.pause_by_need_connection();
+
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
@@ -664,36 +667,6 @@ pub(crate) async fn mine(
         guess_restart_timer
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
-
-        // todo: send need-connection messages from main-to-miner.
-
-        // let (gs_mining_status, maybe_proposal) = {
-        //     // todo: remove this read-lock acquisition which slows us down and can
-        //     // potentially interfere with guessing if write-lock is held somewhere.
-        //     // instead this information could be sent to us via channel msgs.
-        //     let (need_connection, syncing, mining_status, maybe_proposal) = global_state_lock
-        //         .lock(|s| {
-        //             (
-        //                 s.net.peer_map.is_empty(),
-        //                 s.net.sync_anchor.is_some(),
-        //                 s.mining_status.clone(),
-        //                 s.block_proposal.clone(), // Arc
-        //             )
-        //         })
-        //         .await;
-
-        //     machine.set_need_connection(need_connection);
-        //     machine.set_syncing(syncing);
-
-        //     (mining_status, maybe_proposal)
-        // };
-
-        if machine.paused_need_connection() {
-            warn!("Not mining because client has no connections");
-            const WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS: u64 = 5;
-            sleep(Duration::from_secs(WAIT_TIME_WHEN_DISCONNECTED_IN_SECONDS)).await;
-            continue;
-        }
 
         // if mining_status::init, then we need to advance to
         // await_block_proposal state.
@@ -855,6 +828,7 @@ pub(crate) async fn mine(
                         machine.handle_event(MiningEvent::UnPauseBySyncBlocks).unwrap();
                     }
                     MainToMiner::PauseByNeedConnection => {
+                        warn!("pausing mining because client has no connections");
                         machine.handle_event(MiningEvent::PauseByNeedConnection).unwrap();
                     }
                     MainToMiner::UnPauseByNeedConnection => {
