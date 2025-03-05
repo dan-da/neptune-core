@@ -697,14 +697,18 @@ pub(crate) async fn mine(
         // if mining_status::init, then we need to advance to
         // await_block_proposal state.
         if machine.state_data().is_init() {
-            machine.advance().unwrap(); // Init --> AwaitBlockProposal
+            machine
+                .handle_event(MiningEvent::AwaitBlockProposal)
+                .unwrap();
         }
 
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
 
-        if machine.can_start_guessing() || machine.can_start_composing() {
-            machine.advance().unwrap()
+        if machine.can_start_composing() {
+            machine.handle_event(MiningEvent::StartComposing).unwrap();
+        } else if machine.can_start_guessing() {
+            machine.handle_event(MiningEvent::StartGuessing).unwrap();
         }
 
         // notify main if status has changed since start of loop.
@@ -823,7 +827,7 @@ pub(crate) async fn mine(
                         // ??? --> NewTipBlock
                         machine.handle_event(MiningEvent::NewTipBlock).unwrap();
                         // NewTipBlock --> Init
-                        machine.advance().unwrap();
+                        machine.handle_event(MiningEvent::Init).unwrap();
 
                         info!("Miner task received notification about new block");
                     }
@@ -887,8 +891,8 @@ pub(crate) async fn mine(
                             // took less time than the minimum block time.
                             error!("Found block with valid proof-of-work but block is invalid.");
                         } else {
-                            machine.advance().unwrap(); // Guessing    --> NewTipBlock
-                            machine.advance().unwrap(); // NewTipBlock --> Init
+                            machine.handle_event(MiningEvent::NewTipBlock).unwrap(); // Guessing    --> NewTipBlock
+                            machine.handle_event(MiningEvent::Init).unwrap(); // NewTipBlock --> Init
 
                             info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;

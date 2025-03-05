@@ -88,9 +88,10 @@ impl From<GuessingWorkInfo> for BlockSummary {
 
 #[derive(Debug, Clone)]
 pub(crate) enum MiningEvent {
-    Advance,
-
     Init,
+    AwaitBlockProposal,
+    StartComposing,
+    StartGuessing,
 
     PauseByRpc,
     UnPauseByRpc,
@@ -236,16 +237,6 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 11] = [
     &[],
 ];
 
-#[rustfmt::skip]
-const HAPPY_PATH_STATE_TRANSITIONS: &[MiningState] = &[
-    MiningState::Init,
-    MiningState::AwaitBlockProposal,
-    MiningState::Composing,
-    MiningState::AwaitBlock,
-    MiningState::Guessing,
-    MiningState::NewTipBlock,
-];
-
 #[derive(Debug, Clone)]
 pub struct MiningStateMachine {
     state_data: MiningStateData, // holds a MiningState.
@@ -310,64 +301,6 @@ impl MiningStateMachine {
         &self.state_data
     }
 
-    /// advances to next state in the happy path, taking role into account.
-    ///
-    /// this is equivalent to `::handle_event(MiningEvent::Advance)`
-    pub fn advance(&mut self) -> Result<(), InvalidStateTransition> {
-        let old_state = self.state_data.state();
-
-        // finds happy-path state that is after our current state, if any.
-        // cycles to beginning of happy-path if necessary.
-        if let Some(state) = HAPPY_PATH_STATE_TRANSITIONS
-            .iter()
-            .circular_tuple_windows::<(_, _)>()
-            .find(|(prev, _)| **prev == old_state)
-            .map(|(_, next)| next)
-        {
-            let new_status = match (&self.state_data, *state) {
-                (_, MiningState::AwaitBlock) => {
-                    return Err(InvalidStateTransition {
-                        old_state,
-                        new_state: MiningState::AwaitBlock,
-                    })
-                }
-                (MiningStateData::AwaitBlock(_, proposal), MiningState::Guessing) => {
-                    MiningStateData::guessing(proposal.to_owned().into())
-                }
-                _ => MiningStateData::try_from(*state).unwrap(),
-            };
-            self.advance_with(new_status)?;
-
-            // take role(s) into account (composer, guesser)
-            match *state {
-                // compose role skips over these 2 states
-                MiningState::AwaitBlockProposal if self.role_compose => self.advance()?,
-                MiningState::Guessing if self.role_compose && !self.role_guessing => self.advance()?,
-
-                // guess role skips over Composing, AwaitBlock to Guessing.
-                MiningState::Composing if self.role_guess && !self.role_compose => {
-                    return Err(InvalidStateTransition {
-                        old_state,
-                        new_state: *state,
-                    })
-                }
-                MiningState::AwaitBlock if self.role_guess => self.advance()?,
-                _ => {}
-            }
-
-            Ok(())
-        } else {
-            // advance only applies to the happy path.
-            // so we ignore this request.
-            tracing::debug!(
-                "advance request ignored because present state '{}' is not on the mining happy path",
-                old_state
-            );
-            // todo: return an error if strict mode enabled.
-            Ok(())
-        }
-    }
-
     /// handles an event.
     ///
     /// Some events have equivalent short-cut methods that can be called instead.
@@ -389,9 +322,25 @@ impl MiningStateMachine {
         );
 
         match event {
-            MiningEvent::Advance => self.advance()?,
-
+            // MiningEvent::Advance => self.advance()?,
             MiningEvent::Init => self.advance_with(MiningStateData::init())?,
+
+            MiningEvent::AwaitBlockProposal => {
+                self.advance_with(MiningStateData::await_block_proposal())?
+            }
+
+            MiningEvent::StartComposing => self.advance_with(MiningStateData::composing())?,
+
+            MiningEvent::StartGuessing if self.state_data.state() == MiningState::AwaitBlock => {
+                match &self.state_data {
+                    MiningStateData::AwaitBlock(_, proposed_block) => {
+                        self.advance_with(MiningStateData::guessing(proposed_block.clone().into()))?
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            // out-of-order event, ignore.
+            MiningEvent::StartGuessing => {}
 
             MiningEvent::PauseByRpc => self.pause_by_rpc(),
             MiningEvent::UnPauseByRpc => self.unpause_by_rpc(),
@@ -1115,10 +1064,10 @@ mod state_machine_tests {
     // mode.
     #[traced_test]
     #[test]
-    fn events_compose_and_guess_happy_path() -> anyhow::Result<()> {
+    fn events_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
             tracing::debug!("machine config: {:?}", machine.config());
-            let result = machine.exec_events(worker::events_compose_and_guess_happy_path());
+            let result = machine.exec_events(worker::events_happy_path());
 
             if !machine.mining_enabled() && machine.strict_state_transitions {
                 assert!(result.is_err());
@@ -1136,7 +1085,7 @@ mod state_machine_tests {
     fn compose_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
             tracing::debug!("machine config: {:?}", machine.config());
-            let result = machine.exec_events(worker::events_compose_happy_path());
+            let result = machine.exec_events(worker::events_happy_path());
 
             if !machine.mining_enabled() && machine.strict_state_transitions {
                 assert!(result.is_err());
@@ -1154,7 +1103,7 @@ mod state_machine_tests {
     fn guess_happy_path() -> anyhow::Result<()> {
         for mut machine in worker::machine_matrix() {
             tracing::debug!("machine config: {:?}", machine.config());
-            let result = machine.exec_events(worker::events_guess_happy_path());
+            let result = machine.exec_events(worker::events_happy_path());
 
             if !machine.mining_enabled() && machine.strict_state_transitions {
                 assert!(result.is_err());
@@ -1172,6 +1121,16 @@ mod state_machine_tests {
 
         use super::*;
         use crate::config_models::network::Network;
+
+        #[rustfmt::skip]
+        const HAPPY_PATH_STATE_TRANSITIONS: &[MiningState] = &[
+            MiningState::Init,
+            MiningState::AwaitBlockProposal,
+            MiningState::Composing,
+            MiningState::AwaitBlock,
+            MiningState::Guessing,
+            MiningState::NewTipBlock,
+        ];
 
         // returns a list of MiningStateMachine, one for every possible configuration.
         pub fn machine_matrix() -> Vec<MiningStateMachine> {
@@ -1471,34 +1430,15 @@ mod state_machine_tests {
 
         // return list of events for composer to advance along happy path
         // from init all the way back to init.
-        pub(super) fn events_compose_happy_path() -> Vec<MiningEvent> {
+        pub(super) fn events_happy_path() -> Vec<MiningEvent> {
             vec![
-                MiningEvent::Advance, // Init        --> AwaitBlockProposal --> Composing
+                MiningEvent::Init,
+                MiningEvent::AwaitBlockProposal,
+                MiningEvent::Composing,
                 MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
-                MiningEvent::Advance, // AwaitBlock  --> Guessing           --> NewTipBlock
-                MiningEvent::Advance, // NewTipBlock --> Init
-            ]
-        }
-
-        // return list of events for guesser to advance along happy path
-        // from init all the way back to init.
-        pub(super) fn events_guess_happy_path() -> Vec<MiningEvent> {
-            vec![
-                MiningEvent::Advance, // Init               --> AwaitBlockProposal   --> Composing
-                MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
-                MiningEvent::Advance, // Guessing           --> NewTipBlock
-                MiningEvent::Advance, // NewTipBlock        --> Init
-            ]
-        }
-
-        // return list of events for composer and guesser node to advance along
-        // happy path from init all the way back to init.
-        pub(super) fn events_compose_and_guess_happy_path() -> Vec<MiningEvent> {
-            vec![
-                MiningEvent::Advance, // Init               --> AwaitBlockProposal  --> Composing
-                MiningEvent::NewBlockProposal(fake_proposed_block()), // Composing   --> AwaitBlock
-                MiningEvent::Advance, // Guessing           --> NewTipBlock
-                MiningEvent::Advance, // NewTipBlock        --> Init
+                MiningEvent::Guessing,
+                MiningEvent::NewTipBlock,
+                MiningEvent::Init,
             ]
         }
     }
