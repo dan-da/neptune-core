@@ -332,8 +332,7 @@ impl MiningStateMachine {
                         new_state: MiningState::AwaitBlock,
                     })
                 }
-                (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal)) =>
-                {
+                (MiningState::Guessing, MiningStateData::AwaitBlock(_, proposal)) => {
                     MiningStateData::guessing(proposal.to_owned().into())
                 }
                 _ => MiningStateData::try_from(*state).unwrap(),
@@ -404,7 +403,8 @@ impl MiningStateMachine {
             // state.  (without this special case, if we just advance, it still
             // works, but guessing time resets to time of latest block proposal,
             // instead of when guessing actually started.)
-            MiningEvent::NewBlockProposal(proposal) if self.state_data.state() == MiningState::Guessing =>
+            MiningEvent::NewBlockProposal(proposal)
+                if self.state_data.state() == MiningState::Guessing =>
             {
                 self.advance_with(MiningStateData::Guessing(
                     self.state_data.since(),
@@ -1215,13 +1215,28 @@ mod state_machine_tests {
         }
 
         // returns all MiningStateData in the happy path for compose+guess role.
-        pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStateData> {
+        pub(super) fn compose_and_guess_happy_path_states() -> Vec<MiningState> {
             HAPPY_PATH_STATE_TRANSITIONS
                 .iter()
                 .cycle()
                 .take(HAPPY_PATH_STATE_TRANSITIONS.len() + 1)
-                .map(|s| MiningStateData::try_from(*s).unwrap())
+                .copied()
                 .collect_vec()
+        }
+
+        pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStateData> {
+            compose_and_guess_happy_path_states()
+                .into_iter()
+                .map(state_to_state_data)
+                .collect_vec()
+        }
+
+        pub fn state_to_state_data(state: MiningState) -> MiningStateData {
+            match state {
+                MiningState::AwaitBlock => MiningStateData::await_block(fake_proposed_block()),
+                MiningState::Guessing => MiningStateData::guessing(fake_proposed_block().into()),
+                _ => MiningStateData::try_from(state).unwrap(),
+            }
         }
 
         // verifies that input pause event succeeds without error for every
@@ -1407,17 +1422,9 @@ mod state_machine_tests {
                             ms.push(MiningStateData::paused(reason))
                         }
                     }
-                    MiningState::AwaitBlock => {
-                        ms.push(MiningStateData::await_block(
-                            fake_proposed_block().into()
-                        ));
+                    _ => {
+                        ms.push(state_to_state_data(state))
                     }
-                    MiningState::Guessing => {
-                        ms.push(MiningStateData::guessing(
-                            fake_proposed_block().into()
-                        ));
-                    }
-                    _ => ms.push(MiningStateData::try_from(state).unwrap()),
                 }
             }
             ms
