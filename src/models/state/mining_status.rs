@@ -78,7 +78,7 @@ pub(crate) enum MiningStateData {
     AwaitBlockProposal(SystemTime),
     AwaitBlock(SystemTime, ProposedBlock),
     Composing(SystemTime),
-    Guessing(SystemTime, GuessingWorkInfo),
+    Guessing(SystemTime, ProposedBlock),
     NewTipBlock(SystemTime),
     ComposeError(SystemTime),
     Shutdown(SystemTime),
@@ -169,46 +169,6 @@ pub enum MiningPausedReason {
     NeedConnection,
 }
 
-/// represents work-data for the Guessing state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuessingWorkInfo(Arc<Block>);
-
-impl From<Arc<Block>> for GuessingWorkInfo {
-    fn from(block: Arc<Block>) -> Self {
-        Self::new(block)
-    }
-}
-
-impl GuessingWorkInfo {
-    pub(crate) fn new(block: Arc<Block>) -> Self {
-        Self(block)
-    }
-
-    pub fn block(&self) -> &Block {
-        &self.0
-    }
-
-    pub fn num_inputs(&self) -> usize {
-        self.0.body().transaction_kernel.inputs.len()
-    }
-
-    pub fn num_outputs(&self) -> usize {
-        self.0.body().transaction_kernel.outputs.len()
-    }
-
-    pub fn total_coinbase(&self) -> NativeCurrencyAmount {
-        self.0
-            .body()
-            .transaction_kernel
-            .coinbase
-            .unwrap_or_default()
-    }
-
-    pub fn total_guesser_fee(&self) -> NativeCurrencyAmount {
-        self.0.body().transaction_kernel.fee
-    }
-}
-
 /// intended for summarizing a proposed block for the Guessing state.
 ///
 /// Intended to be sent via RPC API.  So it implements Serialize and
@@ -229,23 +189,6 @@ impl From<&Block> for BlockSummary {
             total_coinbase: b.body().transaction_kernel.coinbase.unwrap_or_default(),
             total_guesser_fee: b.body().transaction_kernel.fee,
         }
-    }
-}
-
-impl From<&GuessingWorkInfo> for BlockSummary {
-    fn from(w: &GuessingWorkInfo) -> Self {
-        Self {
-            num_inputs: w.num_inputs(),
-            num_outputs: w.num_outputs(),
-            total_coinbase: w.total_coinbase(),
-            total_guesser_fee: w.total_guesser_fee(),
-        }
-    }
-}
-
-impl From<GuessingWorkInfo> for BlockSummary {
-    fn from(w: GuessingWorkInfo) -> Self {
-        Self::from(&w)
     }
 }
 
@@ -334,7 +277,7 @@ impl From<&MiningStateData> for MiningStatus {
             MiningStateData::AwaitBlockProposal(t) => Self::AwaitBlockProposal(*t),
             MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p).into()),
             MiningStateData::Composing(t) => Self::Composing(*t),
-            MiningStateData::Guessing(t, b) => Self::Guessing(*t, b.into()),
+            MiningStateData::Guessing(t, b) => Self::Guessing(*t, (&**b).into()),
             // MiningStateData::Guessing(_, None) => unreachable!(),
             MiningStateData::NewTipBlock(t) => Self::NewTipBlock(*t),
             MiningStateData::ComposeError(t) => Self::ComposeError(*t),
@@ -414,8 +357,8 @@ impl MiningStateData {
         Self::Composing(SystemTime::now())
     }
 
-    pub fn guessing(work_info: GuessingWorkInfo) -> Self {
-        Self::Guessing(SystemTime::now(), work_info)
+    pub fn guessing(proposed_block: ProposedBlock) -> Self {
+        Self::Guessing(SystemTime::now(), proposed_block)
     }
 
     pub fn new_tip_block() -> Self {

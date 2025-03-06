@@ -686,9 +686,7 @@ pub(crate) async fn mine(
 
         let guesser_task: Option<JoinHandle<()>> = if machine.is_guessing() {
             // safe because above `is_some`
-            if let MiningStateData::Guessing(_, work) = machine.state_data() {
-                let proposal = work.block();
-
+            if let MiningStateData::Guessing(_, proposal) = machine.state_data() {
                 // todo: obtain these via channel msg instead of acquiring lock.
                 let (guesser_key, latest_block_header) = {
                     let state = global_state_lock.lock_guard().await;
@@ -701,7 +699,7 @@ pub(crate) async fn mine(
                 };
 
                 let guesser_task = guess_nonce(
-                    proposal.to_owned(),
+                    (**proposal).to_owned(),
                     latest_block_header,
                     guesser_tx,
                     guesser_key,

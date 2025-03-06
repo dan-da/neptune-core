@@ -207,7 +207,7 @@ impl MiningStateMachine {
             MiningEvent::StartGuessing if self.state_data.state() == MiningState::AwaitBlock => {
                 match &self.state_data {
                     MiningStateData::AwaitBlock(_, proposed_block) => {
-                        self.advance_with(MiningStateData::guessing(proposed_block.clone().into()))?
+                        self.advance_with(MiningStateData::guessing(proposed_block.clone()))?
                     }
                     _ => unreachable!(),
                 }
@@ -752,7 +752,7 @@ mod state_machine_tests {
         pub fn state_to_state_data(state: MiningState) -> MiningStateData {
             match state {
                 MiningState::AwaitBlock => MiningStateData::await_block(fake_proposed_block()),
-                MiningState::Guessing => MiningStateData::guessing(fake_proposed_block().into()),
+                MiningState::Guessing => MiningStateData::guessing(fake_proposed_block()),
                 _ => MiningStateData::try_from(state).unwrap(),
             }
         }
@@ -761,7 +761,7 @@ mod state_machine_tests {
         pub(super) async fn new_block_proposal_replaces_old(
             mut machine: MiningStateMachine,
         ) -> anyhow::Result<()> {
-            machine.state_data = MiningStateData::guessing(fake_proposed_block().into());
+            machine.state_data = MiningStateData::guessing(fake_proposed_block());
 
             let guesser_fraction = 0.75;
             let (new_block, _) = make_mock_block_guesser_preimage_and_guesser_fraction(
