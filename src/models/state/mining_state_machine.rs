@@ -138,7 +138,7 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 11] = [
 ];
 
 #[derive(Debug, Clone)]
-pub struct MiningStateMachine {
+pub(crate) struct MiningStateMachine {
     state_data: MiningStateData, // holds a MiningState.
 
     paused_while_syncing: bool,
@@ -150,14 +150,14 @@ pub struct MiningStateMachine {
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("invalid state transition from {:?} to {:?}", old_state, new_state)]
-pub struct InvalidStateTransition {
+pub(crate) struct InvalidStateTransition {
     pub old_state: MiningState,
     pub new_state: MiningState,
 }
 
 /// configuration for [MiningStateMachine]
 #[derive(Debug, Clone)]
-pub struct MiningStateMachineConfig {
+pub(crate) struct MiningStateMachineConfig {
     pub role_compose: bool,
     pub role_guess: bool,
 
@@ -183,25 +183,12 @@ impl MiningStateMachine {
         &self.config
     }
 
-    pub fn set_config(&mut self, config: MiningStateMachineConfig) {
-        self.config = config;
-    }
-
     pub(crate) fn state_data(&self) -> &MiningStateData {
         &self.state_data
     }
 
-    /// handles an event.
-    ///
-    /// Some events have equivalent short-cut methods that can be called instead.
-    ///
-    /// the `Advance` event automatically moves to the next state in the happy-path.
-    /// See `::advance()` for details.
-    ///
-    /// `::set_syncing()` can be used to pause/unpause because of SyncBlocks
-    ///
-    /// `::set_need_connection()` can be used to pause/unpause because of connection status.
-    pub(crate) fn handle_event(
+    /// handles a single [MiningEvent].
+    pub fn handle_event(
         &mut self,
         event: MiningEvent,
     ) -> Result<(), InvalidStateTransition> {
@@ -272,6 +259,10 @@ impl MiningStateMachine {
         Ok(())
     }
 
+    // advances to input status if allowed.
+    //
+    // returns error if not allowed and in strict_transitions mode.
+    // silently ignores input if not allowed and not in strict mode.
     fn advance_with(&mut self, new_status: MiningStateData) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "advance_with: old_state: {}, new_state: {}",
@@ -317,12 +308,18 @@ impl MiningStateMachine {
         Ok(())
     }
 
+    // sets new StateData and logs a debug msg.
     fn set_new_status(&mut self, new_status: MiningStateData) {
         self.state_data = new_status;
         tracing::debug!("set new state: {}", self.state_data.name());
     }
 
+    // merges two Paused statuses together and sets as status.
+    //   1. keeps timestamp of the original status.
+    //   2. appends reasons(s) of new status to original status reasons.
+    //   3. ensures reasons are unique.
     //
+    // panics if old or new status is not Paused.
     fn merge_set_paused_status(&mut self, new_status: MiningStateData) {
         let merged_status = match (self.state_data.clone(), new_status) {
             (
@@ -418,7 +415,7 @@ impl MiningStateMachine {
     //   3. Only allow Disabled state if mining not enabled.
     //   4. Only allow Shutdown when we have been paused in more than one way.
     //      (once pause count returns to 1, normal rules apply)
-    pub(crate) fn allowed(&self, status: &MiningStateData) -> bool {
+    fn allowed(&self, status: &MiningStateData) -> bool {
         let state = status.state();
 
         // we normally don't allow state equality since status variant data (eg
@@ -448,9 +445,9 @@ impl MiningStateMachine {
             + self.paused_need_connection as u8
     }
 
-    pub fn paused_need_connection(&self) -> bool {
-        self.paused_need_connection
-    }
+    // pub fn paused_need_connection(&self) -> bool {
+    //     self.paused_need_connection
+    // }
 
     fn ensure_allowed(&self, new_status: &MiningStateData) -> Result<(), InvalidStateTransition> {
         if self.allowed(new_status) {
@@ -463,7 +460,7 @@ impl MiningStateMachine {
         }
     }
 
-    pub(crate) fn mining_enabled(&self) -> bool {
+    pub fn mining_enabled(&self) -> bool {
         self.config.role_compose || self.config.role_guess
     }
 
@@ -471,20 +468,20 @@ impl MiningStateMachine {
     //     self.paused_count() > 0
     // }
 
-    pub(crate) fn can_start_guessing(&self) -> bool {
+    pub fn can_start_guessing(&self) -> bool {
         self.config.role_guess && self.state_data.state() == MiningState::AwaitBlock
     }
 
-    pub(crate) fn is_guessing(&self) -> bool {
+    pub fn is_guessing(&self) -> bool {
         self.config.role_guess && self.state_data.state() == MiningState::Guessing
     }
 
-    pub(crate) fn can_start_composing(&self) -> bool {
+    pub fn can_start_composing(&self) -> bool {
         self.config.role_compose && self.state_data.state() == MiningState::AwaitBlockProposal
     }
 
-    pub(crate) fn is_composing(&self) -> bool {
-        self.config.role_compose && self.state_data.state() == MiningState::Composing
+    pub fn is_composing(&self) -> bool {
+        self.config().role_compose && self.state_data.state() == MiningState::Composing
     }
 }
 
