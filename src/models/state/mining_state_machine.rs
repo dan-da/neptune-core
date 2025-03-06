@@ -188,10 +188,7 @@ impl MiningStateMachine {
     }
 
     /// handles a single [MiningEvent].
-    pub fn handle_event(
-        &mut self,
-        event: MiningEvent,
-    ) -> Result<(), InvalidStateTransition> {
+    pub fn handle_event(&mut self, event: MiningEvent) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "handle_event: old_state: {}, event: {}",
             self.state_data.name(),
