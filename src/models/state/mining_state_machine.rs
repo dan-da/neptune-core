@@ -7,11 +7,17 @@
 //! 1. Simplify the complex code in the mining loop so it is
 //!    more maintainable.
 //!
-//! 2. Cleanly support granular display of mining-status, so user can
+//! 2. Facilitate a lock-free mining loop, which means less
+//!    possibility of delay for miners.
+//!
+//! 3. Cleanly support granular display of mining-status, so user can
 //!    see a message like "waiting for block proposal" rather than
 //!    just "inactive".
 //!
-//! 3. Make the core logic of transitioning between mining states
+//! 4. consolidate/unify pause and unpause logic, since pausing
+//!    can occur for different reasons.
+//!
+//! 5. Make the core logic of transitioning between mining states
 //!    testable via unit tests.
 //!
 //!
@@ -33,11 +39,25 @@
 
 use itertools::Itertools;
 
-use super::mining_status::MiningState;
-use super::mining_status::MiningStateData;
 use super::mining_status::MiningEvent;
 use super::mining_status::MiningPausedReason;
+use super::mining_status::MiningState;
+use super::mining_status::MiningStateData;
 
+// Defines the allowed transitions between states.
+//
+// The order of sub-arrays is important.  Each sub-array is indexed by the
+// integer value of the corresponding MiningState variant.  Eg:
+//
+//  MiningState::Init = 0                 --> index 0.
+//  MiningState::AwaitBlockProposal = 1   --> index 1.
+//  MiningState::Composing = 2            --> index 2.
+//
+// Each sub-array contains the set of states that are allowed to occur after the
+// indexed state.
+//
+// The "happy path" represents the expected progression of states during normal
+// mining.  see also: state_machine_tests::worker::HAPPY_PATH_STATE_TRANSITIONS
 #[rustfmt::skip]
 const MINING_STATE_TRANSITIONS: [&[MiningState]; 11] = [
 
@@ -125,12 +145,7 @@ pub struct MiningStateMachine {
     paused_by_rpc: bool,
     paused_need_connection: bool,
 
-    role_compose: bool,
-    role_guess: bool,
-
-    // true: return error on invalid state transitions.
-    // false: ignore invalid state transitions, return Ok()
-    strict_state_transitions: bool,
+    config: MiningStateMachineConfig,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -140,6 +155,7 @@ pub struct InvalidStateTransition {
     pub new_state: MiningState,
 }
 
+/// configuration for [MiningStateMachine]
 #[derive(Debug, Clone)]
 pub struct MiningStateMachineConfig {
     pub role_compose: bool,
@@ -151,30 +167,24 @@ pub struct MiningStateMachineConfig {
 }
 
 impl MiningStateMachine {
-    pub fn new(strict_state_transitions: bool, role_compose: bool, role_guess: bool) -> Self {
+    pub fn new(config: MiningStateMachineConfig) -> Self {
         let myself = Self {
+            config,
             state_data: MiningStateData::init(),
             paused_while_syncing: false,
             paused_by_rpc: false,
             paused_need_connection: false,
-            strict_state_transitions,
-            role_compose,
-            role_guess,
         };
         tracing::debug!("new {:?}", myself);
         myself
     }
 
-    pub fn config(&self) -> MiningStateMachineConfig {
-        MiningStateMachineConfig {
-            strict_state_transitions: self.strict_state_transitions,
-            role_compose: self.role_compose,
-            role_guess: self.role_guess,
-        }
+    pub fn config(&self) -> &MiningStateMachineConfig {
+        &self.config
     }
 
-    pub fn set_strict_state_transitions(&mut self, strict: bool) {
-        self.strict_state_transitions = strict;
+    pub fn set_config(&mut self, config: MiningStateMachineConfig) {
+        self.config = config;
     }
 
     pub(crate) fn state_data(&self) -> &MiningStateData {
@@ -245,7 +255,9 @@ impl MiningStateMachine {
             }
             MiningEvent::NewBlockProposal(proposal) => {
                 // guesser skips Composing state.
-                if self.role_guess && self.state_data.state() == MiningState::AwaitBlockProposal {
+                if self.config.role_guess
+                    && self.state_data.state() == MiningState::AwaitBlockProposal
+                {
                     self.advance_with(MiningStateData::composing())?;
                 }
                 self.advance_with(MiningStateData::await_block(proposal))?;
@@ -273,7 +285,7 @@ impl MiningStateMachine {
             for reason in reasons {
                 self.pause(reason)
             }
-        } else if self.strict_state_transitions {
+        } else if self.config.strict_state_transitions {
             self.ensure_allowed(&new_status)?;
             self.set_new_status(new_status);
         } else if self.allowed(&new_status) {
@@ -310,6 +322,7 @@ impl MiningStateMachine {
         tracing::debug!("set new state: {}", self.state_data.name());
     }
 
+    //
     fn merge_set_paused_status(&mut self, new_status: MiningStateData) {
         let merged_status = match (self.state_data.clone(), new_status) {
             (
@@ -394,6 +407,17 @@ impl MiningStateMachine {
         }
     }
 
+    // check if a given target status can be transitioned to or not.
+    //
+    // the general case is to check if the target state is allowed
+    // for the current state in the STATE_TRANSITIONS_TABLE.
+    //
+    // however some special cases are checked first:
+    //   1. Allow Init to be specified when already in Init state.
+    //   2. Allow same StateData (no change).
+    //   3. Only allow Disabled state if mining not enabled.
+    //   4. Only allow Shutdown when we have been paused in more than one way.
+    //      (once pause count returns to 1, normal rules apply)
     pub(crate) fn allowed(&self, status: &MiningStateData) -> bool {
         let state = status.state();
 
@@ -401,8 +425,8 @@ impl MiningStateMachine {
         // timestamps) can differ between 2 MiningStateData with same state.
         // We make an exception for Init because otherwise it can't be
         // manually set.
-        if state == self.state_data.state() && state == MiningState::Init {
-            true
+        if state == self.state_data.state() {
+            state == MiningState::Init
         } else if *status == self.state_data {
             true
         } else if !self.mining_enabled() {
@@ -410,10 +434,11 @@ impl MiningStateMachine {
         } else if self.paused_count() > 1 {
             state == MiningState::Shutdown
         } else {
-            let state = status.state();
+            // enforce state-transitions defined in MINING_STATE_TRANSITIONS
+            let s = status.state();
             let allowed_states: &[MiningState] =
                 MINING_STATE_TRANSITIONS[self.state_data.state() as usize];
-            allowed_states.iter().any(|v| *v == state)
+            allowed_states.iter().any(|v| *v == s)
         }
     }
 
@@ -439,7 +464,7 @@ impl MiningStateMachine {
     }
 
     pub(crate) fn mining_enabled(&self) -> bool {
-        self.role_compose || self.role_guess
+        self.config.role_compose || self.config.role_guess
     }
 
     // pub(crate) fn mining_paused(&self) -> bool {
@@ -447,22 +472,21 @@ impl MiningStateMachine {
     // }
 
     pub(crate) fn can_start_guessing(&self) -> bool {
-        self.role_guess && self.state_data.state() == MiningState::AwaitBlock
+        self.config.role_guess && self.state_data.state() == MiningState::AwaitBlock
     }
 
     pub(crate) fn is_guessing(&self) -> bool {
-        self.role_guess && self.state_data.state() == MiningState::Guessing
+        self.config.role_guess && self.state_data.state() == MiningState::Guessing
     }
 
     pub(crate) fn can_start_composing(&self) -> bool {
-        self.role_compose && self.state_data.state() == MiningState::AwaitBlockProposal
+        self.config.role_compose && self.state_data.state() == MiningState::AwaitBlockProposal
     }
 
     pub(crate) fn is_composing(&self) -> bool {
-        self.role_compose && self.state_data.state() == MiningState::Composing
+        self.config.role_compose && self.state_data.state() == MiningState::Composing
     }
 }
-
 
 #[cfg(test)]
 mod state_machine_tests {
@@ -490,7 +514,7 @@ mod state_machine_tests {
         for mut machine in worker::machine_matrix() {
             let result = machine.exec_states(worker::compose_and_guess_happy_path());
 
-            if !machine.mining_enabled() && machine.strict_state_transitions {
+            if !machine.mining_enabled() && machine.config().strict_state_transitions {
                 assert!(result.is_err());
             } else {
                 assert!(result.is_ok());
@@ -575,7 +599,7 @@ mod state_machine_tests {
             tracing::debug!("machine config: {:?}", machine.config());
             let result = machine.exec_events(worker::events_happy_path());
 
-            if !machine.mining_enabled() && machine.strict_state_transitions {
+            if !machine.mining_enabled() && machine.config().strict_state_transitions {
                 assert!(result.is_err());
             } else {
                 assert!(result.is_ok());
@@ -593,7 +617,7 @@ mod state_machine_tests {
             tracing::debug!("machine config: {:?}", machine.config());
             let result = machine.exec_events(worker::events_happy_path());
 
-            if !machine.mining_enabled() && machine.strict_state_transitions {
+            if !machine.mining_enabled() && machine.config().strict_state_transitions {
                 assert!(result.is_err());
             } else {
                 assert!(result.is_ok());
@@ -611,7 +635,7 @@ mod state_machine_tests {
             tracing::debug!("machine config: {:?}", machine.config());
             let result = machine.exec_events(worker::events_happy_path());
 
-            if !machine.mining_enabled() && machine.strict_state_transitions {
+            if !machine.mining_enabled() && machine.config().strict_state_transitions {
                 assert!(result.is_err());
             } else {
                 assert!(result.is_ok());
@@ -621,14 +645,15 @@ mod state_machine_tests {
     }
 
     mod worker {
+        use std::sync::Arc;
+
         use rand::rng;
         use rand::seq::SliceRandom;
         use strum::IntoEnumIterator;
-        use std::sync::Arc;
 
+        use super::super::super::mining_status::ProposedBlock;
         use super::*;
         use crate::config_models::network::Network;
-        use super::super::super::mining_status::ProposedBlock;
         use crate::Block;
 
         #[rustfmt::skip]
@@ -645,8 +670,12 @@ mod state_machine_tests {
         pub fn machine_matrix() -> Vec<MiningStateMachine> {
             let iter_bool = [true, false];
             itertools::iproduct!(iter_bool, iter_bool, iter_bool)
-                .map(|(strict, composing, guessing)| {
-                    vec![MiningStateMachine::new(strict, composing, guessing)]
+                .map(|(strict_state_transitions, role_compose, role_guess)| {
+                    vec![MiningStateMachine::new(MiningStateMachineConfig {
+                        strict_state_transitions,
+                        role_compose,
+                        role_guess,
+                    })]
                 })
                 .flatten()
                 .collect()
@@ -658,7 +687,7 @@ mod state_machine_tests {
             iter_event: &[MiningEvent],
         ) -> Vec<(MiningStateMachine, MiningEvent)> {
             itertools::iproduct!(machine_matrix(), iter_event)
-                .map(|(machine, &ref event)| vec![(machine, event.clone())])
+                .map(|(machine, event)| vec![(machine, event.clone())])
                 .flatten()
                 .collect()
         }
@@ -669,7 +698,7 @@ mod state_machine_tests {
             matched_events: &[(MiningEvent, MiningEvent)],
         ) -> Vec<(MiningStateMachine, MiningEvent, MiningEvent)> {
             itertools::iproduct!(machine_matrix(), matched_events)
-                .map(|(machine, &ref events)| vec![(machine, events.0.clone(), events.1.clone())])
+                .map(|(machine, events)| vec![(machine, events.0.clone(), events.1.clone())])
                 .flatten()
                 .collect()
         }
@@ -691,9 +720,9 @@ mod state_machine_tests {
         // returns a list of every pause event with its matching unpause event.
         pub fn all_pause_and_unpause_events() -> Vec<(MiningEvent, MiningEvent)> {
             PAUSE_EVENTS
-                .into_iter()
+                .iter()
                 .cloned()
-                .zip(UNPAUSE_EVENTS.into_iter().cloned())
+                .zip(UNPAUSE_EVENTS.iter().cloned())
                 .collect()
         }
 
@@ -857,7 +886,7 @@ mod state_machine_tests {
                 events.shuffle(&mut rng());
 
                 // force to this random status.  (not allowed by API)
-                machine.state_data = status.iter().cloned().next().unwrap();
+                machine.state_data = status.first().cloned().unwrap();
 
                 for event in events.iter() {
                     match *event {

@@ -43,9 +43,10 @@ use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
+use crate::models::state::mining_state_machine::MiningStateMachine;
+use crate::models::state::mining_state_machine::MiningStateMachineConfig;
 use crate::models::state::mining_status::MiningEvent;
 use crate::models::state::mining_status::MiningStateData;
-use crate::models::state::mining_state_machine::MiningStateMachine;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
@@ -622,7 +623,12 @@ pub(crate) async fn mine(
     global_state_lock: GlobalStateLock,
 ) -> Result<()> {
     let cli = global_state_lock.cli().clone();
-    let mut machine = MiningStateMachine::new(false, cli.compose, cli.guess);
+
+    let mut machine = MiningStateMachine::new(MiningStateMachineConfig {
+        strict_state_transitions: false,
+        role_compose: cli.compose,
+        role_guess: cli.guess,
+    });
 
     // assume no connections at startup -- until we get an UnPauseByNeedConnection message.
     machine

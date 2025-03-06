@@ -3,8 +3,8 @@ pub mod block_proposal;
 pub mod blockchain_state;
 pub mod light_state;
 pub mod mempool;
-pub mod mining_status;
 pub mod mining_state_machine;
+pub mod mining_status;
 pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;
@@ -2945,8 +2945,9 @@ mod global_state_tests {
             "Must favor low guesser fee over none"
         );
 
-        state.block_proposal =
-            Some(BlockProposal::foreign_proposal(Arc::new(small_guesser_fraction.clone())).into());
+        state.block_proposal = Some(BlockProposal::foreign_proposal(Arc::new(
+            small_guesser_fraction.clone(),
+        )));
         assert!(
             state
                 .favor_incoming_block_proposal(
@@ -2957,8 +2958,9 @@ mod global_state_tests {
             "Must favor big guesser fee over low"
         );
 
-        state.block_proposal =
-            Some(BlockProposal::foreign_proposal(Arc::new(big_guesser_fraction.clone())).into());
+        state.block_proposal = Some(BlockProposal::foreign_proposal(Arc::new(
+            big_guesser_fraction.clone(),
+        )));
         assert_eq!(
             BlockProposalRejectError::InsufficientFee {
                 current: Some(big_guesser_fraction.total_guesser_reward()),
