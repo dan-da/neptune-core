@@ -2139,7 +2139,9 @@ mod peer_loop_tests {
             1,
         );
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
-        peer_loop_handler.run_wrapper(mock, to_main_tx, from_main_rx).await?;
+        peer_loop_handler
+            .run_wrapper(mock, to_main_tx, from_main_rx)
+            .await?;
 
         let global_state = state_lock.lock_guard().await;
         assert!(global_state

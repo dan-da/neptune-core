@@ -232,10 +232,10 @@ impl MiningStateMachine {
             MiningEvent::NewBlockProposal(proposal)
                 if self.state_data.state() == MiningState::Guessing =>
             {
-                self.advance_with(MiningStateData::Guessing(
+                self.set_new_status(MiningStateData::Guessing(
                     self.state_data.since(),
                     proposal.into(),
-                ))?;
+                ));
             }
             MiningEvent::NewBlockProposal(proposal) => {
                 // guesser skips Composing state.
@@ -638,6 +638,16 @@ mod state_machine_tests {
         Ok(())
     }
 
+    #[traced_test]
+    #[tokio::test]
+    async fn new_block_proposal_replaces_old() -> anyhow::Result<()> {
+        for machine in worker::machine_matrix() {
+            tracing::debug!("machine config: {:?}", machine.config());
+            worker::new_block_proposal_replaces_old(machine).await?;
+        }
+        Ok(())
+    }
+
     mod worker {
         use std::sync::Arc;
 
@@ -648,6 +658,8 @@ mod state_machine_tests {
         use super::super::super::mining_status::ProposedBlock;
         use super::*;
         use crate::config_models::network::Network;
+        use crate::models::state::wallet::address::generation_address::GenerationSpendingKey;
+        use crate::tests::shared::make_mock_block_guesser_preimage_and_guesser_fraction;
         use crate::Block;
 
         #[rustfmt::skip]
@@ -743,6 +755,39 @@ mod state_machine_tests {
                 MiningState::Guessing => MiningStateData::guessing(fake_proposed_block().into()),
                 _ => MiningStateData::try_from(state).unwrap(),
             }
+        }
+
+        // todo: test other states, eg AwaitBlock.
+        pub(super) async fn new_block_proposal_replaces_old(
+            mut machine: MiningStateMachine,
+        ) -> anyhow::Result<()> {
+            machine.state_data = MiningStateData::guessing(fake_proposed_block().into());
+
+            let guesser_fraction = 0.75;
+            let (new_block, _) = make_mock_block_guesser_preimage_and_guesser_fraction(
+                &fake_proposed_block(),
+                None,
+                GenerationSpendingKey::derive_from_seed(rand::random()),
+                rand::random(),
+                guesser_fraction,
+                rand::random(),
+            )
+            .await;
+
+            let arc_new_block = Arc::new(new_block);
+
+            let result = machine.handle_event(MiningEvent::NewBlockProposal(arc_new_block.clone()));
+
+            if !machine.mining_enabled() && machine.config().strict_state_transitions {
+                assert!(result.is_err());
+            } else {
+                assert!(result.is_ok());
+                assert!(machine.state_data.state() == MiningState::Guessing);
+                if let MiningStateData::Guessing(_, w) = machine.state_data {
+                    assert_eq!(w, arc_new_block.into());
+                }
+            }
+            Ok(())
         }
 
         // verifies that input pause event succeeds without error for every
