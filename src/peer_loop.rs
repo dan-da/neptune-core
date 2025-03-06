@@ -2131,7 +2131,7 @@ mod peer_loop_tests {
         let peer_handshake_data = get_dummy_handshake_data_for_genesis(network);
         let peer_id = peer_handshake_data.instance_id;
         let mut peer_loop_handler = PeerLoopHandler::new(
-            to_main_tx,
+            to_main_tx.clone(),
             state_lock.clone(),
             peer_address,
             peer_handshake_data,
@@ -2139,7 +2139,7 @@ mod peer_loop_tests {
             1,
         );
         let mock = Mock::new(vec![Action::Read(PeerMessage::Bye)]);
-        peer_loop_handler.run_wrapper(mock, from_main_rx).await?;
+        peer_loop_handler.run_wrapper(mock, to_main_tx, from_main_rx).await?;
 
         let global_state = state_lock.lock_guard().await;
         assert!(global_state
