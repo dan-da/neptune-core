@@ -776,16 +776,11 @@ mod state_machine_tests {
 
             let arc_new_block = Arc::new(new_block);
 
-            let result = machine.handle_event(MiningEvent::NewBlockProposal(arc_new_block.clone()));
+            machine.handle_event(MiningEvent::NewBlockProposal(arc_new_block.clone()))?;
 
-            if !machine.mining_enabled() && machine.config().strict_state_transitions {
-                assert!(result.is_err());
-            } else {
-                assert!(result.is_ok());
-                assert!(machine.state_data.state() == MiningState::Guessing);
-                if let MiningStateData::Guessing(_, w) = machine.state_data {
-                    assert_eq!(w, arc_new_block.into());
-                }
+            assert!(machine.state_data.state() == MiningState::Guessing);
+            if let MiningStateData::Guessing(_, w) = machine.state_data {
+                assert_eq!(w, arc_new_block.into());
             }
             Ok(())
         }
