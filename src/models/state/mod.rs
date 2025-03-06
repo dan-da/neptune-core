@@ -4,6 +4,7 @@ pub mod blockchain_state;
 pub mod light_state;
 pub mod mempool;
 pub mod mining_status;
+pub mod mining_state_machine;
 pub mod networking_state;
 pub mod shared;
 pub(crate) mod transaction_details;

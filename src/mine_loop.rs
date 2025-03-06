@@ -45,7 +45,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningEvent;
 use crate::models::state::mining_status::MiningStateData;
-use crate::models::state::mining_status::MiningStateMachine;
+use crate::models::state::mining_state_machine::MiningStateMachine;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
