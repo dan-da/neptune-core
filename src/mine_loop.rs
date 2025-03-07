@@ -276,7 +276,7 @@ fn guess_worker(
 
     let timestamp = block.header().timestamp;
     let timestamp_standard = timestamp.standard_format();
-    let hash = block.hash();
+    let hash = Block::hash(&block);
     let hex = hash.to_hex();
     let height = block.kernel.header.height;
     let num_inputs = block.body().transaction_kernel.inputs.len();
@@ -613,10 +613,29 @@ pub(crate) async fn create_block_transaction_from(
     Ok((block_transaction, own_expected_utxos))
 }
 
+/// The main mining loop.  This fn loops continuously until process shutdown.
 ///
+/// It communicates with the main loop via a receive channel and a send channel.
 ///
-/// Locking:
-///   * acquires `global_state_lock` for write
+/// It (and various sub-fn) also acquire the global-state lock for reads and
+/// writes.
+///
+/// todo: It would be desirable to perform all communication via the channels
+/// and eliminate all lock acquisitions.  That would ensure the mining loop keeps
+/// executing quickly regardless of any long-running tasks holding the lock elsewhere
+/// in the process.
+///
+/// This loop transitions through several possible states while mining and also must
+/// respond to various events.  To manage the complexity, a custom finite-state-machine
+/// called [MiningStateMachine] is used to track the current state and respond to events.
+///
+/// The mining loop serves to progress the state machine through the various states
+/// by feeding it events.  This also requires interrogating the current state from the
+/// machine, as most events must occur in a certain order/progression.
+///
+/// If an event is fed to machine in the wrong order, it is ignored.
+/// (unless MiningStateMachineConfig.strict_state_transitions is set, which
+///  is primarily for testing/debugging.)
 pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
@@ -624,6 +643,7 @@ pub(crate) async fn mine(
 ) -> Result<()> {
     let cli = global_state_lock.cli().clone();
 
+    // init finite-state-machine
     let mut machine = MiningStateMachine::new(MiningStateMachineConfig {
         strict_state_transitions: false,
         role_compose: cli.compose,
@@ -631,13 +651,15 @@ pub(crate) async fn mine(
     });
 
     // assume no connections at startup -- until we get an UnPauseByNeedConnection message.
-    machine
-        .handle_event(MiningEvent::PauseByNeedConnection)
-        .unwrap();
+    machine.handle_event(MiningEvent::PauseByNeedConnection)?;
 
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
     // be orphaned.
+    //
+    // todo: this information should be communicated via channel, eg with a
+    // ReadyToMine message once node has synced with peers.   waiting 60 seconds
+    // guarantees nothing.
     const INITIAL_MINING_SLEEP_IN_SECONDS: u64 = 60;
     tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
 
@@ -650,8 +672,17 @@ pub(crate) async fn mine(
     let guess_restart_timer = time::sleep(infinite);
     tokio::pin!(guess_restart_timer);
 
+    // start of mining loop.
     loop {
-        let mut status_tmp = machine.state_data().clone();
+        // get hash of state data so we can check later if it has changed.
+        // std_hash() should be faster than cloning (in general case)
+        let state_hash_loop_start = machine.state_data().std_hash();
+
+        // if state is MiningState::Init, then we need to advance to
+        // AwaitBlockProposal state.
+        if machine.state_data().is_init() {
+            machine.handle_event(MiningEvent::AwaitBlockProposal)?;
+        }
 
         // Ensure restart timer doesn't resolve again, without guesser
         // task actually being spawned.
@@ -659,31 +690,28 @@ pub(crate) async fn mine(
             .as_mut()
             .reset(tokio::time::Instant::now() + infinite);
 
-        // if mining_status::init, then we need to advance to
-        // await_block_proposal state.
-        if machine.state_data().is_init() {
-            machine
-                .handle_event(MiningEvent::AwaitBlockProposal)
-                .unwrap();
-        }
-
+        // setup channels for guesser and composer tasks
         let (guesser_tx, guesser_rx) = oneshot::channel::<NewBlockFound>();
         let (composer_tx, composer_rx) = oneshot::channel::<(Block, Vec<ExpectedUtxo>)>();
+        let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
 
+        // if in correct state for composing or guessing, signal machine.
         if machine.can_start_composing() {
-            machine.handle_event(MiningEvent::StartComposing).unwrap();
+            machine.handle_event(MiningEvent::StartComposing)?;
         } else if machine.can_start_guessing() {
-            machine.handle_event(MiningEvent::StartGuessing).unwrap();
+            machine.handle_event(MiningEvent::StartGuessing)?;
         }
 
-        // notify main if status has changed since start of loop.
-        if status_tmp != *machine.state_data() {
+        // check if mining state has changed (since start of loop)
+        let state_hash_loop_mid = machine.state_data().std_hash();
+        if state_hash_loop_start != state_hash_loop_mid {
+            // notify main of status change
             to_main
                 .send(MinerToMain::StatusChange(machine.state_data().into()))
                 .await?;
-            status_tmp = machine.state_data().clone();
         }
 
+        // setup guesser task
         let guesser_task: Option<JoinHandle<()>> = if machine.is_guessing() {
             // safe because above `is_some`
             if let MiningStateData::Guessing(_, proposal) = machine.state_data() {
@@ -729,8 +757,7 @@ pub(crate) async fn mine(
             None
         };
 
-        let (cancel_compose_tx, cancel_compose_rx) = tokio::sync::watch::channel(());
-
+        // setup composer task
         let mut composer_task = if machine.is_composing() {
             // todo: obtain block via channel msg from main instead of acquiring lock.
             let latest_block = global_state_lock
@@ -754,16 +781,19 @@ pub(crate) async fn mine(
             tokio::spawn(async { Ok(()) })
         };
 
-        // Await a message from either the worker task or from the main loop,
-        // or the restart of the guesser-task.
+        // Await an event from either worker task or from the main loop,
         select! {
+            // on guessing restart timer timeout we just exit the select.
             _ = &mut guess_restart_timer => {}
-            Ok(Err(e)) = &mut composer_task => {
-                machine.handle_event(MiningEvent::ComposeError).unwrap();
 
+            // handle an error from the composer task
+            Ok(Err(e)) = &mut composer_task => {
+                machine.handle_event(MiningEvent::ComposeError)?;
+
+                // special handling if its a ProverJobError.
                 match e.downcast_ref::<prover_job::ProverJobError>() {
                     Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
-                        tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
+                        tracing::error!("exceeded proof complexity limit.  mining halted.  details: {}", e.to_string())
                     },
                     _ => {
                         // Ensure graceful shutdown in case of error during
@@ -776,53 +806,56 @@ pub(crate) async fn mine(
                 }
             },
 
+            // handle a message from main loop.
             Some(main_message) = from_main.recv() => {
                 debug!("Miner received message type: {}", main_message.get_type());
 
                 match main_message {
                     MainToMiner::Shutdown => {
-                        machine.handle_event(MiningEvent::Shutdown).unwrap();
+                        machine.handle_event(MiningEvent::Shutdown)?;
                         debug!("Miner shutting down.");
                     }
                     MainToMiner::NewBlock => {
                         // ??? --> NewTipBlock
-                        machine.handle_event(MiningEvent::NewTipBlock).unwrap();
+                        machine.handle_event(MiningEvent::NewTipBlock)?;
                         // NewTipBlock --> Init
-                        machine.handle_event(MiningEvent::Init).unwrap();
+                        machine.handle_event(MiningEvent::Init)?;
 
                         info!("Miner task received notification about new block");
                     }
                     MainToMiner::NewBlockProposal(proposal) => {
-                        machine.handle_event(MiningEvent::NewBlockProposal(proposal)).unwrap();
+                        machine.handle_event(MiningEvent::NewBlockProposal(proposal))?;
                         info!("Miner received message about new block proposal for guessing.");
                     }
                     MainToMiner::WaitForContinue => {
-                        machine.handle_event(MiningEvent::NewTipBlock).unwrap();
+                        machine.handle_event(MiningEvent::NewTipBlock)?;
                     }
                     MainToMiner::Continue => {
-                        machine.handle_event(MiningEvent::Init).unwrap();
+                        machine.handle_event(MiningEvent::Init)?;
                     }
                     MainToMiner::PauseByRpc => {
-                        machine.handle_event(MiningEvent::PauseByRpc).unwrap();
+                        machine.handle_event(MiningEvent::PauseByRpc)?;
                     }
                     MainToMiner::UnPauseByRpc => {
-                        machine.handle_event(MiningEvent::UnPauseByRpc).unwrap();
+                        machine.handle_event(MiningEvent::UnPauseByRpc)?;
                     }
                     MainToMiner::PauseBySyncBlocks => {
-                        machine.handle_event(MiningEvent::PauseBySyncBlocks).unwrap();
+                        machine.handle_event(MiningEvent::PauseBySyncBlocks)?;
                     }
                     MainToMiner::UnPauseBySyncBlocks => {
-                        machine.handle_event(MiningEvent::UnPauseBySyncBlocks).unwrap();
+                        machine.handle_event(MiningEvent::UnPauseBySyncBlocks)?;
                     }
                     MainToMiner::PauseByNeedConnection => {
                         warn!("pausing mining because client has no connections");
-                        machine.handle_event(MiningEvent::PauseByNeedConnection).unwrap();
+                        machine.handle_event(MiningEvent::PauseByNeedConnection)?;
                     }
                     MainToMiner::UnPauseByNeedConnection => {
-                        machine.handle_event(MiningEvent::UnPauseByNeedConnection).unwrap();
+                        machine.handle_event(MiningEvent::UnPauseByNeedConnection)?;
                     }
                 }
             }
+
+            // handle a completed block proposal from our composer.
             new_composition = composer_rx => {
                 // Compose --> AwaitBlock
                 match new_composition {
@@ -831,11 +864,13 @@ pub(crate) async fn mine(
                         to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
                     },
                     Err(e) => {
-                        machine.handle_event(MiningEvent::ComposeError).unwrap();
+                        machine.handle_event(MiningEvent::ComposeError)?;
                         warn!("composing task was cancelled prematurely. Got: {}", e);
                     }
                 };
             }
+
+            // handle a new block found by our guesser.
             new_block = guesser_rx => {
                 match new_block {
                     Err(err) => {
@@ -859,10 +894,10 @@ pub(crate) async fn mine(
                             // took less time than the minimum block time.
                             error!("Found block with valid proof-of-work but block is invalid.");
                         } else {
-                            machine.handle_event(MiningEvent::NewTipBlock).unwrap(); // Guessing    --> NewTipBlock
-                            machine.handle_event(MiningEvent::Init).unwrap(); // NewTipBlock --> Init
+                            machine.handle_event(MiningEvent::NewTipBlock)?; // Guessing    --> NewTipBlock
+                            machine.handle_event(MiningEvent::Init)?; // NewTipBlock --> Init
 
-                            info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
+                            info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, Block::hash(&new_block_found.block));
                             to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
                         }
                     },
@@ -870,19 +905,22 @@ pub(crate) async fn mine(
             }
         }
 
-        if status_tmp != *machine.state_data() {
+        // check if state data has changed during the select.
+        if state_hash_loop_mid != machine.state_data().std_hash() {
+            // notify main of status change
             to_main
                 .send(MinerToMain::StatusChange(machine.state_data().into()))
                 .await?;
         }
 
+        // cancel composer task if running and we are no longer in composing state.
         if !machine.state_data().is_composing() && !composer_task.is_finished() {
             cancel_compose_tx.send(())?;
             debug!("Cancel signal sent to composer worker.");
         }
 
-        // we shutdown guesser task every iteration.  It will
-        // start again if our state is still guessing.
+        // cancel guesser task every iteration.
+        // It will start again if our state is still guessing.
         if let Some(gt) = &guesser_task {
             gt.abort();
             debug!("Abort-signal sent to guesser worker.");
@@ -892,6 +930,7 @@ pub(crate) async fn mine(
             }
         }
 
+        // exit mining loop if in shutdown state.
         if machine.state_data().is_shutdown() {
             break;
         }

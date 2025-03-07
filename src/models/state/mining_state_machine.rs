@@ -234,14 +234,14 @@ impl MiningStateMachine {
             MiningEvent::UnPauseByNeedConnection => self.unpause_by_need_connection(),
 
             // if new-block-proposal arrives while we are guessing, then we need
-            // to update the existing mining status, rather than advance to next
+            // to update the existing mining state_data, rather than advance to next
             // state.  (without this special case, if we just advance, it still
             // works, but guessing time resets to time of latest block proposal,
             // instead of when guessing actually started.)
             MiningEvent::NewBlockProposal(proposal)
                 if self.state_data.state() == MiningState::Guessing =>
             {
-                self.set_new_status(MiningStateData::Guessing(
+                self.set_state_data(MiningStateData::Guessing(
                     self.state_data.since(),
                     proposal.into(),
                 ));
@@ -250,7 +250,7 @@ impl MiningStateMachine {
             MiningEvent::NewBlockProposal(proposal)
                 if self.state_data.state() == MiningState::AwaitBlock =>
             {
-                self.set_new_status(MiningStateData::AwaitBlock(
+                self.set_state_data(MiningStateData::AwaitBlock(
                     self.state_data.since(),
                     proposal.into(),
                 ));
@@ -274,28 +274,31 @@ impl MiningStateMachine {
         Ok(())
     }
 
-    // advances to input status if allowed.
+    // advances to input state-data if allowed.
     //
     // returns error if not allowed and in strict_transitions mode.
     // silently ignores input if not allowed and not in strict mode.
-    fn advance_with(&mut self, new_status: MiningStateData) -> Result<(), InvalidStateTransition> {
+    fn advance_with(
+        &mut self,
+        new_state_data: MiningStateData,
+    ) -> Result<(), InvalidStateTransition> {
         tracing::debug!(
             "advance_with: old_state: {}, new_state: {}",
             self.state_data.name(),
-            new_status.name()
+            new_state_data.name()
         );
 
         // special handling for pause.
-        if let MiningStateData::Paused(_, ref reasons) = new_status {
+        if let MiningStateData::Paused(_, ref reasons) = new_state_data {
             assert!(!reasons.is_empty());
             for reason in reasons {
                 self.pause(reason)
             }
         } else if self.config.strict_state_transitions {
-            self.ensure_allowed(&new_status)?;
-            self.set_new_status(new_status);
-        } else if self.allowed(&new_status) {
-            self.set_new_status(new_status);
+            self.ensure_allowed(&new_state_data)?;
+            self.set_state_data(new_state_data);
+        } else if self.allowed(&new_state_data) {
+            self.set_state_data(new_state_data);
         }
 
         Ok(())
@@ -324,19 +327,19 @@ impl MiningStateMachine {
     }
 
     // sets new StateData and logs a debug msg.
-    fn set_new_status(&mut self, new_status: MiningStateData) {
-        self.state_data = new_status;
+    fn set_state_data(&mut self, new_state_data: MiningStateData) {
+        self.state_data = new_state_data;
         tracing::debug!("set new state: {}", self.state_data.name());
     }
 
-    // merges two Paused statuses together and sets as status.
-    //   1. keeps timestamp of the original status.
-    //   2. appends reasons(s) of new status to original status reasons.
+    // merges two Paused state-data together and sets.
+    //   1. keeps timestamp of the original state-data.
+    //   2. appends reasons(s) of new state-data to original state-data reasons.
     //   3. ensures reasons are unique.
     //
-    // panics if old or new status is not Paused.
-    fn merge_set_paused_status(&mut self, new_status: MiningStateData) {
-        let merged_status = match (self.state_data.clone(), new_status) {
+    // panics if old or new state-data is not Paused.
+    fn merge_paused_state_data(&mut self, new_state_data: MiningStateData) -> MiningStateData {
+        match (self.state_data.clone(), new_state_data) {
             (
                 MiningStateData::Paused(old_time, mut old_reasons),
                 MiningStateData::Paused(_, mut new_reasons),
@@ -346,9 +349,8 @@ impl MiningStateMachine {
                 MiningStateData::Paused(old_time, old_reasons.into_iter().unique().collect())
             }
             (_, MiningStateData::Paused(t, reasons)) => MiningStateData::Paused(t, reasons),
-            _ => panic!("attempted to merge status other than Paused"),
-        };
-        self.set_new_status(merged_status);
+            _ => panic!("attempted to merge MiningStateData other than Paused"),
+        }
     }
 
     fn pause(&mut self, reason: &MiningPausedReason) {
@@ -362,9 +364,10 @@ impl MiningStateMachine {
     fn pause_by_need_connection(&mut self) {
         if !self.paused_need_connection {
             let reason = MiningPausedReason::NeedConnection;
-            let new_status = MiningStateData::paused(reason);
-            if self.allowed(&new_status) {
-                self.merge_set_paused_status(new_status);
+            let new_state_data = MiningStateData::paused(reason);
+            if self.allowed(&new_state_data) {
+                let merged = self.merge_paused_state_data(new_state_data);
+                self.set_state_data(merged);
             }
             self.paused_need_connection = true;
         }
@@ -382,9 +385,10 @@ impl MiningStateMachine {
     fn pause_by_rpc(&mut self) {
         if !self.paused_by_rpc {
             let reason = MiningPausedReason::Rpc;
-            let new_status = MiningStateData::paused(reason);
-            if self.allowed(&new_status) {
-                self.merge_set_paused_status(new_status);
+            let new_state_data = MiningStateData::paused(reason);
+            if self.allowed(&new_state_data) {
+                let merged = self.merge_paused_state_data(new_state_data);
+                self.set_state_data(merged);
             }
             self.paused_by_rpc = true;
         }
@@ -402,9 +406,10 @@ impl MiningStateMachine {
     fn pause_by_sync_blocks(&mut self) {
         if !self.paused_while_syncing {
             let reason = MiningPausedReason::SyncBlocks;
-            let new_status = MiningStateData::paused(reason);
-            if self.allowed(&new_status) {
-                self.merge_set_paused_status(new_status);
+            let new_state_data = MiningStateData::paused(reason);
+            if self.allowed(&new_state_data) {
+                let merged = self.merge_paused_state_data(new_state_data);
+                self.set_state_data(merged);
             }
             self.paused_while_syncing = true;
         }
@@ -419,7 +424,7 @@ impl MiningStateMachine {
         }
     }
 
-    // check if a given target status can be transitioned to or not.
+    // check if a given target state-data can be transitioned to or not.
     //
     // the general case is to check if the target state is allowed
     // for the current state in the STATE_TRANSITIONS_TABLE.
@@ -430,16 +435,16 @@ impl MiningStateMachine {
     //   3. Only allow Disabled state if mining not enabled.
     //   4. Only allow Shutdown when we have been paused in more than one way.
     //      (once pause count returns to 1, normal rules apply)
-    fn allowed(&self, status: &MiningStateData) -> bool {
-        let state = status.state();
+    fn allowed(&self, state_data: &MiningStateData) -> bool {
+        let state = state_data.state();
 
-        // we normally don't allow state equality since status variant data (eg
+        // we normally don't allow state equality since state-data variant data (eg
         // timestamps) can differ between 2 MiningStateData with same state.
         // We make an exception for Init because otherwise it can't be
         // manually set.
         if state == self.state_data.state() {
             state == MiningState::Init
-        } else if *status == self.state_data {
+        } else if *state_data == self.state_data {
             true
         } else if !self.mining_enabled() {
             state == MiningState::Disabled
@@ -447,7 +452,7 @@ impl MiningStateMachine {
             state == MiningState::Shutdown
         } else {
             // enforce state-transitions defined in MINING_STATE_TRANSITIONS
-            let s = status.state();
+            let s = state_data.state();
             let allowed_states: &[MiningState] =
                 MINING_STATE_TRANSITIONS[self.state_data.state() as usize];
             allowed_states.iter().any(|v| *v == s)
@@ -464,13 +469,16 @@ impl MiningStateMachine {
     //     self.paused_need_connection
     // }
 
-    fn ensure_allowed(&self, new_status: &MiningStateData) -> Result<(), InvalidStateTransition> {
-        if self.allowed(new_status) {
+    fn ensure_allowed(
+        &self,
+        new_state_data: &MiningStateData,
+    ) -> Result<(), InvalidStateTransition> {
+        if self.allowed(new_state_data) {
             Ok(())
         } else {
             Err(InvalidStateTransition {
                 old_state: self.state_data.state(),
-                new_state: new_status.state(),
+                new_state: new_state_data.state(),
             })
         }
     }
@@ -562,7 +570,7 @@ mod state_machine_tests {
         Ok(())
     }
 
-    // verifies that pause events only cause a mining status change for
+    // verifies that pause events only cause a mining state change for
     // certain starting states -- for every possible combination of machine
     // config and pause event
     #[traced_test]
@@ -575,7 +583,7 @@ mod state_machine_tests {
         Ok(())
     }
 
-    // verifies that unpause events only cause a mining status change for
+    // verifies that unpause events only cause a mining state change for
     // certain starting states -- for every combination of machine and
     // pause/unpause event pair.
     #[traced_test]
@@ -745,7 +753,7 @@ mod state_machine_tests {
                 .collect_vec()
         }
 
-        pub(super) fn compose_and_guess_happy_path() -> Vec<MiningStateData> {
+        pub fn compose_and_guess_happy_path() -> Vec<MiningStateData> {
             compose_and_guess_happy_path_states()
                 .into_iter()
                 .map(state_to_state_data)
@@ -814,37 +822,37 @@ mod state_machine_tests {
         ) -> anyhow::Result<()> {
             // for each state, we make a new state-machine and force it
             // to the target state, then pause it.
-            for status in all_reachable_status(&machine_in) {
+            for state_data in all_reachable_state_data(&machine_in) {
                 let mut machine = machine_in.clone();
                 tracing::debug!(
-                    "status: {}, machine config: {:?}",
-                    status.state(),
+                    "state: {}, machine config: {:?}",
+                    state_data.state(),
                     machine.config()
                 );
-                machine.state_data = status;
+                machine.state_data = state_data;
                 machine.handle_event(pause_event.clone())?;
             }
             Ok(())
         }
 
-        // verifies that pausing only causes mining status to change for
+        // verifies that pausing only causes mining state to change for
         // selected starting states.
         pub(super) fn pause_changes_only_certain_states(
             machine_in: MiningStateMachine,
             pause_event: MiningEvent,
         ) -> anyhow::Result<()> {
             // for each state, we make a new machine and force it to the target state, then pause it.
-            for status in all_reachable_status(&machine_in) {
+            for state_data in all_reachable_state_data(&machine_in) {
                 let mut machine = machine_in.clone();
                 tracing::debug!(
-                    "status: {}, machine config: {:?}",
-                    status.state(),
+                    "state: {}, machine config: {:?}",
+                    state_data.state(),
                     machine.config()
                 );
-                machine.state_data = status.clone();
+                machine.state_data = state_data.clone();
                 machine.handle_event(pause_event.clone())?;
 
-                let ss = status.state();
+                let ss = state_data.state();
                 let ms = machine.state_data.state();
                 let ps = MiningState::Paused;
 
@@ -869,7 +877,7 @@ mod state_machine_tests {
             Ok(())
         }
 
-        // verifies that unpausing only causes mining status to change for
+        // verifies that unpausing only causes mining state to change for
         // selected starting states.
         pub(super) fn unpause_changes_only_certain_states(
             machine_in: MiningStateMachine,
@@ -878,18 +886,18 @@ mod state_machine_tests {
         ) -> anyhow::Result<()> {
             // for each state, we make a new state-machine and force it
             // to the target state, then pause and unpause it.
-            for status in all_reachable_status(&machine_in) {
+            for state_data in all_reachable_state_data(&machine_in) {
                 let mut machine = machine_in.clone();
                 tracing::debug!(
-                    "status: {}, machine config: {:?}",
-                    status.state(),
+                    "state: {}, machine config: {:?}",
+                    state_data.state(),
                     machine.config()
                 );
-                machine.state_data = status.clone();
+                machine.state_data = state_data.clone();
                 machine.handle_event(pause_event.clone())?;
                 machine.handle_event(unpause_event.clone())?;
 
-                let ss = status.state();
+                let ss = state_data.state();
                 let ms = machine.state_data.state();
                 let is = MiningState::Init;
 
@@ -930,18 +938,18 @@ mod state_machine_tests {
             let mut paused_while_syncing = false;
             let mut paused_need_connection = false;
 
-            let mut status = all_reachable_status(&machine);
+            let mut state_data = all_reachable_state_data(&machine);
             let mut events = all_pause_and_unpause_events()
                 .into_iter()
                 .flat_map(|(a, b)| [a, b])
                 .collect_vec();
 
             for _ in 0..50 {
-                status.shuffle(&mut rng());
+                state_data.shuffle(&mut rng());
                 events.shuffle(&mut rng());
 
-                // force to this random status.  (not allowed by API)
-                machine.state_data = status.first().cloned().unwrap();
+                // force to this random state_data.  (not allowed by API)
+                machine.state_data = state_data.first().cloned().unwrap();
 
                 for event in events.iter() {
                     match *event {
@@ -969,18 +977,18 @@ mod state_machine_tests {
             Ok(())
         }
 
-        // returns all status variants that can be reached by the input machine.
-        fn all_reachable_status(machine: &MiningStateMachine) -> Vec<MiningStateData> {
+        // returns all state_data variants that can be reached by the input machine.
+        fn all_reachable_state_data(machine: &MiningStateMachine) -> Vec<MiningStateData> {
             if machine.mining_enabled() {
-                all_enabled_status()
+                all_enabled_state_data()
             } else {
                 vec![MiningStateData::disabled()]
             }
         }
 
-        // returns all status, including different pause reasons, that can be reached
+        // returns all state_data, including different pause reasons, that can be reached
         // by a machine with mining enabled. (role_compose or role_guess)
-        fn all_enabled_status() -> Vec<MiningStateData> {
+        fn all_enabled_state_data() -> Vec<MiningStateData> {
             MiningState::iter()
                 .filter(|s| *s != MiningState::Disabled)
                 .flat_map(|state| match state {
@@ -997,30 +1005,30 @@ mod state_machine_tests {
             machine_in: MiningStateMachine,
             pause_event: MiningEvent,
         ) -> anyhow::Result<()> {
-            // for each status in happy path, we make a new state-machine and advance it
+            // for each state_data in happy path, we make a new state-machine and advance it
             // to the target state, then pause it.
-            for status in compose_and_guess_happy_path() {
+            for state_data in compose_and_guess_happy_path() {
                 let mut machine = machine_in.clone();
                 tracing::debug!(
-                    "status: {}, machine config: {:?}",
-                    status.state(),
+                    "state: {}, machine config: {:?}",
+                    state_data.state(),
                     machine.config()
                 );
-                advance_init_to_status(&mut machine, status.state())?;
+                advance_init_to_state(&mut machine, state_data.state())?;
                 machine.handle_event(pause_event.clone())?;
             }
             Ok(())
         }
 
-        // advances along the happy path from current status (which should be init)
-        // to a target status using the ::advance_with() method.
-        fn advance_init_to_status(
+        // advances along the happy path from current state (which should be init)
+        // to a target state using the ::advance_with() method.
+        fn advance_init_to_state(
             machine: &mut MiningStateMachine,
             target: MiningState,
         ) -> anyhow::Result<()> {
-            for status in compose_and_guess_happy_path() {
-                let state = status.state();
-                machine.advance_with(status)?;
+            for state_data in compose_and_guess_happy_path() {
+                let state = state_data.state();
+                machine.advance_with(state_data)?;
                 if state == target {
                     break;
                 }

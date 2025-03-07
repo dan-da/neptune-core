@@ -25,14 +25,11 @@
 //! in order to transition between states.  These events may have associated
 //! data.
 
-use std::fmt::Display;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::SystemTime;
-
-use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use std::time::SystemTime;
+use std::hash::Hash;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -69,7 +66,7 @@ pub enum MiningState {
 /// Associates processing data with each state.
 ///
 /// note: variants must match those of [MiningState]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) enum MiningStateData {
     Disabled(SystemTime),
     Init(SystemTime),
@@ -181,350 +178,392 @@ pub struct BlockSummary {
     pub total_guesser_fee: NativeCurrencyAmount,
 }
 
-impl From<&Block> for BlockSummary {
-    fn from(b: &Block) -> Self {
-        Self {
-            num_inputs: b.body().transaction_kernel.inputs.len(),
-            num_outputs: b.body().transaction_kernel.outputs.len(),
-            total_coinbase: b.body().transaction_kernel.coinbase.unwrap_or_default(),
-            total_guesser_fee: b.body().transaction_kernel.fee,
-        }
-    }
-}
+mod block_summary_impl {
+    use super::*;
 
-impl MiningEvent {
-    fn name(&self) -> &str {
-        match self {
-            Self::Init => "init",
-            Self::AwaitBlockProposal => "await-block-proposal",
-            Self::StartComposing => "start-composing",
-            Self::StartGuessing => "start-guessing",
-            Self::PauseByRpc => "pause-by-rpc",
-            Self::UnPauseByRpc => "unpause-by-rpc",
-            Self::PauseBySyncBlocks => "pause-by-sync-blocks",
-            Self::UnPauseBySyncBlocks => "unpause-by-sync-blocks",
-            Self::PauseByNeedConnection => "pause-by-need-connection",
-            Self::UnPauseByNeedConnection => "unpause-by-need-connection",
-            Self::NewBlockProposal(_) => "new-block-proposal",
-            Self::NewTipBlock => "new-tip-block",
-            Self::ComposeError => "compose-error",
-            Self::Shutdown => "shutdown",
-        }
-    }
-}
-
-// we impl Debug in order to prevent writing out entire block in log(s)
-impl std::fmt::Debug for MiningEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name())
-    }
-}
-
-impl Display for MiningEvent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name())
-    }
-}
-
-impl MiningState {
-    fn name(&self) -> &str {
-        match *self {
-            Self::Disabled => "disabled",
-            Self::Init => "initializing",
-            Self::Paused => "paused",
-            Self::UnPaused => "unpaused",
-            Self::AwaitBlockProposal => "await block proposal",
-            Self::AwaitBlock => "await block",
-            Self::Composing => "composing",
-            Self::Guessing => "guessing",
-            Self::NewTipBlock => "new tip block",
-            Self::ComposeError => "composer error",
-            Self::Shutdown => "shutdown",
-        }
-    }
-}
-
-impl Display for MiningState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.name())
-    }
-}
-
-impl MiningPausedReason {
-    pub fn description(&self) -> &str {
-        match self {
-            Self::Rpc => "user",
-            Self::SyncBlocks => "syncing blocks",
-            Self::NeedConnection => "await connections",
-        }
-    }
-}
-
-impl Display for MiningPausedReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let desc = self.description();
-        write!(f, "{}", desc)
-    }
-}
-
-impl From<&MiningStateData> for MiningStatus {
-    fn from(ms: &MiningStateData) -> Self {
-        match ms {
-            MiningStateData::Disabled(t) => Self::Disabled(*t),
-            MiningStateData::Init(t) => Self::Init(*t),
-            MiningStateData::Paused(t, r) => Self::Paused(*t, r.clone()),
-            MiningStateData::UnPaused(t) => Self::UnPaused(*t),
-            MiningStateData::AwaitBlockProposal(t) => Self::AwaitBlockProposal(*t),
-            MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p).into()),
-            MiningStateData::Composing(t) => Self::Composing(*t),
-            MiningStateData::Guessing(t, b) => Self::Guessing(*t, (&**b).into()),
-            // MiningStateData::Guessing(_, None) => unreachable!(),
-            MiningStateData::NewTipBlock(t) => Self::NewTipBlock(*t),
-            MiningStateData::ComposeError(t) => Self::ComposeError(*t),
-            MiningStateData::Shutdown(t) => Self::Shutdown(*t),
-        }
-    }
-}
-
-impl TryFrom<MiningState> for MiningStateData {
-    type Error = anyhow::Error;
-
-    /// note that:
-    ///
-    ///   1. MiningStateData::Guessing is not supported.
-    ///   2. MiningStateData::Paused will use MiningPausedReason::Rpc
-    fn try_from(state: MiningState) -> Result<Self, Self::Error> {
-        Ok(match state {
-            MiningState::Disabled => MiningStateData::disabled(),
-            MiningState::Init => MiningStateData::init(),
-            MiningState::AwaitBlockProposal => MiningStateData::await_block_proposal(),
-            MiningState::AwaitBlock => anyhow::bail!("unsupported usage"),
-            MiningState::Composing => MiningStateData::composing(),
-            MiningState::Guessing => anyhow::bail!("unsupported usage"),
-            MiningState::NewTipBlock => MiningStateData::new_tip_block(),
-            MiningState::ComposeError => MiningStateData::compose_error(),
-            MiningState::Shutdown => MiningStateData::shutdown(),
-            MiningState::Paused => MiningStateData::paused(MiningPausedReason::Rpc),
-            MiningState::UnPaused => MiningStateData::unpaused(),
-        })
-    }
-}
-
-impl From<&MiningStatus> for MiningState {
-    fn from(s: &MiningStatus) -> MiningState {
-        match *s {
-            MiningStatus::Disabled(_) => MiningState::Disabled,
-            MiningStatus::Init(_) => MiningState::Init,
-            MiningStatus::Paused(..) => MiningState::Paused,
-            MiningStatus::UnPaused(_) => MiningState::UnPaused,
-            MiningStatus::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
-            MiningStatus::AwaitBlock(..) => MiningState::AwaitBlock,
-            MiningStatus::Composing(_) => MiningState::Composing,
-            MiningStatus::Guessing(..) => MiningState::Guessing,
-            MiningStatus::NewTipBlock(_) => MiningState::NewTipBlock,
-            MiningStatus::ComposeError(_) => MiningState::ComposeError,
-            MiningStatus::Shutdown(_) => MiningState::Shutdown,
-        }
-    }
-}
-
-impl MiningStateData {
-    pub fn disabled() -> Self {
-        Self::Disabled(SystemTime::now())
-    }
-
-    pub fn init() -> Self {
-        Self::Init(SystemTime::now())
-    }
-
-    pub fn paused(reason: MiningPausedReason) -> Self {
-        Self::Paused(SystemTime::now(), vec![reason])
-    }
-
-    pub fn unpaused() -> Self {
-        Self::UnPaused(SystemTime::now())
-    }
-
-    pub fn await_block_proposal() -> Self {
-        Self::AwaitBlockProposal(SystemTime::now())
-    }
-
-    pub fn await_block(proposed_block: ProposedBlock) -> Self {
-        Self::AwaitBlock(SystemTime::now(), proposed_block)
-    }
-
-    pub fn composing() -> Self {
-        Self::Composing(SystemTime::now())
-    }
-
-    pub fn guessing(proposed_block: ProposedBlock) -> Self {
-        Self::Guessing(SystemTime::now(), proposed_block)
-    }
-
-    pub fn new_tip_block() -> Self {
-        Self::NewTipBlock(SystemTime::now())
-    }
-
-    pub fn compose_error() -> Self {
-        Self::ComposeError(SystemTime::now())
-    }
-
-    pub fn shutdown() -> Self {
-        Self::Shutdown(SystemTime::now())
-    }
-
-    // pub fn is_disabled(&self) -> bool {
-    //     self.state() == MiningState::Disabled
-    // }
-
-    pub fn is_init(&self) -> bool {
-        self.state() == MiningState::Init
-    }
-
-    // pub fn is_paused(&self) -> bool {
-    //     self.state() == MiningState::Paused
-    // }
-
-    // pub fn is_await_block_proposal(&self) -> bool {
-    //     self.state() == MiningState::AwaitBlockProposal
-    // }
-
-    // pub fn is_await_block(&self) -> bool {
-    //     self.state() == MiningState::AwaitBlock
-    // }
-
-    pub fn is_composing(&self) -> bool {
-        self.state() == MiningState::Composing
-    }
-
-    pub fn is_guessing(&self) -> bool {
-        self.state() == MiningState::Guessing
-    }
-
-    // pub fn is_new_tip_block(&self) -> bool {
-    //     self.state() == MiningState::NewTipBlock
-    // }
-
-    // pub fn is_compose_error(&self) -> bool {
-    //     self.state() == MiningState::ComposeError
-    // }
-
-    pub fn is_shutdown(&self) -> bool {
-        self.state() == MiningState::Shutdown
-    }
-
-    pub fn state(&self) -> MiningState {
-        MiningState::from(self)
-    }
-
-    pub(crate) fn name(&self) -> String {
-        self.state().name().to_owned()
-    }
-
-    pub fn since(&self) -> SystemTime {
-        match *self {
-            Self::Disabled(t) => t,
-            Self::Init(t) => t,
-            Self::Paused(t, _) => t,
-            Self::UnPaused(t) => t,
-            Self::AwaitBlockProposal(t) => t,
-            Self::AwaitBlock(t, _) => t,
-            Self::Composing(t) => t,
-            Self::Guessing(t, _) => t,
-            Self::NewTipBlock(t) => t,
-            Self::ComposeError(t) => t,
-            Self::Shutdown(t) => t,
-        }
-    }
-
-    // pub(crate) fn paused_reasons(&self) -> &[MiningPausedReason] {
-    //     match self {
-    //         Self::Paused(reasons) => reasons,
-    //         _ => &[],
-    //     }
-    // }
-}
-
-impl From<&MiningStateData> for MiningState {
-    fn from(s: &MiningStateData) -> Self {
-        match *s {
-            MiningStateData::Disabled(_) => MiningState::Disabled,
-            MiningStateData::Init(_) => MiningState::Init,
-            MiningStateData::Paused(..) => MiningState::Paused,
-            MiningStateData::UnPaused(_) => MiningState::UnPaused,
-            MiningStateData::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
-            MiningStateData::AwaitBlock(..) => MiningState::AwaitBlock,
-            MiningStateData::Composing(_) => MiningState::Composing,
-            MiningStateData::Guessing(..) => MiningState::Guessing,
-            MiningStateData::NewTipBlock(_) => MiningState::NewTipBlock,
-            MiningStateData::ComposeError(_) => MiningState::ComposeError,
-            MiningStateData::Shutdown(_) => MiningState::Shutdown,
-        }
-    }
-}
-
-impl MiningStatus {
-    pub fn since(&self) -> SystemTime {
-        match *self {
-            Self::Disabled(t) => t,
-            Self::Init(t) => t,
-            Self::Paused(t, _) => t,
-            Self::UnPaused(t) => t,
-            Self::AwaitBlockProposal(t) => t,
-            Self::AwaitBlock(t, _) => t,
-            Self::Composing(t) => t,
-            Self::Guessing(t, _) => t,
-            Self::NewTipBlock(t) => t,
-            Self::ComposeError(t) => t,
-            Self::Shutdown(t) => t,
-        }
-    }
-}
-
-impl Display for MiningStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let input_output_info = match self {
-            Self::Guessing(_, info) => {
-                format!(" {}/{}", info.num_inputs, info.num_outputs)
+    impl From<&Block> for BlockSummary {
+        fn from(b: &Block) -> Self {
+            Self {
+                num_inputs: b.body().transaction_kernel.inputs.len(),
+                num_outputs: b.body().transaction_kernel.outputs.len(),
+                total_coinbase: b.body().transaction_kernel.coinbase.unwrap_or_default(),
+                total_guesser_fee: b.body().transaction_kernel.fee,
             }
-            _ => String::default(),
-        };
-
-        let work_type_and_duration = match self {
-            Self::Disabled(_) => MiningState::from(self).to_string(),
-            Self::Paused(t, reasons) => {
-                format!(
-                    "paused for {}  ({})",
-                    human_duration_secs(&t.elapsed()),
-                    reasons.iter().map(|r| r.description()).join(", ")
-                )
-            }
-            _ => format!(
-                "{} for {}",
-                MiningState::from(self),
-                human_duration_secs(&self.since().elapsed()),
-            ),
-        };
-        let reward = match self {
-            Self::Guessing(_, block_summary) => format!(
-                "; total guesser reward: {}",
-                block_summary.total_guesser_fee
-            ),
-            _ => String::default(),
-        };
-
-        write!(f, "{work_type_and_duration}{input_output_info}{reward}",)
+        }
     }
 }
 
-// formats a duration in human readable form, to seconds precision.
-// eg: 7h 5m 23s
-fn human_duration_secs(duration_exact: &Result<Duration, std::time::SystemTimeError>) -> String {
-    // remove sub-second component, so humantime ends with seconds.
-    // also set to 0 if any error.
-    let duration_to_secs = duration_exact
-        .as_ref()
-        .map(|v| *v - Duration::from_nanos(v.subsec_nanos().into()))
-        .unwrap_or(Duration::ZERO);
-    humantime::format_duration(duration_to_secs).to_string()
+// This file contains several inter-related enums and it is useful to
+// present them one after another (above).
+//
+// To keep things organized, we place the impl for each one into its
+// own module below.  We could also consider making a file for each.
+
+mod mining_event_impl {
+    use super::*;
+
+    impl MiningEvent {
+        fn name(&self) -> &str {
+            match self {
+                Self::Init => "init",
+                Self::AwaitBlockProposal => "await-block-proposal",
+                Self::StartComposing => "start-composing",
+                Self::StartGuessing => "start-guessing",
+                Self::PauseByRpc => "pause-by-rpc",
+                Self::UnPauseByRpc => "unpause-by-rpc",
+                Self::PauseBySyncBlocks => "pause-by-sync-blocks",
+                Self::UnPauseBySyncBlocks => "unpause-by-sync-blocks",
+                Self::PauseByNeedConnection => "pause-by-need-connection",
+                Self::UnPauseByNeedConnection => "unpause-by-need-connection",
+                Self::NewBlockProposal(_) => "new-block-proposal",
+                Self::NewTipBlock => "new-tip-block",
+                Self::ComposeError => "compose-error",
+                Self::Shutdown => "shutdown",
+            }
+        }
+    }
+
+    // we impl Debug in order to prevent writing out entire block in log(s)
+    impl std::fmt::Debug for MiningEvent {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.name())
+        }
+    }
+
+    impl std::fmt::Display for MiningEvent {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.name())
+        }
+    }
+}
+
+
+mod mining_state_impl {
+    use super::*;
+
+    impl MiningState {
+        pub(super) fn name(&self) -> &str {
+            match *self {
+                Self::Disabled => "disabled",
+                Self::Init => "initializing",
+                Self::Paused => "paused",
+                Self::UnPaused => "unpaused",
+                Self::AwaitBlockProposal => "await block proposal",
+                Self::AwaitBlock => "await block",
+                Self::Composing => "composing",
+                Self::Guessing => "guessing",
+                Self::NewTipBlock => "new tip block",
+                Self::ComposeError => "composer error",
+                Self::Shutdown => "shutdown",
+            }
+        }
+    }
+
+    impl From<&MiningStatus> for MiningState {
+        fn from(s: &MiningStatus) -> MiningState {
+            match *s {
+                MiningStatus::Disabled(_) => MiningState::Disabled,
+                MiningStatus::Init(_) => MiningState::Init,
+                MiningStatus::Paused(..) => MiningState::Paused,
+                MiningStatus::UnPaused(_) => MiningState::UnPaused,
+                MiningStatus::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
+                MiningStatus::AwaitBlock(..) => MiningState::AwaitBlock,
+                MiningStatus::Composing(_) => MiningState::Composing,
+                MiningStatus::Guessing(..) => MiningState::Guessing,
+                MiningStatus::NewTipBlock(_) => MiningState::NewTipBlock,
+                MiningStatus::ComposeError(_) => MiningState::ComposeError,
+                MiningStatus::Shutdown(_) => MiningState::Shutdown,
+            }
+        }
+    }
+
+    impl From<&MiningStateData> for MiningState {
+        fn from(s: &MiningStateData) -> Self {
+            match *s {
+                MiningStateData::Disabled(_) => MiningState::Disabled,
+                MiningStateData::Init(_) => MiningState::Init,
+                MiningStateData::Paused(..) => MiningState::Paused,
+                MiningStateData::UnPaused(_) => MiningState::UnPaused,
+                MiningStateData::AwaitBlockProposal(_) => MiningState::AwaitBlockProposal,
+                MiningStateData::AwaitBlock(..) => MiningState::AwaitBlock,
+                MiningStateData::Composing(_) => MiningState::Composing,
+                MiningStateData::Guessing(..) => MiningState::Guessing,
+                MiningStateData::NewTipBlock(_) => MiningState::NewTipBlock,
+                MiningStateData::ComposeError(_) => MiningState::ComposeError,
+                MiningStateData::Shutdown(_) => MiningState::Shutdown,
+            }
+        }
+    }
+
+    impl std::fmt::Display for MiningState {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.name())
+        }
+    }
+}
+
+mod mining_paused_reason_impl {
+    use super::*;
+
+    impl MiningPausedReason {
+        pub fn description(&self) -> &str {
+            match self {
+                Self::Rpc => "user",
+                Self::SyncBlocks => "syncing blocks",
+                Self::NeedConnection => "await connections",
+            }
+        }
+    }
+
+    impl std::fmt::Display for MiningPausedReason {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let desc = self.description();
+            write!(f, "{}", desc)
+        }
+    }
+}
+
+
+mod mining_state_data_impl {
+    use super::*;
+    use std::hash::Hasher;
+
+    impl TryFrom<MiningState> for MiningStateData {
+        type Error = anyhow::Error;
+
+        /// note that:
+        ///
+        ///   1. MiningStateData::Guessing is not supported.
+        ///   2. MiningStateData::Paused will use MiningPausedReason::Rpc
+        fn try_from(state: MiningState) -> Result<Self, Self::Error> {
+            Ok(match state {
+                MiningState::Disabled => MiningStateData::disabled(),
+                MiningState::Init => MiningStateData::init(),
+                MiningState::AwaitBlockProposal => MiningStateData::await_block_proposal(),
+                MiningState::AwaitBlock => anyhow::bail!("unsupported usage"),
+                MiningState::Composing => MiningStateData::composing(),
+                MiningState::Guessing => anyhow::bail!("unsupported usage"),
+                MiningState::NewTipBlock => MiningStateData::new_tip_block(),
+                MiningState::ComposeError => MiningStateData::compose_error(),
+                MiningState::Shutdown => MiningStateData::shutdown(),
+                MiningState::Paused => MiningStateData::paused(MiningPausedReason::Rpc),
+                MiningState::UnPaused => MiningStateData::unpaused(),
+            })
+        }
+    }
+
+    impl MiningStateData {
+        pub fn disabled() -> Self {
+            Self::Disabled(SystemTime::now())
+        }
+
+        pub fn init() -> Self {
+            Self::Init(SystemTime::now())
+        }
+
+        pub fn paused(reason: MiningPausedReason) -> Self {
+            Self::Paused(SystemTime::now(), vec![reason])
+        }
+
+        pub fn unpaused() -> Self {
+            Self::UnPaused(SystemTime::now())
+        }
+
+        pub fn await_block_proposal() -> Self {
+            Self::AwaitBlockProposal(SystemTime::now())
+        }
+
+        pub fn await_block(proposed_block: ProposedBlock) -> Self {
+            Self::AwaitBlock(SystemTime::now(), proposed_block)
+        }
+
+        pub fn composing() -> Self {
+            Self::Composing(SystemTime::now())
+        }
+
+        pub fn guessing(proposed_block: ProposedBlock) -> Self {
+            Self::Guessing(SystemTime::now(), proposed_block)
+        }
+
+        pub fn new_tip_block() -> Self {
+            Self::NewTipBlock(SystemTime::now())
+        }
+
+        pub fn compose_error() -> Self {
+            Self::ComposeError(SystemTime::now())
+        }
+
+        pub fn shutdown() -> Self {
+            Self::Shutdown(SystemTime::now())
+        }
+
+        // pub fn is_disabled(&self) -> bool {
+        //     self.state() == MiningState::Disabled
+        // }
+
+        pub fn is_init(&self) -> bool {
+            self.state() == MiningState::Init
+        }
+
+        // pub fn is_paused(&self) -> bool {
+        //     self.state() == MiningState::Paused
+        // }
+
+        // pub fn is_await_block_proposal(&self) -> bool {
+        //     self.state() == MiningState::AwaitBlockProposal
+        // }
+
+        // pub fn is_await_block(&self) -> bool {
+        //     self.state() == MiningState::AwaitBlock
+        // }
+
+        pub fn is_composing(&self) -> bool {
+            self.state() == MiningState::Composing
+        }
+
+        pub fn is_guessing(&self) -> bool {
+            self.state() == MiningState::Guessing
+        }
+
+        // pub fn is_new_tip_block(&self) -> bool {
+        //     self.state() == MiningState::NewTipBlock
+        // }
+
+        // pub fn is_compose_error(&self) -> bool {
+        //     self.state() == MiningState::ComposeError
+        // }
+
+        pub fn is_shutdown(&self) -> bool {
+            self.state() == MiningState::Shutdown
+        }
+
+        pub fn state(&self) -> MiningState {
+            MiningState::from(self)
+        }
+
+        pub(crate) fn name(&self) -> String {
+            self.state().name().to_owned()
+        }
+
+        pub fn since(&self) -> SystemTime {
+            match *self {
+                Self::Disabled(t) => t,
+                Self::Init(t) => t,
+                Self::Paused(t, _) => t,
+                Self::UnPaused(t) => t,
+                Self::AwaitBlockProposal(t) => t,
+                Self::AwaitBlock(t, _) => t,
+                Self::Composing(t) => t,
+                Self::Guessing(t, _) => t,
+                Self::NewTipBlock(t) => t,
+                Self::ComposeError(t) => t,
+                Self::Shutdown(t) => t,
+            }
+        }
+
+        // pub(crate) fn paused_reasons(&self) -> &[MiningPausedReason] {
+        //     match self {
+        //         Self::Paused(reasons) => reasons,
+        //         _ => &[],
+        //     }
+        // }
+
+        // returns hash of this MiningStateData, using [std::hash::DefaultHasher].
+        pub fn std_hash(&self) -> u64 {
+            let mut s = std::hash::DefaultHasher::new();
+            self.hash(&mut s);
+            s.finish()
+        }
+    }
+}
+
+mod mining_status_impl {
+    use std::time::Duration;
+    use super::*;
+    use itertools::Itertools;
+
+    impl MiningStatus {
+        pub fn since(&self) -> SystemTime {
+            match *self {
+                Self::Disabled(t) => t,
+                Self::Init(t) => t,
+                Self::Paused(t, _) => t,
+                Self::UnPaused(t) => t,
+                Self::AwaitBlockProposal(t) => t,
+                Self::AwaitBlock(t, _) => t,
+                Self::Composing(t) => t,
+                Self::Guessing(t, _) => t,
+                Self::NewTipBlock(t) => t,
+                Self::ComposeError(t) => t,
+                Self::Shutdown(t) => t,
+            }
+        }
+    }
+
+    impl std::fmt::Display for MiningStatus {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let input_output_info = match self {
+                Self::Guessing(_, info) => {
+                    format!(" {}/{}", info.num_inputs, info.num_outputs)
+                }
+                _ => String::default(),
+            };
+
+            let work_type_and_duration = match self {
+                Self::Disabled(_) => MiningState::from(self).to_string(),
+                Self::Paused(t, reasons) => {
+                    format!(
+                        "paused for {}  ({})",
+                        human_duration_secs(&t.elapsed()),
+                        reasons.iter().map(|r| r.description()).join(", ")
+                    )
+                }
+                _ => format!(
+                    "{} for {}",
+                    MiningState::from(self),
+                    human_duration_secs(&self.since().elapsed()),
+                ),
+            };
+            let reward = match self {
+                Self::Guessing(_, block_summary) => format!(
+                    "; total guesser reward: {}",
+                    block_summary.total_guesser_fee
+                ),
+                _ => String::default(),
+            };
+
+            write!(f, "{work_type_and_duration}{input_output_info}{reward}",)
+        }
+    }
+
+    impl From<&MiningStateData> for MiningStatus {
+        fn from(ms: &MiningStateData) -> Self {
+            match ms {
+                MiningStateData::Disabled(t) => Self::Disabled(*t),
+                MiningStateData::Init(t) => Self::Init(*t),
+                MiningStateData::Paused(t, r) => Self::Paused(*t, r.clone()),
+                MiningStateData::UnPaused(t) => Self::UnPaused(*t),
+                MiningStateData::AwaitBlockProposal(t) => Self::AwaitBlockProposal(*t),
+                MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p).into()),
+                MiningStateData::Composing(t) => Self::Composing(*t),
+                MiningStateData::Guessing(t, b) => Self::Guessing(*t, (&**b).into()),
+                // MiningStateData::Guessing(_, None) => unreachable!(),
+                MiningStateData::NewTipBlock(t) => Self::NewTipBlock(*t),
+                MiningStateData::ComposeError(t) => Self::ComposeError(*t),
+                MiningStateData::Shutdown(t) => Self::Shutdown(*t),
+            }
+        }
+    }
+
+    // formats a duration in human readable form, to seconds precision.
+    // eg: 7h 5m 23s
+    fn human_duration_secs(duration_exact: &Result<Duration, std::time::SystemTimeError>) -> String {
+        // remove sub-second component, so humantime ends with seconds.
+        // also set to 0 if any error.
+        let duration_to_secs = duration_exact
+            .as_ref()
+            .map(|v| *v - Duration::from_nanos(v.subsec_nanos().into()))
+            .unwrap_or(Duration::ZERO);
+        humantime::format_duration(duration_to_secs).to_string()
+    }
 }
