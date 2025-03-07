@@ -25,11 +25,12 @@
 //! in order to transition between states.  These events may have associated
 //! data.
 
+use std::hash::Hash;
 use std::sync::Arc;
+use std::time::SystemTime;
+
 use serde::Deserialize;
 use serde::Serialize;
-use std::time::SystemTime;
-use std::hash::Hash;
 
 use crate::models::blockchain::block::Block;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -47,7 +48,7 @@ pub(super) type ProposedBlock = Arc<Block>;
 /// composing and guessing roles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumIter)]
 #[repr(u8)]
-pub enum MiningState {
+pub(crate) enum MiningState {
     // ---- happy path ----
     Init = 0,
     AwaitBlockProposal = 1,
@@ -178,21 +179,6 @@ pub struct BlockSummary {
     pub total_guesser_fee: NativeCurrencyAmount,
 }
 
-mod block_summary_impl {
-    use super::*;
-
-    impl From<&Block> for BlockSummary {
-        fn from(b: &Block) -> Self {
-            Self {
-                num_inputs: b.body().transaction_kernel.inputs.len(),
-                num_outputs: b.body().transaction_kernel.outputs.len(),
-                total_coinbase: b.body().transaction_kernel.coinbase.unwrap_or_default(),
-                total_guesser_fee: b.body().transaction_kernel.fee,
-            }
-        }
-    }
-}
-
 // This file contains several inter-related enums and it is useful to
 // present them one after another (above).
 //
@@ -236,7 +222,6 @@ mod mining_event_impl {
         }
     }
 }
-
 
 mod mining_state_impl {
     use super::*;
@@ -302,31 +287,10 @@ mod mining_state_impl {
     }
 }
 
-mod mining_paused_reason_impl {
-    use super::*;
-
-    impl MiningPausedReason {
-        pub fn description(&self) -> &str {
-            match self {
-                Self::Rpc => "user",
-                Self::SyncBlocks => "syncing blocks",
-                Self::NeedConnection => "await connections",
-            }
-        }
-    }
-
-    impl std::fmt::Display for MiningPausedReason {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let desc = self.description();
-            write!(f, "{}", desc)
-        }
-    }
-}
-
-
 mod mining_state_data_impl {
-    use super::*;
     use std::hash::Hasher;
+
+    use super::*;
 
     impl TryFrom<MiningState> for MiningStateData {
         type Error = anyhow::Error;
@@ -397,25 +361,9 @@ mod mining_state_data_impl {
             Self::Shutdown(SystemTime::now())
         }
 
-        // pub fn is_disabled(&self) -> bool {
-        //     self.state() == MiningState::Disabled
-        // }
-
         pub fn is_init(&self) -> bool {
             self.state() == MiningState::Init
         }
-
-        // pub fn is_paused(&self) -> bool {
-        //     self.state() == MiningState::Paused
-        // }
-
-        // pub fn is_await_block_proposal(&self) -> bool {
-        //     self.state() == MiningState::AwaitBlockProposal
-        // }
-
-        // pub fn is_await_block(&self) -> bool {
-        //     self.state() == MiningState::AwaitBlock
-        // }
 
         pub fn is_composing(&self) -> bool {
             self.state() == MiningState::Composing
@@ -424,14 +372,6 @@ mod mining_state_data_impl {
         pub fn is_guessing(&self) -> bool {
             self.state() == MiningState::Guessing
         }
-
-        // pub fn is_new_tip_block(&self) -> bool {
-        //     self.state() == MiningState::NewTipBlock
-        // }
-
-        // pub fn is_compose_error(&self) -> bool {
-        //     self.state() == MiningState::ComposeError
-        // }
 
         pub fn is_shutdown(&self) -> bool {
             self.state() == MiningState::Shutdown
@@ -461,13 +401,6 @@ mod mining_state_data_impl {
             }
         }
 
-        // pub(crate) fn paused_reasons(&self) -> &[MiningPausedReason] {
-        //     match self {
-        //         Self::Paused(reasons) => reasons,
-        //         _ => &[],
-        //     }
-        // }
-
         // returns hash of this MiningStateData, using [std::hash::DefaultHasher].
         pub fn std_hash(&self) -> u64 {
             let mut s = std::hash::DefaultHasher::new();
@@ -479,10 +412,13 @@ mod mining_state_data_impl {
 
 mod mining_status_impl {
     use std::time::Duration;
-    use super::*;
+
     use itertools::Itertools;
 
+    use super::*;
+
     impl MiningStatus {
+        /// returns time when mining entered this status.
         pub fn since(&self) -> SystemTime {
             match *self {
                 Self::Disabled(t) => t,
@@ -496,6 +432,15 @@ mod mining_status_impl {
                 Self::NewTipBlock(t) => t,
                 Self::ComposeError(t) => t,
                 Self::Shutdown(t) => t,
+            }
+        }
+
+        /// returns a list of reasons why mining is paused.
+        /// empty if not paused.
+        pub fn paused_reasons(&self) -> &[MiningPausedReason] {
+            match self {
+                Self::Paused(_, reasons) => reasons,
+                _ => &[],
             }
         }
     }
@@ -547,7 +492,6 @@ mod mining_status_impl {
                 MiningStateData::AwaitBlock(t, p) => Self::AwaitBlock(*t, (&**p).into()),
                 MiningStateData::Composing(t) => Self::Composing(*t),
                 MiningStateData::Guessing(t, b) => Self::Guessing(*t, (&**b).into()),
-                // MiningStateData::Guessing(_, None) => unreachable!(),
                 MiningStateData::NewTipBlock(t) => Self::NewTipBlock(*t),
                 MiningStateData::ComposeError(t) => Self::ComposeError(*t),
                 MiningStateData::Shutdown(t) => Self::Shutdown(*t),
@@ -557,7 +501,9 @@ mod mining_status_impl {
 
     // formats a duration in human readable form, to seconds precision.
     // eg: 7h 5m 23s
-    fn human_duration_secs(duration_exact: &Result<Duration, std::time::SystemTimeError>) -> String {
+    fn human_duration_secs(
+        duration_exact: &Result<Duration, std::time::SystemTimeError>,
+    ) -> String {
         // remove sub-second component, so humantime ends with seconds.
         // also set to 0 if any error.
         let duration_to_secs = duration_exact
@@ -565,5 +511,41 @@ mod mining_status_impl {
             .map(|v| *v - Duration::from_nanos(v.subsec_nanos().into()))
             .unwrap_or(Duration::ZERO);
         humantime::format_duration(duration_to_secs).to_string()
+    }
+}
+
+mod mining_paused_reason_impl {
+    use super::*;
+
+    impl MiningPausedReason {
+        pub fn description(&self) -> &str {
+            match self {
+                Self::Rpc => "user",
+                Self::SyncBlocks => "syncing blocks",
+                Self::NeedConnection => "await connections",
+            }
+        }
+    }
+
+    impl std::fmt::Display for MiningPausedReason {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let desc = self.description();
+            write!(f, "{}", desc)
+        }
+    }
+}
+
+mod block_summary_impl {
+    use super::*;
+
+    impl From<&Block> for BlockSummary {
+        fn from(b: &Block) -> Self {
+            Self {
+                num_inputs: b.body().transaction_kernel.inputs.len(),
+                num_outputs: b.body().transaction_kernel.outputs.len(),
+                total_coinbase: b.body().transaction_kernel.coinbase.unwrap_or_default(),
+                total_guesser_fee: b.body().transaction_kernel.fee,
+            }
+        }
     }
 }

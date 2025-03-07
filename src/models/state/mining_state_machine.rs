@@ -137,6 +137,7 @@ const MINING_STATE_TRANSITIONS: [&[MiningState]; 11] = [
     &[],
 ];
 
+/// see module description.
 #[derive(Debug, Clone)]
 pub(crate) struct MiningStateMachine {
     state_data: MiningStateData, // holds a MiningState.
@@ -158,7 +159,10 @@ pub(crate) struct InvalidStateTransition {
 /// configuration for [MiningStateMachine]
 #[derive(Debug, Clone)]
 pub(crate) struct MiningStateMachineConfig {
+    // should we compose?
     pub role_compose: bool,
+
+    // should we guess?
     pub role_guess: bool,
 
     // true: return error on invalid state transitions.
@@ -241,10 +245,7 @@ impl MiningStateMachine {
             MiningEvent::NewBlockProposal(proposal)
                 if self.state_data.state() == MiningState::Guessing =>
             {
-                self.set_state_data(MiningStateData::Guessing(
-                    self.state_data.since(),
-                    proposal.into(),
-                ));
+                self.set_state_data(MiningStateData::Guessing(self.state_data.since(), proposal));
             }
             // same as above, but this applies to AwaitBlock
             MiningEvent::NewBlockProposal(proposal)
@@ -252,7 +253,7 @@ impl MiningStateMachine {
             {
                 self.set_state_data(MiningStateData::AwaitBlock(
                     self.state_data.since(),
-                    proposal.into(),
+                    proposal,
                 ));
             }
             MiningEvent::NewBlockProposal(proposal) => {
@@ -465,10 +466,6 @@ impl MiningStateMachine {
             + self.paused_need_connection as u8
     }
 
-    // pub fn paused_need_connection(&self) -> bool {
-    //     self.paused_need_connection
-    // }
-
     fn ensure_allowed(
         &self,
         new_state_data: &MiningStateData,
@@ -486,10 +483,6 @@ impl MiningStateMachine {
     pub fn mining_enabled(&self) -> bool {
         self.config.role_compose || self.config.role_guess
     }
-
-    // pub(crate) fn mining_paused(&self) -> bool {
-    //     self.paused_count() > 0
-    // }
 
     pub fn can_start_guessing(&self) -> bool {
         self.config.role_guess && self.state_data.state() == MiningState::AwaitBlock
