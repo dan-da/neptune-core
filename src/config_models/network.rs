@@ -86,6 +86,10 @@ impl Network {
     pub fn is_regtest(&self) -> bool {
         matches!(self, Self::RegTest)
     }
+
+    pub fn use_mock_proof(&self) -> bool {
+        self.is_regtest()
+    }
 }
 
 impl fmt::Display for Network {
