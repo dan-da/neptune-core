@@ -704,6 +704,7 @@ mod test {
     use proptest_arbitrary_interop::arb;
     use tracing_test::traced_test;
 
+    use crate::config_models::network::Network;
     use super::*;
     use crate::job_queue::triton_vm::TritonVmJobPriority;
     use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
@@ -888,6 +889,7 @@ mod test {
 
         #[tokio::test]
         async fn can_verify_via_valid_proof_collection() {
+            let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
             let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
                 .new_tree(&mut test_runner)
@@ -902,7 +904,7 @@ mod test {
             )
             .await
             .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash).await);
+            assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
             let claim = witness.claim();
@@ -922,6 +924,7 @@ mod test {
         #[traced_test]
         #[tokio::test]
         async fn can_verify_via_valid_proof_collection_if_timelocked_expired() {
+            let network = Network::Main;
             let mut test_runner = TestRunner::deterministic();
             let deterministic_now = arb::<Timestamp>()
                 .new_tree(&mut test_runner)
@@ -941,7 +944,7 @@ mod test {
             )
             .await
             .unwrap();
-            assert!(proof_collection.verify(txk_mast_hash).await);
+            assert!(proof_collection.verify(txk_mast_hash, network).await);
 
             let witness = SingleProofWitness::from_collection(proof_collection);
             let claim = witness.claim();

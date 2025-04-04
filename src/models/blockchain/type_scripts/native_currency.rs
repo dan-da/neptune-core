@@ -1039,6 +1039,7 @@ impl SecretWitness for NativeCurrencyWitness {
 pub mod test {
     use std::panic;
 
+    use crate::config_models::network::Network;
     use num_traits::CheckedAdd;
     use num_traits::Zero;
     use proptest::collection::vec;
@@ -1467,6 +1468,7 @@ pub mod test {
 
     #[tokio::test]
     async fn native_currency_failing_proof() {
+        let network = Network::Main;
         let mut test_runner = TestRunner::deterministic();
         let primitive_witness = PrimitiveWitness::arbitrary_with_size_numbers(Some(2), 2, 2)
             .new_tree(&mut test_runner)
@@ -1501,7 +1503,7 @@ pub mod test {
             )
             .await
             .unwrap();
-        assert!(verify(claim, proof).await, "proof fails");
+        assert!(verify(claim, proof, network).await, "proof fails");
     }
 
     #[proptest]

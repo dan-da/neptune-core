@@ -988,7 +988,7 @@ mod test {
                 ),
             }
 
-            assert!(mempool_tx.is_valid().await);
+            assert!(mempool_tx.is_valid(network).await);
         }
     }
 
@@ -1074,7 +1074,7 @@ mod test {
                 ),
             }
 
-            assert!(mempool_tx.is_valid().await);
+            assert!(mempool_tx.is_valid(network).await);
 
             // Ensure tx was updated to latest mutator set
             let mutator_set_accumulator_after = alice

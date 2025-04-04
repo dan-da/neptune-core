@@ -2010,7 +2010,7 @@ pub(crate) mod block_tests {
             .unwrap();
 
             let block_is_valid = block
-                .is_valid_internal(blocks.last().unwrap(), now, None, None)
+                .is_valid_internal(blocks.last().unwrap(), now, None, None, network)
                 .await;
             println!("block is valid? {:?}", block_is_valid.map(|_| "yes"));
             println!();

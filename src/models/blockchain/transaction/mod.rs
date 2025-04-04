@@ -397,6 +397,7 @@ mod transaction_tests {
     #[tokio::test]
     async fn update_single_proof_works() {
         async fn prop(to_be_updated: PrimitiveWitness, mined: PrimitiveWitness) {
+            let network = Network::Main;
             let as_single_proof = SingleProof::produce(
                 &to_be_updated,
                 TritonVmJobQueue::dummy(),
@@ -408,7 +409,7 @@ mod transaction_tests {
                 kernel: to_be_updated.kernel,
                 proof: TransactionProof::SingleProof(as_single_proof),
             };
-            assert!(original_tx.is_valid().await);
+            assert!(original_tx.is_valid(network).await);
 
             let mutator_set_update =
                 MutatorSetUpdate::new(mined.kernel.inputs.clone(), mined.kernel.outputs.clone());
@@ -424,7 +425,7 @@ mod transaction_tests {
             .await
             .unwrap();
 
-            assert!(updated_tx.is_valid().await)
+            assert!(updated_tx.is_valid(network).await)
         }
 
         for (to_be_updated_params, mined_params) in [

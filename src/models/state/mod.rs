@@ -1880,7 +1880,7 @@ mod global_state_tests {
             .await
             .unwrap()
             .transaction;
-        assert!(tx.is_valid().await);
+        assert!(tx.is_valid(network).await);
 
         assert_eq!(
             2,
@@ -1918,7 +1918,7 @@ mod global_state_tests {
             .await
             .unwrap()
             .transaction;
-        assert!(new_tx.is_valid().await);
+        assert!(new_tx.is_valid(network).await);
         assert_eq!(
             4,
             new_tx.kernel.outputs.len(),
@@ -2586,7 +2586,7 @@ mod global_state_tests {
         .await
         .unwrap();
 
-        assert!(coinbase_transaction.is_valid().await);
+        assert!(coinbase_transaction.is_valid(network).await);
         assert!(coinbase_transaction
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
 
@@ -2657,7 +2657,7 @@ mod global_state_tests {
             .pop()
             .unwrap();
 
-        assert!(tx_to_alice_and_bob.is_valid().await);
+        assert!(tx_to_alice_and_bob.is_valid(network).await);
         assert!(tx_to_alice_and_bob
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
 
@@ -2684,7 +2684,7 @@ mod global_state_tests {
             )
             .await
             .unwrap();
-        assert!(block_transaction.is_valid().await);
+        assert!(block_transaction.is_valid(network).await);
         assert!(block_transaction
             .is_confirmable_relative_to(&genesis_block.mutator_set_accumulator_after()));
 
@@ -2842,7 +2842,7 @@ mod global_state_tests {
             "No change for Alice as she spent it all"
         );
 
-        assert!(tx_from_alice.is_valid().await);
+        assert!(tx_from_alice.is_valid(network).await);
         assert!(tx_from_alice.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
 
         // make bob's transaction
@@ -2888,7 +2888,7 @@ mod global_state_tests {
             "No change for Bob as he spent it all"
         );
 
-        assert!(tx_from_bob.is_valid().await);
+        assert!(tx_from_bob.is_valid(network).await);
         assert!(tx_from_bob.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
 
         // Make block_2 with tx that contains:
@@ -2909,7 +2909,7 @@ mod global_state_tests {
         )
         .await
         .unwrap();
-        assert!(coinbase_transaction2.is_valid().await);
+        assert!(coinbase_transaction2.is_valid(network).await);
         assert!(coinbase_transaction2
             .is_confirmable_relative_to(&block_1.mutator_set_accumulator_after()));
 
@@ -2930,7 +2930,7 @@ mod global_state_tests {
             )
             .await
             .unwrap();
-        assert!(block_transaction2.is_valid().await);
+        assert!(block_transaction2.is_valid(network).await);
         assert!(
             block_transaction2.is_confirmable_relative_to(&block_1.mutator_set_accumulator_after())
         );

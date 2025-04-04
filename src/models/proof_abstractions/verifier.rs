@@ -88,6 +88,8 @@ pub(crate) mod test {
 
     #[tokio::test]
     async fn test_claims_cache() {
+        let network = Network::Main;
+
         // generate random claim and bogus proof
         let mut rng = rand::rng();
         let some_claim = Claim::new(rng.random())
@@ -96,12 +98,12 @@ pub(crate) mod test {
         let some_proof = bogus_proof(&some_claim);
 
         // verification must fail
-        assert!(!verify(some_claim.clone(), some_proof.clone()).await);
+        assert!(!verify(some_claim.clone(), some_proof.clone(), network).await);
 
         // put claim into cache
         cache_true_claim(some_claim.clone()).await;
 
         // verification must succeed
-        assert!(verify(some_claim, some_proof).await);
+        assert!(verify(some_claim, some_proof, network).await);
     }
 }
