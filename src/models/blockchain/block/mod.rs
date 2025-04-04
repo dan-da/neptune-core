@@ -264,7 +264,8 @@ impl Block {
         assert!(
             verify(
                 tx_claim.clone(),
-                transaction.proof.clone().into_single_proof().clone()
+                transaction.proof.clone().into_single_proof().clone(),
+                proof_job_options.job_settings.network,
             )
             .await,
             "Transaction proof must be valid to generate a block"
@@ -707,6 +708,7 @@ impl Block {
                 now,
                 Some(network.target_block_interval()),
                 Some(network.minimum_block_time()),
+                network,
             )
             .await
         {
@@ -733,6 +735,7 @@ impl Block {
         now: Timestamp,
         target_block_interval: Option<Timestamp>,
         minimum_block_time: Option<Timestamp>,
+        network: Network,
     ) -> Result<(), BlockValidationError> {
         const FUTUREDATING_LIMIT: Timestamp = Timestamp::minutes(5);
 
@@ -809,7 +812,7 @@ impl Block {
         };
 
         // 1.d)
-        if !BlockProgram::verify(self.body(), self.appendix(), block_proof).await {
+        if !BlockProgram::verify(self.body(), self.appendix(), block_proof, network).await {
             return Err(BlockValidationError::ProofValidity);
         }
 

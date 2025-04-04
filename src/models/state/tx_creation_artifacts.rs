@@ -109,7 +109,7 @@ impl TxCreationArtifacts {
         }
 
         // 3. validate that transaction (proof) is valid.
-        if !self.transaction.verify_proof().await {
+        if !self.transaction.verify_proof(network).await {
             return Err(TxCreationArtifactsError::InvalidProof);
         }
 

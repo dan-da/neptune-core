@@ -4,6 +4,8 @@ use tasm_lib::triton_vm::proof::Proof;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
+use crate::config_models::network::Network;
+
 // This claims-cache stores mock proof-claims that are simply asserted to be valid.
 //
 // The cache is only used for tests and regtest mode!!
@@ -38,8 +40,12 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 /// the verifier). When the test flag is set and the cache does not contain the
 /// claim and verification succeeds, the claim is added to the cache. The only
 /// other way to populate the cache is through method `cache_true_claim`.
-pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
-    // presently this is only populated if network is regtest.
+pub(crate) async fn verify(claim: Claim, proof: Proof, network: Network) -> bool {
+    if network.is_regtest() {
+        return true;
+    }
+
+    #[cfg(test)]
     if CLAIMS_CACHE.lock().await.contains(&claim) {
         return true;
     }

@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tasm_lib::prelude::Digest;
 
+use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::BFieldCodec;
 use crate::models::blockchain::transaction::PrimitiveWitness;
 use crate::models::blockchain::transaction::Proof;
@@ -71,7 +72,7 @@ impl TransactionProof {
     }
 
     /// verify this proof is valid for a provided transaction id
-    pub async fn verify(&self, kernel_mast_hash: Digest) -> bool {
+    pub async fn verify(&self, kernel_mast_hash: Digest, network: Network) -> bool {
         match self {
             TransactionProof::Witness(primitive_witness) => {
                 !primitive_witness.kernel.merge_bit
@@ -80,10 +81,10 @@ impl TransactionProof {
             }
             TransactionProof::SingleProof(single_proof) => {
                 let claim = SingleProof::claim(kernel_mast_hash);
-                verify(claim, single_proof.clone()).await
+                verify(claim, single_proof.clone(), network).await
             }
             TransactionProof::ProofCollection(proof_collection) => {
-                proof_collection.verify(kernel_mast_hash).await
+                proof_collection.verify(kernel_mast_hash, network).await
             }
         }
     }
