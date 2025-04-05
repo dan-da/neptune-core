@@ -23,12 +23,12 @@ use crate::job_queue::traits::JobCompletion;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
+use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
-use crate::triton_vm::proof::Proof;
 use crate::triton_vm::vm::VMState;
 
 /// represents an error running a [ProverJob]
