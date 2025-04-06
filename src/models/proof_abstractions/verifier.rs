@@ -3,7 +3,7 @@ use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::stark::Stark;
 use tokio::task;
 
-use crate::config_models::cli_args::Args;
+use crate::config_models::network::Network;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 
 // This claims-cache stores mock proof-claims that are simply asserted to be valid.
@@ -43,7 +43,7 @@ static CLAIMS_CACHE: std::sync::LazyLock<tokio::sync::Mutex<std::collections::Ha
 pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
     // security: we do not accept mock proofs unless we ourselves
     // are running a network that accepts mock-proofs, eg regtest.
-    if Args::singleton_instance().network.use_mock_proof() {
+    if Network::singleton_instance().use_mock_proof() {
         if proof.is_valid_mock() {
             return true;
         } else if proof.is_invalid_mock() {
