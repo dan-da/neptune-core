@@ -2,7 +2,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::ops::RangeInclusive;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -567,11 +566,6 @@ impl Args {
         } else {
             TxProvingCapability::LockScript
         }
-    }
-
-    pub fn singleton_instance() -> Arc<Self> {
-        static INSTANCE: OnceLock<Arc<Args>> = OnceLock::new();
-        INSTANCE.get_or_init(|| Arc::new(Self::parse())).clone()
     }
 }
 
