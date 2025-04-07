@@ -13,6 +13,7 @@ use crate::models::blockchain::transaction::BFieldCodec;
 use crate::triton_vm::prelude::LabelledInstruction;
 use crate::BFieldElement;
 
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 enum MockableProofBehavior {
     #[default]
@@ -21,11 +22,54 @@ enum MockableProofBehavior {
     InvalidMock,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct MockableProof {
     behavior: MockableProofBehavior,
     proof: VmProof,
 }
+
+impl BFieldCodec for MockableProof {
+    type Error = <VmProof as BFieldCodec>::Error;
+
+// this causes a runtime error when executing program in VM for some reason.
+
+/*
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
+        let behavior = *MockableProofBehavior::decode(&sequence[0..1]).unwrap(); // First element only
+        let proof = *VmProof::decode(&sequence[1..])?; // All elements except the first
+
+        Ok(Box::new(Self {
+            behavior,
+            proof,
+        }))
+    }
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        let mut encoded = self.behavior.encode();
+        encoded.extend(self.proof.encode());
+        encoded
+    }
+
+    fn static_length() -> Option<usize> {
+        Some(MockableProofBehavior::static_length()? + VmProof::static_length()?)
+    } 
+*/
+    
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
+        Ok(Box::new(Self{behavior: Default:: default(), proof: *VmProof::decode(sequence)?}))
+    }
+
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.proof.encode()
+    }    
+
+    fn static_length() -> Option<usize> {
+        VmProof::static_length() 
+    }
+
+}
+
 
 impl TasmObject for MockableProof {
     fn label_friendly_name() -> String {
@@ -41,6 +85,10 @@ impl TasmObject for MockableProof {
     fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
         iterator: &mut Itr,
     ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
+//        let proof = VmProof::decode_iter(iterator)?;
+//        Ok(Box::new(Self{behavior: Default::default(), proof: *proof }))
+
+
         let elems: Vec<BFieldElement> = iterator.collect();
         let mockable_proof = Self::decode(&elems)?;
         Ok(mockable_proof)
@@ -60,6 +108,7 @@ impl DerefMut for MockableProof {
         &mut self.proof
     }
 }
+
 
 impl From<MockableProof> for VmProof {
     fn from(mp: MockableProof) -> VmProof {
