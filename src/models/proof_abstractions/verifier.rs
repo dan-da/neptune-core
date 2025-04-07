@@ -51,7 +51,7 @@ pub(crate) async fn verify(claim: Claim, proof: Proof) -> bool {
         }
     }
 
-    // presently this is only used by cache_true_claims test.
+    // presently this is used by certain unit tests.
     if CLAIMS_CACHE.lock().await.contains(&claim) {
         return true;
     }
