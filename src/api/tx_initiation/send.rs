@@ -128,6 +128,7 @@ impl TransactionSender {
 
         // generate proof
         let proof = TransactionProofBuilder::new()
+            .transaction_details(&tx_details)
             .primitive_witness(witness)
             .job_queue(vm_job_queue())
             .tx_proving_capability(gsl.cli().proving_capability())
