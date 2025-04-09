@@ -20,12 +20,15 @@ pub trait JobResult: Any + Send + Sync + std::fmt::Debug {
 pub enum JobCompletion {
     Finished(Box<dyn JobResult>),
     Cancelled,
+    Panicked,
 }
 impl std::fmt::Display for JobCompletion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             Self::Finished(_) => "Finished",
             Self::Cancelled => "Cancelled",
+            //Self::Panicked(_) => "Panicked",
+            Self::Panicked => "Panicked",
         };
 
         write!(f, "{}", str)

@@ -404,6 +404,8 @@ impl Job for ProverJob {
     //
     // The select!() and kill() occur in Self::prove_out_of_process().
     async fn run_async_cancellable(&self, mut rx: JobCancelReceiver) -> JobCompletion {
+        panic!("panic when prover job is run");
+
         // check if allowed, and listen for cancel messages.
         tokio::select!(
             result = self.check_if_allowed() => {

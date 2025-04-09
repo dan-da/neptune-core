@@ -1,7 +1,12 @@
+use std::any::Any;
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum JobHandleError {
     #[error("the job was cancelled")]
     JobCancelled,
+
+    #[error("the job panicked")]
+    JobPanicked,
 
     #[error("channel send error cancelling job")]
     CancelJobError(#[from] tokio::sync::watch::error::SendError<()>),

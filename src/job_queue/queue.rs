@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
+use tokio::task::JoinError;
 use tokio::task::JoinHandle;
 
 use super::errors::JobHandleError;
@@ -37,6 +38,8 @@ impl JobHandle {
         match self.complete().await? {
             JobCompletion::Finished(r) => Ok(r),
             JobCompletion::Cancelled => Err(JobHandleError::JobCancelled),
+            //JobCompletion::Panicked(e) => Err(JobHandleError::JobPanicked(e)),
+            JobCompletion::Panicked => Err(JobHandleError::JobPanicked),
         }
     }
 
@@ -205,11 +208,45 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                 );
                 let timer = tokio::time::Instant::now();
                 let job_completion = match msg.job.is_async() {
-                    true => msg.job.run_async_cancellable(msg.cancel_rx).await,
-                    false => tokio::task::spawn_blocking(move || msg.job.run(msg.cancel_rx))
-                        .await
-                        .unwrap(),
+                    true => {
+                        let result = tokio::task::spawn(async move {
+                            msg.job.run_async_cancellable(msg.cancel_rx).await
+                        })
+                        .await;
+
+                        match result {
+                            Ok(jc) => jc,
+                            Err(e) => {
+                                if e.is_panic() {
+                                    // JobCompletion::Panicked(e.into_panic())
+                                    JobCompletion::Panicked
+                                } else if e.is_cancelled() {
+                                    JobCompletion::Cancelled
+                                } else {
+                                    unreachable!()
+                                }
+                            }
+                        }
+                    }
+                    false => {
+                        let result =
+                            tokio::task::spawn_blocking(move || msg.job.run(msg.cancel_rx)).await;
+                        match result {
+                            Ok(jc) => jc,
+                            Err(e) => {
+                                if e.is_panic() {
+                                    // JobCompletion::Panicked(e.into_panic())
+                                    JobCompletion::Panicked
+                                } else if e.is_cancelled() {
+                                    JobCompletion::Cancelled
+                                } else {
+                                    unreachable!()
+                                }
+                            }
+                        }
+                    }
                 };
+
                 tracing::info!(
                     "  *** JobQueue: ended job #{} - Completion: {} - {} secs ***",
                     job_num,
@@ -553,6 +590,50 @@ mod tests {
 
             let completion = job_handle.cancel_and_await().await.unwrap();
             assert!(matches!(completion, JobCompletion::Cancelled));
+
+            Ok(())
+        }
+
+        #[traced_test]
+        #[tokio::test]
+        pub(super) async fn panic_in_async_job_cancels_job() -> anyhow::Result<()> {
+            // create a job queue
+            let job_queue = JobQueue::start();
+
+            struct PanicJob;
+
+            #[async_trait::async_trait]
+            impl Job for PanicJob {
+                fn is_async(&self) -> bool {
+                    true
+                }
+
+                async fn run_async_cancellable(
+                    &self,
+                    _cancel_rx: JobCancelReceiver,
+                ) -> JobCompletion {
+                    panic!("job panics for unknown reason");
+                }
+            }
+
+            let job_handle = job_queue.add_job(Box::new(PanicJob), DoubleJobPriority::Low)?;
+
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+            let completion = job_handle.complete().await;
+
+            println!("completion: {:#?}", completion);
+
+            assert!(!job_queue.tx.is_closed());
+
+            // ensure we can still run another job afterwards.
+            let job = Box::new(DoubleJob {
+                data: 10,
+                duration: std::time::Duration::from_millis(50),
+                is_async: false,
+            });
+            let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
+            assert!(job_handle.result().await.is_ok());
 
             Ok(())
         }
