@@ -183,9 +183,9 @@ impl<'a> TransactionProofBuilder<'a> {
             return Err(CreateProofError::MissingRequirement);
         };
 
-        // if network.is_regtest() {
-        //     return Ok(Self::build_mock_proof(tx_details));
-        // }
+        if network.is_regtest() {
+            return Ok(Self::build_mock_proof(tx_details));
+        }
 
         let Some(job_queue) = self.job_queue else {
             return Err(CreateProofError::MissingRequirement);
