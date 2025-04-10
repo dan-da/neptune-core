@@ -1,6 +1,8 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
+use tasm_lib::prelude::Library;
+use crate::triton_vm::prelude::LabelledInstruction;
 use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -31,7 +33,7 @@ enum MockProofBehavior {
 /// 1. standard.      not a mock proof
 /// 2. valid-mock.    a mock proof that passes validation (if mock proofs are allowed)
 /// 3. invalid-mock.  a mock proof that fails validation (if mock proofs are allowed, or not)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, TasmObject)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
 pub struct MockableProof {
     proof: VmProof,
 }
@@ -50,6 +52,30 @@ impl BFieldCodec for MockableProof {
 
     fn static_length() -> Option<usize> {
         VmProof::static_length() 
+    }
+}
+
+impl TasmObject for MockableProof {
+    fn label_friendly_name() -> String {
+        VmProof::label_friendly_name()
+    }
+
+    fn compute_size_and_assert_valid_size_indicator(
+        library: &mut Library,
+    ) -> Vec<LabelledInstruction> {
+        VmProof::compute_size_and_assert_valid_size_indicator(library)
+    }
+
+    fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
+        iterator: &mut Itr,
+    ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
+//        let proof = VmProof::decode_iter(iterator)?;
+//        Ok(Box::new(Self{behavior: Default::default(), proof: *proof }))
+
+
+        let elems: Vec<BFieldElement> = iterator.collect();
+        let mockable_proof = Self::decode(&elems)?;
+        Ok(mockable_proof)
     }
 }
 
