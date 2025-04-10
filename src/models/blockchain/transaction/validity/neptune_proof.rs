@@ -13,35 +13,29 @@ use crate::models::blockchain::transaction::BFieldCodec;
 use crate::triton_vm::prelude::LabelledInstruction;
 use crate::BFieldElement;
 
+/// defines Mock proof behaviors. (private)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
-enum MockableProofBehavior {
+enum MockProofBehavior {
     ValidMock,
     InvalidMock,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+/// represents a triton-vm proof that can optionally be mocked.
+///
+/// Mock proofs are useful for testing and simulations because they can be generated
+/// instantly on commodity hardware whereas real proofs can take minutes on powerful
+/// machines and simply be impossible to generate on weaker devices.
+///
+/// In particular the regtest network (mode) uses mock proofs so that transactions
+/// and blocks can be generated quickly at will.
+///
+/// The proof can be of three types:
+/// 1. standard.      not a mock proof
+/// 2. valid-mock.    a mock proof that passes validation (if mock proofs are allowed)
+/// 3. invalid-mock.  a mock proof that fails validation (if mock proofs are allowed, or not)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
 pub struct MockableProof {
     proof: VmProof,
-}
-
-impl TasmObject for MockableProof {
-    fn label_friendly_name() -> String {
-        VmProof::label_friendly_name()
-    }
-
-    fn compute_size_and_assert_valid_size_indicator(
-        library: &mut Library,
-    ) -> Vec<LabelledInstruction> {
-        VmProof::compute_size_and_assert_valid_size_indicator(library)
-    }
-
-    fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
-        iterator: &mut Itr,
-    ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
-        let elems: Vec<BFieldElement> = iterator.collect();
-        let mockable_proof = Self::decode(&elems)?;
-        Ok(mockable_proof)
-    }
 }
 
 impl Deref for MockableProof {
@@ -77,42 +71,53 @@ impl From<VmProof> for MockableProof {
 }
 
 impl MockableProof {
+    /// creates an invalid standard proof (not a mock proof)
     pub fn invalid() -> Self {
         Self {
             proof: VmProof(vec![]),
         }
     }
 
+    /// creates a mock proof that will pass validation (if mock proofs are allowed)
     pub fn valid_mock(_claim: Claim) -> Self {
         Self {
-            proof: VmProof(MockableProofBehavior::ValidMock.encode()),
+            proof: VmProof(MockProofBehavior::ValidMock.encode()),
         }
     }
 
+    /// creates a mock proof that will fail validation (if mock proofs are allowed, or not)
     pub fn invalid_mock(_claim: Claim) -> Self {
         Self {
-            proof: VmProof(MockableProofBehavior::InvalidMock.encode()),
+            proof: VmProof(MockProofBehavior::InvalidMock.encode()),
         }
     }
 
-    fn matches_behavior(&self, target: MockableProofBehavior) -> bool {
-        if let Ok(behavior) = MockableProofBehavior::decode(&self.proof.0) {
-            *behavior == target
-        } else {
-            false
-        }
-    }
-
+    /// indicates if this is a standard proof (not a mock proof)
     pub fn is_standard(&self) -> bool {
         !self.is_valid_mock() && !self.is_invalid_mock()
     }
 
-    pub fn is_valid_mock(&self) -> bool {
-        self.matches_behavior(MockableProofBehavior::ValidMock)
+    /// indicates if this is a mock proof
+    pub fn is_mock(&self) -> bool {
+        self.is_valid_mock() || self.is_invalid_mock()
     }
 
+    /// indicates if this is a valid mock proof
+    pub fn is_valid_mock(&self) -> bool {
+        self.matches_behavior(MockProofBehavior::ValidMock)
+    }
+
+    /// indicates if this is an invalid mock proof
     pub fn is_invalid_mock(&self) -> bool {
-        self.matches_behavior(MockableProofBehavior::InvalidMock)
+        self.matches_behavior(MockProofBehavior::InvalidMock)
+    }
+
+    fn matches_behavior(&self, target: MockProofBehavior) -> bool {
+        if let Ok(behavior) = MockProofBehavior::decode(&self.proof.0) {
+            *behavior == target
+        } else {
+            false
+        }
     }
 }
 
