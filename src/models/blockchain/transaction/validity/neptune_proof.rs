@@ -13,63 +13,16 @@ use crate::models::blockchain::transaction::BFieldCodec;
 use crate::triton_vm::prelude::LabelledInstruction;
 use crate::BFieldElement;
 
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, BFieldCodec)]
 enum MockableProofBehavior {
-    #[default]
-    Standard,
     ValidMock,
     InvalidMock,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec)]
 pub struct MockableProof {
-    behavior: MockableProofBehavior,
     proof: VmProof,
 }
-
-impl BFieldCodec for MockableProof {
-    type Error = <VmProof as BFieldCodec>::Error;
-
-// this causes a runtime error when executing program in VM for some reason.
-
-/*
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
-        let behavior = *MockableProofBehavior::decode(&sequence[0..1]).unwrap(); // First element only
-        let proof = *VmProof::decode(&sequence[1..])?; // All elements except the first
-
-        Ok(Box::new(Self {
-            behavior,
-            proof,
-        }))
-    }
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        let mut encoded = self.behavior.encode();
-        encoded.extend(self.proof.encode());
-        encoded
-    }
-
-    fn static_length() -> Option<usize> {
-        Some(MockableProofBehavior::static_length()? + VmProof::static_length()?)
-    } 
-*/
-    
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
-        Ok(Box::new(Self{behavior: Default:: default(), proof: *VmProof::decode(sequence)?}))
-    }
-
-
-    fn encode(&self) -> Vec<BFieldElement> {
-        self.proof.encode()
-    }    
-
-    fn static_length() -> Option<usize> {
-        VmProof::static_length() 
-    }
-
-}
-
 
 impl TasmObject for MockableProof {
     fn label_friendly_name() -> String {
@@ -85,10 +38,6 @@ impl TasmObject for MockableProof {
     fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
         iterator: &mut Itr,
     ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
-//        let proof = VmProof::decode_iter(iterator)?;
-//        Ok(Box::new(Self{behavior: Default::default(), proof: *proof }))
-
-
         let elems: Vec<BFieldElement> = iterator.collect();
         let mockable_proof = Self::decode(&elems)?;
         Ok(mockable_proof)
@@ -109,7 +58,6 @@ impl DerefMut for MockableProof {
     }
 }
 
-
 impl From<MockableProof> for VmProof {
     fn from(mp: MockableProof) -> VmProof {
         mp.proof
@@ -118,19 +66,13 @@ impl From<MockableProof> for VmProof {
 
 impl From<Vec<BFieldElement>> for MockableProof {
     fn from(v: Vec<BFieldElement>) -> Self {
-        Self {
-            proof: VmProof(v),
-            behavior: Default::default(),
-        }
+        Self { proof: VmProof(v) }
     }
 }
 
 impl From<VmProof> for MockableProof {
     fn from(proof: VmProof) -> Self {
-        Self {
-            proof,
-            behavior: Default::default(),
-        }
+        Self { proof }
     }
 }
 
@@ -138,34 +80,39 @@ impl MockableProof {
     pub fn invalid() -> Self {
         Self {
             proof: VmProof(vec![]),
-            behavior: MockableProofBehavior::Standard,
         }
     }
 
     pub fn valid_mock(_claim: Claim) -> Self {
         Self {
-            proof: VmProof(vec![]),
-            behavior: MockableProofBehavior::ValidMock,
+            proof: VmProof(MockableProofBehavior::ValidMock.encode()),
         }
     }
 
     pub fn invalid_mock(_claim: Claim) -> Self {
         Self {
-            proof: VmProof(vec![]),
-            behavior: MockableProofBehavior::InvalidMock,
+            proof: VmProof(MockableProofBehavior::InvalidMock.encode()),
+        }
+    }
+
+    fn matches_behavior(&self, target: MockableProofBehavior) -> bool {
+        if let Ok(behavior) = MockableProofBehavior::decode(&self.proof.0) {
+            *behavior == target
+        } else {
+            false
         }
     }
 
     pub fn is_standard(&self) -> bool {
-        matches!(self.behavior, MockableProofBehavior::Standard)
+        !self.is_valid_mock() && !self.is_invalid_mock()
     }
 
     pub fn is_valid_mock(&self) -> bool {
-        matches!(self.behavior, MockableProofBehavior::ValidMock)
+        self.matches_behavior(MockableProofBehavior::ValidMock)
     }
 
     pub fn is_invalid_mock(&self) -> bool {
-        matches!(self.behavior, MockableProofBehavior::InvalidMock)
+        self.matches_behavior(MockableProofBehavior::InvalidMock)
     }
 }
 
