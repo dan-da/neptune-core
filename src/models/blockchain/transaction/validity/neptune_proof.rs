@@ -4,13 +4,11 @@ use std::ops::DerefMut;
 use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
-use tasm_lib::prelude::Library;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof as VmProof;
 
 use crate::models::blockchain::transaction::BFieldCodec;
-use crate::triton_vm::prelude::LabelledInstruction;
 use crate::BFieldElement;
 
 /// defines Mock proof behaviors. (private)

@@ -164,8 +164,6 @@ impl ProverJob {
     // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
     // error is returned.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
-        // regtest mode: we should never be here
-        assert!(!self.job_settings.network.is_regtest());
 
         tracing::debug!("executing VM program to determine complexity (padded-height)");
         tracing::debug!("job settings: {:?}", self.job_settings);
@@ -249,6 +247,13 @@ impl ProverJob {
     /// there, generate it and store it to disk.
     #[cfg_attr(test, expect(clippy::unused_async))]
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
+
+        // regtest mode uses mock proofs.
+        if self.job_settings.network.is_regtest() {
+            let proof = Proof::valid_mock(self.claim.clone());
+            return ProverProcessCompletion::Finished(proof).into();
+        }
+
         // todo: make test version async, cancellable.
         #[cfg(test)]
         {
