@@ -31,10 +31,28 @@ enum MockProofBehavior {
 /// 1. standard.      not a mock proof
 /// 2. valid-mock.    a mock proof that passes validation (if mock proofs are allowed)
 /// 3. invalid-mock.  a mock proof that fails validation (if mock proofs are allowed, or not)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, BFieldCodec, TasmObject)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, GetSize, TasmObject)]
 pub struct MockableProof {
     proof: VmProof,
 }
+
+impl BFieldCodec for MockableProof {
+    type Error = <VmProof as BFieldCodec>::Error;
+    
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
+        Ok(Box::new(Self{proof: *VmProof::decode(sequence)?}))
+    }
+
+
+    fn encode(&self) -> Vec<BFieldElement> {
+        self.proof.encode()
+    }    
+
+    fn static_length() -> Option<usize> {
+        VmProof::static_length() 
+    }
+}
+
 
 impl Deref for MockableProof {
     type Target = VmProof;
