@@ -240,6 +240,7 @@ impl SingleProof {
         .await?;
         let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
         let claim = single_proof_witness.claim();
+
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
@@ -254,6 +255,15 @@ impl SingleProof {
         info!("Done");
 
         Ok(single_proof)
+    }
+
+    pub(crate) fn produce_mock(primitive_witness: &PrimitiveWitness, valid_mock: bool) -> Proof {
+        let claim = Self::claim(primitive_witness.kernel.mast_hash());
+        if valid_mock {
+            Proof::valid_mock(claim)
+        } else {
+            Proof::invalid_mock(claim)
+        }
     }
 }
 

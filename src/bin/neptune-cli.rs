@@ -339,7 +339,7 @@ enum Command {
     /// mine a series of blocks to the node's wallet. (regtest network only)
     MineBlocksToWallet {
         /// number of blocks to mine
-        #[clap(default_value="1")]
+        #[clap(default_value = "1")]
         num_blocks: u32,
     },
 
@@ -1183,9 +1183,11 @@ async fn main() -> Result<()> {
         }
 
         /******** RegTest Mode *********/
-        Command::MineBlocksToWallet {num_blocks} => {
+        Command::MineBlocksToWallet { num_blocks } => {
             println!("Sending command to mine block(s).");
-            client.mine_regtest_blocks_to_wallet(ctx, token, num_blocks).await??;
+            client
+                .mine_regtest_blocks_to_wallet(ctx, token, num_blocks)
+                .await??;
             println!("Command completed successfully");
         }
     }

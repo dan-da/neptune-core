@@ -412,7 +412,6 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .job_queue(vm_job_queue)
         .proof_job_options(job_options)
         .tx_proving_capability(proving_power)
-        .network(network)
         .build()
         .await?;
 

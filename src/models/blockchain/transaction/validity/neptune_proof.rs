@@ -1,16 +1,16 @@
 use std::ops::Deref;
 use std::ops::DerefMut;
 
-use tasm_lib::prelude::Library;
-use crate::triton_vm::prelude::LabelledInstruction;
 use get_size2::GetSize;
 use serde::Deserialize;
 use serde::Serialize;
+use tasm_lib::prelude::Library;
 use tasm_lib::structure::tasm_object::TasmObject;
 use tasm_lib::triton_vm::proof::Claim;
 use tasm_lib::triton_vm::proof::Proof as VmProof;
 
 use crate::models::blockchain::transaction::BFieldCodec;
+use crate::triton_vm::prelude::LabelledInstruction;
 use crate::BFieldElement;
 
 /// defines Mock proof behaviors. (private)
@@ -40,18 +40,19 @@ pub struct MockableProof {
 
 impl BFieldCodec for MockableProof {
     type Error = <VmProof as BFieldCodec>::Error;
-    
-    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
-        Ok(Box::new(Self{proof: *VmProof::decode(sequence)?}))
-    }
 
+    fn decode(sequence: &[BFieldElement]) -> Result<Box<Self>, Self::Error> {
+        Ok(Box::new(Self {
+            proof: *VmProof::decode(sequence)?,
+        }))
+    }
 
     fn encode(&self) -> Vec<BFieldElement> {
         self.proof.encode()
-    }    
+    }
 
     fn static_length() -> Option<usize> {
-        VmProof::static_length() 
+        VmProof::static_length()
     }
 }
 
@@ -69,16 +70,14 @@ impl TasmObject for MockableProof {
     fn decode_iter<Itr: Iterator<Item = BFieldElement>>(
         iterator: &mut Itr,
     ) -> Result<Box<Self>, Box<dyn std::error::Error + Send + Sync>> {
-//        let proof = VmProof::decode_iter(iterator)?;
-//        Ok(Box::new(Self{behavior: Default::default(), proof: *proof }))
-
+        //        let proof = VmProof::decode_iter(iterator)?;
+        //        Ok(Box::new(Self{behavior: Default::default(), proof: *proof }))
 
         let elems: Vec<BFieldElement> = iterator.collect();
         let mockable_proof = Self::decode(&elems)?;
         Ok(mockable_proof)
     }
 }
-
 
 impl Deref for MockableProof {
     type Target = VmProof;

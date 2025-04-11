@@ -1,5 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -10,9 +12,6 @@ use tasm_lib::twenty_first::math::b_field_element::BFieldElement;
 
 use crate::models::blockchain::block::block_header;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-
-use std::sync::OnceLock;
-use std::sync::Arc;
 
 static INSTANCE: OnceLock<Arc<Network>> = OnceLock::new();
 
@@ -106,7 +105,7 @@ impl Network {
 
     pub fn singleton_instance() -> Arc<Self> {
         INSTANCE.get_or_init(|| Arc::new(Self::Main)).clone()
-    }    
+    }
 }
 
 impl fmt::Display for Network {

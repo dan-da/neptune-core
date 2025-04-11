@@ -526,6 +526,17 @@ impl Args {
         }
     }
 
+    pub(crate) fn proof_job_options_defaults(&self) -> TritonVmProofJobOptions {
+        TritonVmProofJobOptions {
+            job_priority: TritonVmJobPriority::default(),
+            job_settings: ProverJobSettings {
+                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
+                network: self.network,
+            },
+            cancel_job_rx: None,
+        }
+    }
+
     /// Get the proving capability CLI argument or estimate it if it is not set.
     /// Cache the result so we don't estimate more than once.
     pub fn proving_capability(&self) -> TxProvingCapability {
