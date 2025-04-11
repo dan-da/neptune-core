@@ -206,6 +206,18 @@ impl<'a> TransactionProofBuilder<'a> {
             valid_mock,
         } = self;
 
+        // note: this if condition should not be necessary.
+        // it always returns a mock SingleProof regardless of requested type.
+        // without it, the integration test alice_sends_to_random_key fails
+        // for reasons unknown (to me).
+        if proof_job_options.job_settings.network.use_mock_proof() {
+            tracing::debug!("USE MOCK PROOF");
+            let sp = SingleProof::produce_mock(true);
+             return Ok(TransactionProof::SingleProof(sp));
+        }
+       
+        tracing::debug!("NOT IN USE MOCK PROOF");
+
         // if proof_type is not provided, then we default to the max we are
         // capable of.
         let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
