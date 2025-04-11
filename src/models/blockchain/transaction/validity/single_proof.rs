@@ -257,8 +257,8 @@ impl SingleProof {
         Ok(single_proof)
     }
 
-    pub(crate) fn produce_mock(primitive_witness: &PrimitiveWitness, valid_mock: bool) -> Proof {
-        let claim = Self::claim(primitive_witness.kernel.mast_hash());
+    pub(crate) fn produce_mock(valid_mock: bool) -> Proof {
+        let claim = Claim::new(Digest::default());
         if valid_mock {
             Proof::valid_mock(claim)
         } else {

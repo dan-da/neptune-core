@@ -218,7 +218,7 @@ impl ProofCollection {
         debug!("proving, salted inputs hash: {}", salted_inputs_hash);
         debug!("proving, salted outputs hash: {}", salted_outputs_hash);
 
-        let claim = Claim::new(txk_mast_hash);
+        let claim = Claim::new(Digest::default());
         let mock_proof = if valid_mock {
             Proof::valid_mock(claim)
         } else {

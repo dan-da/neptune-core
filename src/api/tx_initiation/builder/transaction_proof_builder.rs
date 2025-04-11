@@ -24,6 +24,8 @@
 //!
 //! see [builder](super) for examples of using the builders together.
 
+use std::borrow::Borrow;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::api::tx_initiation::error::CreateProofError;
@@ -32,8 +34,11 @@ use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::TransactionProof;
+use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
+use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
 
@@ -45,6 +50,7 @@ pub struct TransactionProofBuilder<'a> {
     transaction_details: Option<&'a TransactionDetails>,
     primitive_witness: Option<PrimitiveWitness>,
     primitive_witness_ref: Option<&'a PrimitiveWitness>,
+    proof_collection: Option<ProofCollection>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
     tx_proving_capability: TxProvingCapability,
@@ -58,13 +64,19 @@ impl<'a> TransactionProofBuilder<'a> {
         Default::default()
     }
 
-    /// add transaction details (required)
+    /// add transaction details
     pub fn transaction_details(mut self, transaction_details: &'a TransactionDetails) -> Self {
         self.transaction_details = Some(transaction_details);
         self
     }
 
-    /// add primitive witness (optional)
+    /// add proof collection
+    pub fn proof_collection(mut self, proof_collection: ProofCollection) -> Self {
+        self.proof_collection = Some(proof_collection);
+        self
+    }
+
+    /// add primitive witness
     ///
     /// If not provided, the builder will generate a `PrimitiveWitness` from the
     /// `TransactionDetails`.
@@ -82,7 +94,7 @@ impl<'a> TransactionProofBuilder<'a> {
         self
     }
 
-    /// add transaction details reference (optional)
+    /// add transaction details reference
     ///
     /// Note that if the target proof-type is `PrimitiveWitness` then the
     /// reference will be cloned when building and it may be better to use the
@@ -120,7 +132,7 @@ impl<'a> TransactionProofBuilder<'a> {
         self
     }
 
-    /// create valid or invalid mock proof.
+    /// create valid or invalid mock proof. (optional)
     ///
     /// default = true
     ///
@@ -182,82 +194,103 @@ impl<'a> TransactionProofBuilder<'a> {
     /// does not presently expose it.  As such, there is no way to cancel a job
     /// once build() is called.  That funtionality may be exposed later.
     pub async fn build(self) -> Result<TransactionProof, CreateProofError> {
-        let Some(tx_details) = self.transaction_details else {
-            return Err(CreateProofError::MissingRequirement);
-        };
-
-        let tx_proving_capability = self.tx_proving_capability;
-        let proof_job_options = self.proof_job_options;
+        let TransactionProofBuilder {
+            transaction_details,
+            primitive_witness,
+            primitive_witness_ref,
+            proof_collection,
+            job_queue,
+            proof_job_options,
+            tx_proving_capability,
+            proof_type,
+            valid_mock,
+        } = self;
 
         // if proof_type is not provided, then we default to the max we are
         // capable of.
-        let proof_type = self.proof_type.unwrap_or(tx_proving_capability.into());
+        let proof_type = proof_type.unwrap_or(tx_proving_capability.into());
 
-        if proof_job_options.job_settings.network.use_mock_proof() {
-            let valid_mock = self.valid_mock.unwrap_or(true);
+        let job_queue_clone = job_queue.clone();
+        let proof_job_options_clone = proof_job_options.clone();
 
-            let witness = self.primitive_witness.unwrap_or_else(|| {
-                self.primitive_witness_ref
-                    .cloned()
-                    .unwrap_or_else(|| tx_details.into())
-            });
+        let build_inner = |witness_cow: Cow<'a, PrimitiveWitness>| async move {
+            if proof_job_options_clone.job_settings.network.use_mock_proof() {
+                let valid_mock = valid_mock.unwrap_or(true);
 
-            let proof = match proof_type {
-                TransactionProofType::PrimitiveWitness => TransactionProof::Witness(witness),
-                TransactionProofType::ProofCollection => {
-                    let pc = ProofCollection::produce_mock(&witness, valid_mock);
-                    TransactionProof::ProofCollection(pc)
-                }
-                TransactionProofType::SingleProof => {
-                    let sp = SingleProof::produce_mock(&witness, valid_mock);
-                    TransactionProof::SingleProof(sp)
-                }
+                let proof = match proof_type {
+                    TransactionProofType::PrimitiveWitness => {
+                        TransactionProof::Witness(witness_cow.into_owned())
+                    }
+                    TransactionProofType::ProofCollection => {
+                        let pc = ProofCollection::produce_mock(witness_cow.borrow(), valid_mock);
+                        TransactionProof::ProofCollection(pc)
+                    }
+                    TransactionProofType::SingleProof => {
+                        let sp = SingleProof::produce_mock(valid_mock);
+                        TransactionProof::SingleProof(sp)
+                    }
+                };
+                return Ok(proof);
+            }
+
+            let Some(job_queue) = job_queue_clone else {
+                return Err(CreateProofError::MissingRequirement);
             };
-            return Ok(proof);
-        }
 
-        let Some(job_queue) = self.job_queue else {
-            return Err(CreateProofError::MissingRequirement);
+            if !tx_proving_capability.can_prove(proof_type) {
+                return Err(CreateProofError::TooWeak);
+            }
+
+            let transaction_proof = match proof_type {
+                TransactionProofType::PrimitiveWitness => {
+                    TransactionProof::Witness(witness_cow.into_owned())
+                }
+                TransactionProofType::ProofCollection => TransactionProof::ProofCollection(
+                    ProofCollection::produce(witness_cow.borrow(), job_queue, proof_job_options_clone)
+                        .await?,
+                ),
+                TransactionProofType::SingleProof => TransactionProof::SingleProof(
+                    SingleProof::produce(witness_cow.borrow(), job_queue, proof_job_options_clone)
+                        .await?,
+                ),
+            };
+
+            Ok(transaction_proof)
         };
 
-        if !tx_proving_capability.can_prove(proof_type) {
-            return Err(CreateProofError::TooWeak);
-        }
+        let build_single_proof_from_proof_collection = |proof_collection| async move {
+            let Some(job_queue) = job_queue else {
+                return Err(CreateProofError::MissingRequirement);
+            };
 
-        let transaction_proof = match proof_type {
-            TransactionProofType::PrimitiveWitness => {
-                // use primitive_witness, else primitive_witness_ref, else tx_details
-                let witness = self.primitive_witness.unwrap_or_else(|| {
-                    self.primitive_witness_ref
-                        .cloned()
-                        .unwrap_or_else(|| tx_details.into())
-                });
-                TransactionProof::Witness(witness)
+            if !tx_proving_capability.can_prove(proof_type) {
+                return Err(CreateProofError::TooWeak);
             }
-            TransactionProofType::ProofCollection => {
-                TransactionProof::ProofCollection(match self.primitive_witness_ref {
-                    Some(witness) => {
-                        ProofCollection::produce(witness, job_queue, proof_job_options).await?
-                    }
-                    None => {
-                        let witness = self.primitive_witness.unwrap_or_else(|| tx_details.into());
-                        ProofCollection::produce(&witness, job_queue, proof_job_options).await?
-                    }
-                })
-            }
-            TransactionProofType::SingleProof => {
-                TransactionProof::SingleProof(match self.primitive_witness_ref {
-                    Some(witness) => {
-                        SingleProof::produce(witness, job_queue, proof_job_options).await?
-                    }
-                    None => {
-                        let witness = self.primitive_witness.unwrap_or_else(|| tx_details.into());
-                        SingleProof::produce(&witness, job_queue, proof_job_options).await?
-                    }
-                })
-            }
+
+            let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+            let claim = single_proof_witness.claim();
+            let nondeterminism = single_proof_witness.nondeterminism();
+            let proof = SingleProof
+                .prove(claim, nondeterminism, job_queue, proof_job_options)
+                .await?;
+
+            Ok(TransactionProof::SingleProof(proof))
         };
 
-        Ok(transaction_proof)
+        match proof_collection {
+            Some(pc) if proof_type == TransactionProofType::SingleProof => {
+                build_single_proof_from_proof_collection(pc).await
+            }
+            _ => match primitive_witness {
+                Some(w) => build_inner(Cow::Owned(w)).await,
+                None => match primitive_witness_ref {
+                    Some(w) => build_inner(Cow::Borrowed(w)).await,
+                    None => match transaction_details {
+                        Some(d) => build_inner(Cow::Owned(d.primitive_witness())).await,
+                        None => return Err(CreateProofError::MissingRequirement),
+                    },
+                },
+            },
+        }
     }
 }
