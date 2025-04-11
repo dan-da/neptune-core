@@ -226,7 +226,11 @@ impl<'a> TransactionProofBuilder<'a> {
         let proof_job_options_clone = proof_job_options.clone();
 
         let build_inner = |witness_cow: Cow<'a, PrimitiveWitness>| async move {
-            if proof_job_options_clone.job_settings.network.use_mock_proof() {
+            if proof_job_options_clone
+                .job_settings
+                .network
+                .use_mock_proof()
+            {
                 let valid_mock = valid_mock.unwrap_or(true);
 
                 let proof = match proof_type {
@@ -258,8 +262,12 @@ impl<'a> TransactionProofBuilder<'a> {
                     TransactionProof::Witness(witness_cow.into_owned())
                 }
                 TransactionProofType::ProofCollection => TransactionProof::ProofCollection(
-                    ProofCollection::produce(witness_cow.borrow(), job_queue, proof_job_options_clone)
-                        .await?,
+                    ProofCollection::produce(
+                        witness_cow.borrow(),
+                        job_queue,
+                        proof_job_options_clone,
+                    )
+                    .await?,
                 ),
                 TransactionProofType::SingleProof => TransactionProof::SingleProof(
                     SingleProof::produce(witness_cow.borrow(), job_queue, proof_job_options_clone)

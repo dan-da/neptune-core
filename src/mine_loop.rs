@@ -40,7 +40,7 @@ use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
 use crate::models::blockchain::block::difficulty_control::difficulty_control;
 use crate::models::blockchain::block::*;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::*;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::channel::*;
@@ -631,11 +631,17 @@ pub(crate) async fn create_block_transaction_from(
             global_state_lock.cli().network,
         );
         let nop = PrimitiveWitness::from_transaction_details(&nop);
-        let nop_proof =
-            SingleProof::produce(&nop, vm_job_queue.clone(), job_options.clone()).await?;
+        let proof = TransactionProofBuilder::new()
+            .primitive_witness_ref(&nop)
+            .job_queue(vm_job_queue.clone())
+            .proof_job_options(job_options.clone())
+            .tx_proving_capability(global_state_lock.cli().proving_capability())
+            .proof_type(TransactionProofType::SingleProof)
+            .build()
+            .await?;
         let nop = Transaction {
             kernel: nop.kernel,
-            proof: TransactionProof::SingleProof(nop_proof),
+            proof,
         };
 
         transactions_to_merge = vec![nop];

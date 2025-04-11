@@ -232,6 +232,10 @@ impl SingleProof {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
+        if proof_job_options.job_settings.network.use_mock_proof() {
+            tracing::warn!("SingleProof::produce() should not be called for network(s) that use mock proofs, eg regtest");
+        }
+
         let proof_collection = ProofCollection::produce(
             primitive_witness,
             triton_vm_job_queue.clone(),
