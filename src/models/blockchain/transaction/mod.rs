@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -9,6 +11,7 @@ use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::prelude::twenty_first;
 
 pub mod lock_script;
@@ -238,21 +241,23 @@ impl Transaction {
         );
         let new_kernel = merge_witness.new_kernel.clone();
         let new_single_proof_witness = SingleProofWitness::from_merge(merge_witness);
-        let new_single_proof_claim = new_single_proof_witness.claim();
+
         info!("Start: creating new single proof through merge");
-        let new_single_proof = SingleProof
-            .prove(
-                new_single_proof_claim,
-                new_single_proof_witness.nondeterminism(),
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+
+        let proof = TransactionProofBuilder::new()
+            .single_proof_witness(&new_single_proof_witness)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .tx_proving_capability(TxProvingCapability::SingleProof)
+            .proof_type(TransactionProofType::SingleProof)
+            .build()
             .await?;
+
         info!("Done: creating new single proof through merge");
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(new_single_proof),
+            proof,
         })
     }
 

@@ -51,6 +51,7 @@ pub struct TransactionProofBuilder<'a> {
     primitive_witness: Option<PrimitiveWitness>,
     primitive_witness_ref: Option<&'a PrimitiveWitness>,
     proof_collection: Option<ProofCollection>,
+    single_proof_witness: Option<&'a SingleProofWitness>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
     tx_proving_capability: TxProvingCapability,
@@ -73,6 +74,12 @@ impl<'a> TransactionProofBuilder<'a> {
     /// add proof collection
     pub fn proof_collection(mut self, proof_collection: ProofCollection) -> Self {
         self.proof_collection = Some(proof_collection);
+        self
+    }
+
+    /// add single proof witness
+    pub fn single_proof_witness(mut self, single_proof_witness: &'a SingleProofWitness) -> Self {
+        self.single_proof_witness = Some(single_proof_witness);
         self
     }
 
@@ -199,6 +206,7 @@ impl<'a> TransactionProofBuilder<'a> {
             primitive_witness,
             primitive_witness_ref,
             proof_collection,
+            single_proof_witness,
             job_queue,
             proof_job_options,
             tx_proving_capability,
@@ -213,9 +221,9 @@ impl<'a> TransactionProofBuilder<'a> {
         if proof_job_options.job_settings.network.use_mock_proof() {
             tracing::debug!("USE MOCK PROOF");
             let sp = SingleProof::produce_mock(true);
-             return Ok(TransactionProof::SingleProof(sp));
+            return Ok(TransactionProof::SingleProof(sp));
         }
-       
+
         tracing::debug!("NOT IN USE MOCK PROOF");
 
         // if proof_type is not provided, then we default to the max we are
@@ -278,36 +286,51 @@ impl<'a> TransactionProofBuilder<'a> {
             Ok(transaction_proof)
         };
 
-        let build_single_proof_from_proof_collection = |proof_collection| async move {
-            let Some(job_queue) = job_queue else {
-                return Err(CreateProofError::MissingRequirement);
+        let build_single_proof_from_single_proof_witness =
+            |single_proof_witness: Cow<'a, SingleProofWitness>| async move {
+                let Some(job_queue) = job_queue else {
+                    return Err(CreateProofError::MissingRequirement);
+                };
+
+                if !tx_proving_capability.can_prove(proof_type) {
+                    return Err(CreateProofError::TooWeak);
+                }
+
+                let spw = <Cow<'_, SingleProofWitness> as Borrow<SingleProofWitness>>::borrow(
+                    &single_proof_witness,
+                );
+
+                let claim = spw.claim();
+                let nondeterminism = spw.nondeterminism();
+                let proof = SingleProof
+                    .prove(claim, nondeterminism, job_queue, proof_job_options)
+                    .await?;
+
+                Ok(TransactionProof::SingleProof(proof))
             };
 
-            if !tx_proving_capability.can_prove(proof_type) {
-                return Err(CreateProofError::TooWeak);
+        // let build_single_proof_from_proof_collection = |proof_collection| async move {
+        //     let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
+        //     build_single_proof_from_single_proof_witness(&single_proof_witness).await
+        // };
+
+        match single_proof_witness {
+            Some(witness) if proof_type == TransactionProofType::SingleProof => {
+                build_single_proof_from_single_proof_witness(Cow::Borrowed(witness)).await
             }
-
-            let single_proof_witness = SingleProofWitness::from_collection(proof_collection);
-            let claim = single_proof_witness.claim();
-            let nondeterminism = single_proof_witness.nondeterminism();
-            let proof = SingleProof
-                .prove(claim, nondeterminism, job_queue, proof_job_options)
-                .await?;
-
-            Ok(TransactionProof::SingleProof(proof))
-        };
-
-        match proof_collection {
-            Some(pc) if proof_type == TransactionProofType::SingleProof => {
-                build_single_proof_from_proof_collection(pc).await
-            }
-            _ => match primitive_witness {
-                Some(w) => build_inner(Cow::Owned(w)).await,
-                None => match primitive_witness_ref {
-                    Some(w) => build_inner(Cow::Borrowed(w)).await,
-                    None => match transaction_details {
-                        Some(d) => build_inner(Cow::Owned(d.primitive_witness())).await,
-                        None => return Err(CreateProofError::MissingRequirement),
+            _ => match proof_collection {
+                Some(pc) if proof_type == TransactionProofType::SingleProof => {
+                    let witness = SingleProofWitness::from_collection(pc);
+                    build_single_proof_from_single_proof_witness(Cow::Owned(witness)).await
+                }
+                _ => match primitive_witness {
+                    Some(w) => build_inner(Cow::Owned(w)).await,
+                    None => match primitive_witness_ref {
+                        Some(w) => build_inner(Cow::Borrowed(w)).await,
+                        None => match transaction_details {
+                            Some(d) => build_inner(Cow::Owned(d.primitive_witness())).await,
+                            None => return Err(CreateProofError::MissingRequirement),
+                        },
                     },
                 },
             },

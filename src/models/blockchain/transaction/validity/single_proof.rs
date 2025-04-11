@@ -48,7 +48,7 @@ const NO_BRANCH_TAKEN_ERROR: i128 = 1_000_051;
 const MANIPULATED_PROOF_COLLECTION_WITNESS_ERROR: i128 = 1_000_052;
 
 #[derive(Debug, Clone, BFieldCodec)]
-pub(crate) enum SingleProofWitness {
+pub enum SingleProofWitness {
     Collection(Box<ProofCollection>),
     Update(UpdateWitness),
     Merger(MergeWitness),
