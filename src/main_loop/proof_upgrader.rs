@@ -12,6 +12,7 @@ use tracing::info;
 use tracing::warn;
 
 use super::TransactionOrigin;
+use crate::api::tx_initiation::builder::single_proof_builder::SingleProofBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -23,15 +24,12 @@ use crate::models::blockchain::transaction::transaction_kernel::TransactionKerne
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
-use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProofWitness;
 use crate::models::blockchain::transaction::Transaction;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
-use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::timestamp::Timestamp;
-use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
 use crate::models::state::transaction_kernel_id::TransactionKernelId;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -572,11 +570,11 @@ impl UpgradeJob {
                 .await?;
 
             info!("Done producing gobbler-transaction for a value of {gobbling_fee}");
-            let gobbler = Transaction {
+            let gobbler_tx = Transaction {
                 kernel: gobbler_witness.kernel,
                 proof,
             };
-            (Some(gobbler), expected_utxos)
+            (Some(gobbler_tx), expected_utxos)
         } else {
             (None, vec![])
         };
@@ -588,16 +586,12 @@ impl UpgradeJob {
         match self {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());
-                let claim = single_proof_witness.claim();
-                let nondeterminism = single_proof_witness.nondeterminism();
-                info!("Proof-upgrader: Start generate single proof");
-                let single_proof = SingleProof
-                    .prove(
-                        claim,
-                        nondeterminism,
-                        triton_vm_job_queue.clone(),
-                        proof_job_options.clone(),
-                    )
+
+                let single_proof = SingleProofBuilder::new()
+                    .single_proof_witness(&single_proof_witness)
+                    .job_queue(triton_vm_job_queue.clone())
+                    .proof_job_options(proof_job_options.clone())
+                    .build()
                     .await?;
                 info!("Proof-upgrader, to single proof: Done");
 

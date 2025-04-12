@@ -119,6 +119,17 @@ impl MockableProof {
         }
     }
 
+    pub fn mock(valid: bool) -> Self {
+        let behavior = if valid {
+            MockProofBehavior::ValidMock
+        } else {
+            MockProofBehavior::InvalidMock
+        };
+        Self {
+            proof: VmProof(behavior.encode()),
+        }
+    }
+
     /// creates a mock proof that will pass validation (if mock proofs are allowed)
     pub fn valid_mock(_claim: Claim) -> Self {
         Self {

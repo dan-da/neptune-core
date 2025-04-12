@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use itertools::Itertools;
 use tasm_lib::field;
 use tasm_lib::memory::encode_to_memory;
@@ -232,10 +233,6 @@ impl SingleProof {
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        if proof_job_options.job_settings.network.use_mock_proof() {
-            tracing::warn!("SingleProof::produce() should not be called for network(s) that use mock proofs, eg regtest");
-        }
-
         let proof_collection = ProofCollection::produce(
             primitive_witness,
             triton_vm_job_queue.clone(),
@@ -248,17 +245,17 @@ impl SingleProof {
         let nondeterminism = single_proof_witness.nondeterminism();
 
         info!("Start: generate single proof");
-        let single_proof = SingleProof
-            .prove(
-                claim,
-                nondeterminism,
-                triton_vm_job_queue,
-                proof_job_options,
-            )
+        let proof = ProofBuilder::new()
+            .program(SingleProof.program())
+            .claim(claim)
+            .nondeterminism(nondeterminism)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
             .await?;
         info!("Done");
 
-        Ok(single_proof)
+        Ok(proof)
     }
 
     pub(crate) fn produce_mock(valid_mock: bool) -> Proof {

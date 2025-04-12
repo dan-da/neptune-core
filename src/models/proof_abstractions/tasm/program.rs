@@ -11,6 +11,7 @@ use super::prover_job::ProverJob;
 use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
+use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
@@ -68,19 +69,22 @@ where
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
     ) -> anyhow::Result<Proof> {
-        prove_consensus_program(
-            self.program(),
-            claim,
-            nondeterminism,
-            triton_vm_job_queue,
-            proof_job_options,
-        )
-        .await
+        Ok(ProofBuilder::new()
+            .program(self.program())
+            .claim(claim)
+            .nondeterminism(nondeterminism)
+            .job_queue(triton_vm_job_queue)
+            .proof_job_options(proof_job_options)
+            .build()
+            .await?)
     }
 }
 
 /// Run the program and generate a proof for it, assuming the Triton VM run
 /// halts gracefully.
+///
+/// Please do not call this directly.  Use TransactionProofBuilder instead
+/// which includes logic for building mock proofs if necessary.
 ///
 /// If we are in a test environment, try reading it from disk. If it is not
 /// there, generate it and store it to disk.
