@@ -48,7 +48,6 @@ pub enum TransactionProof {
 }
 
 impl TransactionProof {
-
     pub fn is_witness(&self) -> bool {
         matches!(self, Self::Witness(_))
     }

@@ -72,7 +72,10 @@ impl ProofBuilder {
     }
 
     /// specify the device's proving capability.  (optional)
-    pub fn tx_proving_capability_option(mut self, tx_proving_capability: Option<TxProvingCapability>) -> Self {
+    pub fn tx_proving_capability_option(
+        mut self,
+        tx_proving_capability: Option<TxProvingCapability>,
+    ) -> Self {
         self.tx_proving_capability = tx_proving_capability;
         self
     }

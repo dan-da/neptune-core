@@ -266,7 +266,10 @@ impl GenesisNode {
                 }
             }
             if start.elapsed() > std::time::Duration::from_secs(timeout_secs.into()) {
-                anyhow::bail!("tx not in mempool with single-proof after {} seconds", timeout_secs);
+                anyhow::bail!(
+                    "tx not in mempool with single-proof after {} seconds",
+                    timeout_secs
+                );
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
