@@ -196,16 +196,9 @@ impl<'a> SingleProofBuilder<'a> {
             valid_mock,
         } = self;
 
-        // note: this if condition should not be necessary.
-        // it always returns a mock SingleProof regardless of requested type.
-        // without it, the integration test alice_sends_to_random_key fails
-        // for reasons unknown (to me).
         if proof_job_options.job_settings.network.use_mock_proof() {
-            tracing::debug!("USE MOCK PROOF");
             return Ok(Proof::mock(valid_mock.unwrap_or(true)));
         }
-
-        tracing::debug!("NOT IN USE MOCK PROOF");
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 

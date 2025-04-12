@@ -33,7 +33,6 @@ use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
-use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
@@ -200,18 +199,6 @@ impl<'a> TransactionProofBuilder<'a> {
         let proof_type = Self::get_proof_type(proof_type, tx_proving_capability)?;
 
         let valid_mock = valid_mock.unwrap_or(true);
-
-        // note: this if condition should not be necessary.
-        // it always returns a mock SingleProof regardless of requested type.
-        // without it, the integration test alice_sends_to_random_key fails
-        // for reasons unknown (to me).
-        if proof_job_options.job_settings.network.use_mock_proof() {
-            tracing::debug!("USE MOCK PROOF");
-            let mock_proof = Proof::mock(valid_mock);
-            return Ok(TransactionProof::SingleProof(mock_proof));
-        }
-
-        tracing::debug!("NOT IN USE MOCK PROOF");
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
