@@ -53,6 +53,7 @@ pub struct TransactionProofBuilder<'a> {
     tx_proving_capability: Option<TxProvingCapability>,
     proof_type: Option<TransactionProofType>,
     valid_mock: Option<bool>,
+    suppress_capability_warning: bool,
 }
 
 impl<'a> TransactionProofBuilder<'a> {
@@ -135,6 +136,14 @@ impl<'a> TransactionProofBuilder<'a> {
         self
     }
 
+    /// suppress warning if proving capability is not supplied.
+    ///
+    /// does not apply if proof_type is PrimitiveWitness
+    pub fn suppress_capability_warning(mut self) -> Self {
+        self.suppress_capability_warning = true;
+        self
+    }
+
     /// generate the proof.
     ///
     /// if the target proof-type is Witness, this will return immediately.
@@ -194,6 +203,7 @@ impl<'a> TransactionProofBuilder<'a> {
             tx_proving_capability,
             valid_mock,
             proof_type,
+            suppress_capability_warning,
         } = self;
 
         let proof_type = Self::get_proof_type(proof_type, tx_proving_capability)?;
@@ -227,7 +237,9 @@ impl<'a> TransactionProofBuilder<'a> {
                     }
                 }
                 None if proof_type != TransactionProofType::PrimitiveWitness => {
-                    tracing::warn!("tx_proving_capability not set. proving might fail.")
+                    if !suppress_capability_warning {
+                        tracing::warn!("tx_proving_capability not set. proving might fail.")
+                    }
                 }
                 _ => {}
             }

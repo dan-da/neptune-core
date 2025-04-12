@@ -27,6 +27,7 @@ pub struct ProofBuilder {
     proof_job_options: TritonVmProofJobOptions,
     tx_proving_capability: Option<TxProvingCapability>,
     valid_mock: Option<bool>,
+    suppress_capability_warning: bool,
 }
 
 impl ProofBuilder {
@@ -80,6 +81,12 @@ impl ProofBuilder {
         self
     }
 
+    /// suppress warning if proving capability is not supplied.
+    pub fn suppress_capability_warning(mut self) -> Self {
+        self.suppress_capability_warning = true;
+        self
+    }
+
     /// create valid or invalid mock proof. (optional)
     ///
     /// default = true
@@ -101,6 +108,7 @@ impl ProofBuilder {
             proof_job_options,
             tx_proving_capability,
             valid_mock,
+            suppress_capability_warning,
         } = self;
 
         let (Some(program), Some(claim), Some(nondeterminism)) = (program, claim, nondeterminism)
@@ -121,7 +129,11 @@ impl ProofBuilder {
                     return Err(CreateProofError::TooWeak);
                 }
             }
-            None => tracing::warn!("tx_proving_capability not set. proving might fail."),
+            None => {
+                if !suppress_capability_warning {
+                    tracing::warn!("tx_proving_capability not set. proving might fail.")
+                }
+            }
         }
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
