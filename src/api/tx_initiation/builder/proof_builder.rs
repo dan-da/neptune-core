@@ -98,8 +98,12 @@ impl ProofBuilder {
         tracing::debug!("NOT IN USE MOCK PROOF");
 
         let capability = proof_job_options.job_settings.tx_proving_capability;
-        if !capability.can_prove(TransactionProofType::SingleProof) {
-            return Err(CreateProofError::TooWeak);
+        let proof_type = TransactionProofType::SingleProof;
+        if !capability.can_prove(proof_type) {
+            return Err(CreateProofError::TooWeak {
+                proof_type,
+                capability,
+            });
         }
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);

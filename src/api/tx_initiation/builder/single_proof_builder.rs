@@ -192,12 +192,13 @@ impl<'a> SingleProofBuilder<'a> {
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
-        if !proof_job_options
-            .job_settings
-            .tx_proving_capability
-            .can_prove(TransactionProofType::SingleProof)
-        {
-            return Err(CreateProofError::TooWeak);
+        let capability = proof_job_options.job_settings.tx_proving_capability;
+        let proof_type = TransactionProofType::SingleProof;
+        if !capability.can_prove(proof_type) {
+            return Err(CreateProofError::TooWeak {
+                proof_type,
+                capability,
+            });
         }
 
         let job_queue_clone = job_queue.clone();

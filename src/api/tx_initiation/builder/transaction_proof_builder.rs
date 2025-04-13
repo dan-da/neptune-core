@@ -212,7 +212,10 @@ impl<'a> TransactionProofBuilder<'a> {
             }
 
             if !capability.can_prove(proof_type) {
-                return Err(CreateProofError::TooWeak);
+                return Err(CreateProofError::TooWeak {
+                    proof_type,
+                    capability,
+                });
             }
 
             let transaction_proof = match proof_type {

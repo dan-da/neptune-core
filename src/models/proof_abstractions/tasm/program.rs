@@ -184,8 +184,8 @@ pub mod test {
     use super::*;
     use crate::models::blockchain::shared::Hash;
     use crate::models::proof_abstractions::tasm::environment;
-    use crate::triton_vm::stark::Stark;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
+    use crate::triton_vm::stark::Stark;
 
     const TEST_DATA_DIR: &str = "test_data";
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";

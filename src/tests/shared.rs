@@ -44,7 +44,6 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
@@ -100,6 +99,7 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::transaction_details::TransactionDetails;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -901,7 +901,9 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         &tip_block,
         global_state_lock,
         timestamp,
-        global_state_lock.cli().proof_job_options_capability(TxProvingCapability::SingleProof),
+        global_state_lock
+            .cli()
+            .proof_job_options_capability(TxProvingCapability::SingleProof),
     )
     .await?;
 
