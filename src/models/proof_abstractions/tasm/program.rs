@@ -185,15 +185,18 @@ pub mod test {
     use crate::models::blockchain::shared::Hash;
     use crate::models::proof_abstractions::tasm::environment;
     use crate::triton_vm::stark::Stark;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
 
     const TEST_DATA_DIR: &str = "test_data";
     const TEST_NAME_HTTP_HEADER_KEY: &str = "Test-Name";
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {
+            let mut job_settings = ProverJobSettings::default();
+            job_settings.tx_proving_capability = TxProvingCapability::SingleProof;
             Self {
                 job_priority,
-                job_settings: Default::default(),
+                job_settings,
                 cancel_job_rx: None,
             }
         }
@@ -207,7 +210,7 @@ pub mod test {
                 job_settings: ProverJobSettings {
                     max_log2_padded_height_for_proofs,
                     network: Default::default(),
-                    tx_proving_capability: Default::default(),
+                    tx_proving_capability: TxProvingCapability::SingleProof,
                 },
                 cancel_job_rx: None,
             }

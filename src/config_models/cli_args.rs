@@ -549,11 +549,6 @@ impl Args {
         options
     }
 
-    #[cfg(test)]
-    pub(crate) fn proof_job_options_singleproof(&self) -> TritonVmProofJobOptions {
-        self.proof_job_options_capability(TxProvingCapability::SingleProof);
-    }
-
     /// Get the proving capability CLI argument or estimate it if it is not set.
     /// Cache the result so we don't estimate more than once.
     pub fn proving_capability(&self) -> TxProvingCapability {
