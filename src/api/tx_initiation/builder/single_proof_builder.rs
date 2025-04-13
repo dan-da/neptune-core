@@ -15,7 +15,6 @@ use crate::api::tx_initiation::error::CreateProofError;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::transaction::primitive_witness::PrimitiveWitness;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::blockchain::transaction::validity::proof_collection::ProofCollection;
 use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -197,7 +196,7 @@ impl<'a> SingleProofBuilder<'a> {
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
         let capability = proof_job_options.job_settings.tx_proving_capability;
-        let proof_type = TransactionProofType::SingleProof;
+        let proof_type = proof_job_options.job_settings.proof_type;
         if !capability.can_prove(proof_type) {
             return Err(CreateProofError::TooWeak {
                 proof_type,
