@@ -48,7 +48,7 @@ pub struct TransactionProofBuilder<'a> {
     primitive_witness: Option<PrimitiveWitness>,
     primitive_witness_ref: Option<&'a PrimitiveWitness>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
-    proof_job_options: TritonVmProofJobOptions,
+    proof_job_options: Option<TritonVmProofJobOptions>,
     proof_type: Option<TransactionProofType>,
     valid_mock: Option<bool>,
 }
@@ -101,7 +101,7 @@ impl<'a> TransactionProofBuilder<'a> {
 
     /// add job options. (optional)
     pub fn proof_job_options(mut self, proof_job_options: TritonVmProofJobOptions) -> Self {
-        self.proof_job_options = proof_job_options;
+        self.proof_job_options = Some(proof_job_options);
         self
     }
 
@@ -185,6 +185,10 @@ impl<'a> TransactionProofBuilder<'a> {
             valid_mock,
             proof_type,
         } = self;
+
+        let Some(proof_job_options) = proof_job_options else {
+            return Err(CreateProofError::MissingRequirement);
+        };
 
         let capability = proof_job_options.job_settings.tx_proving_capability;
         let proof_type = proof_type.unwrap_or(capability.into());

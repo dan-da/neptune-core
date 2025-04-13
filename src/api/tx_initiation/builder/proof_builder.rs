@@ -6,7 +6,6 @@ use std::sync::Arc;
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
-use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -23,7 +22,7 @@ pub struct ProofBuilder {
     claim: Option<Claim>,
     nondeterminism: Option<NonDeterminism>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
-    proof_job_options: TritonVmProofJobOptions,
+    proof_job_options: Option<TritonVmProofJobOptions>,
     valid_mock: Option<bool>,
 }
 
@@ -59,7 +58,7 @@ impl ProofBuilder {
 
     /// add job options. (optional)
     pub fn proof_job_options(mut self, proof_job_options: TritonVmProofJobOptions) -> Self {
-        self.proof_job_options = proof_job_options;
+        self.proof_job_options = Some(proof_job_options);
         self
     }
 
@@ -85,7 +84,8 @@ impl ProofBuilder {
             valid_mock,
         } = self;
 
-        let (Some(program), Some(claim), Some(nondeterminism)) = (program, claim, nondeterminism)
+        let (Some(program), Some(claim), Some(nondeterminism), Some(proof_job_options)) =
+            (program, claim, nondeterminism, proof_job_options)
         else {
             return Err(CreateProofError::MissingRequirement);
         };
@@ -98,7 +98,7 @@ impl ProofBuilder {
         tracing::debug!("NOT IN USE MOCK PROOF");
 
         let capability = proof_job_options.job_settings.tx_proving_capability;
-        let proof_type = TransactionProofType::SingleProof;
+        let proof_type = proof_job_options.job_settings.proof_type;
         if !capability.can_prove(proof_type) {
             return Err(CreateProofError::TooWeak {
                 proof_type,

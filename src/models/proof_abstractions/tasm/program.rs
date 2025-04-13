@@ -155,7 +155,8 @@ pub(crate) async fn prove_consensus_program(
     Ok(result?)
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Default))]
 pub struct TritonVmProofJobOptions {
     pub job_priority: TritonVmJobPriority,
     pub job_settings: ProverJobSettings,

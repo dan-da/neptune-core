@@ -143,13 +143,14 @@ pub struct ProverJobSettings {
     pub(crate) proof_type: TransactionProofType,
 }
 
+#[cfg(test)]
 impl Default for ProverJobSettings {
     fn default() -> Self {
         Self {
             max_log2_padded_height_for_proofs: None,
             network: Network::default(),
-            tx_proving_capability: TxProvingCapability::default(),
-            proof_type: TxProvingCapability::default().into(),
+            tx_proving_capability: TxProvingCapability::SingleProof,
+            proof_type: TxProvingCapability::SingleProof.into(),
         }
     }
 }
