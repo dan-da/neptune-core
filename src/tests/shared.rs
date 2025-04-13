@@ -44,13 +44,13 @@ use twenty_first::math::b_field_element::BFieldElement;
 use twenty_first::math::digest::Digest;
 use twenty_first::util_types::mmr::mmr_trait::Mmr;
 
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::config_models::cli_args;
 use crate::config_models::data_directory::DataDirectory;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
@@ -782,12 +782,14 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         FeeNotificationPolicy::OffChain,
     );
 
+    let cli = cli_args::Args::default();
+
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
         TritonVmJobQueue::dummy(),
-        (TritonVmJobPriority::Normal, None).into(),
+        cli.proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
     )
     .await
     .unwrap();
@@ -899,7 +901,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         &tip_block,
         global_state_lock,
         timestamp,
-        (TritonVmJobPriority::Normal, None).into(),
+        global_state_lock.cli().proof_job_options_capability(TxProvingCapability::SingleProof),
     )
     .await?;
 

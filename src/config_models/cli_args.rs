@@ -525,7 +525,7 @@ impl Args {
             },
             cancel_job_rx: None,
         }
-    }
+    }    
 
     pub(crate) fn proof_job_options_defaults(&self) -> TritonVmProofJobOptions {
         TritonVmProofJobOptions {
@@ -534,6 +534,20 @@ impl Args {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
                 network: self.network,
                 tx_proving_capability: self.proving_capability(),
+            },
+            cancel_job_rx: None,
+        }
+    }
+
+
+    #[cfg(test)]
+    pub(crate) fn proof_job_options_capability(&self, tx_proving_capability: TxProvingCapability) -> TritonVmProofJobOptions {
+        TritonVmProofJobOptions {
+            job_priority: TritonVmJobPriority::default(),
+            job_settings: ProverJobSettings {
+                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
+                network: self.network,
+                tx_proving_capability,
             },
             cancel_job_rx: None,
         }
