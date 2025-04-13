@@ -3013,7 +3013,9 @@ mod global_state_tests {
                 &genesis_block,
                 global_state_lock,
                 timestamp,
-                global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
+                global_state_lock
+                    .cli()
+                    .proof_job_options_primitive_witness(),
             )
             .await
             .unwrap();

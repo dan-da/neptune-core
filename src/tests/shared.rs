@@ -99,7 +99,6 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -789,7 +788,7 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         composer_parameters,
         block_timestamp,
         TritonVmJobQueue::dummy(),
-        cli.proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
+        cli.proof_job_options_primitive_witness(),
     )
     .await
     .unwrap();
@@ -901,9 +900,7 @@ pub(crate) async fn mine_block_to_wallet_invalid_block_proof(
         &tip_block,
         global_state_lock,
         timestamp,
-        global_state_lock
-            .cli()
-            .proof_job_options_capability(TxProvingCapability::SingleProof),
+        Default::default(),
     )
     .await?;
 

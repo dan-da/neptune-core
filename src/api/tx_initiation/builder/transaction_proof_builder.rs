@@ -107,9 +107,7 @@ impl<'a> TransactionProofBuilder<'a> {
 
     /// specify the target proof type.  (optional)
     ///
-    /// if not specified, then builder attempts to generate the
-    /// best proof the device is capable of, as specified by
-    /// tx_proving_capability().
+    /// if present, this will override the value in `TritionVmProofJobOptions`
     pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
         self.proof_type = Some(proof_type);
         self
@@ -186,12 +184,19 @@ impl<'a> TransactionProofBuilder<'a> {
             proof_type,
         } = self;
 
-        let Some(proof_job_options) = proof_job_options else {
-            return Err(CreateProofError::MissingRequirement);
+        let proof_job_options = match proof_job_options {
+            Some(mut pjo) => {
+                // if proof_type is provided, it overrides value in job_settings
+                if let Some(proof_type) = proof_type {
+                    pjo.job_settings.proof_type = proof_type;
+                }
+                pjo
+            }
+            None => return Err(CreateProofError::MissingRequirement),
         };
 
         let capability = proof_job_options.job_settings.tx_proving_capability;
-        let proof_type = proof_type.unwrap_or(capability.into());
+        let proof_type = proof_job_options.job_settings.proof_type;
 
         let valid_mock = valid_mock.unwrap_or(true);
 

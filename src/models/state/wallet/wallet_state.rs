@@ -4111,7 +4111,6 @@ pub(crate) mod tests {
         use crate::mine_loop::make_coinbase_transaction_stateless;
         use crate::models::blockchain::block::block_height::BlockHeight;
         use crate::models::blockchain::transaction::transaction_kernel::transaction_kernel_tests::pseudorandom_transaction_kernel;
-        use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
         use crate::models::state::wallet::utxo_notification::UtxoNotificationPayload;
         use crate::tests::shared::unit_test_data_directory;
 
@@ -4483,7 +4482,7 @@ pub(crate) mod tests {
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::dummy(),
-                rando.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
+                rando.cli().proof_job_options_primitive_witness(),
             )
             .await
             .unwrap();
@@ -4614,7 +4613,9 @@ pub(crate) mod tests {
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::dummy(),
-                global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
+                global_state_lock
+                    .cli()
+                    .proof_job_options_primitive_witness(),
             )
             .await
             .unwrap();
