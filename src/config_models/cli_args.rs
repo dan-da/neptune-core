@@ -520,19 +520,6 @@ impl Args {
         }
     }
 
-    pub(crate) fn proof_job_options_defaults(&self) -> TritonVmProofJobOptions {
-        TritonVmProofJobOptions {
-            job_priority: TritonVmJobPriority::default(),
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
-                network: self.network,
-                tx_proving_capability: self.proving_capability(),
-                proof_type: self.proving_capability().into(),
-            },
-            cancel_job_rx: None,
-        }
-    }
-
     /// Get the proving capability CLI argument or estimate it if it is not set.
     /// Cache the result so we don't estimate more than once.
     pub fn proving_capability(&self) -> TxProvingCapability {
@@ -576,6 +563,21 @@ impl Args {
     }
 }
 
+impl From<&Args> for TritonVmProofJobOptions {
+    fn from(cli: &Args) -> Self {
+        Self {
+            job_priority: Default::default(),
+            job_settings: ProverJobSettings {
+                max_log2_padded_height_for_proofs: cli.max_log2_padded_height_for_proofs,
+                network: cli.network,
+                tx_proving_capability: cli.proving_capability(),
+                proof_type: cli.proving_capability().into(),
+            },
+            cancel_job_rx: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod cli_args_tests {
     use std::net::Ipv6Addr;
@@ -597,7 +599,7 @@ mod cli_args_tests {
             &self,
             proof_type: TransactionProofType,
         ) -> TritonVmProofJobOptions {
-            let mut options = self.proof_job_options_defaults();
+            let mut options: TritonVmProofJobOptions = self.into();
             options.job_settings.proof_type = proof_type;
             options
         }
