@@ -548,6 +548,7 @@ impl Args {
     ) -> TritonVmProofJobOptions {
         let mut options = self.proof_job_options_defaults();
         options.job_settings.tx_proving_capability = capability;
+        options.job_settings.proof_type = capability.into();
         options
     }
 

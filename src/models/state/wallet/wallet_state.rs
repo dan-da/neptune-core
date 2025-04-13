@@ -4483,7 +4483,7 @@ pub(crate) mod tests {
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::dummy(),
-                TritonVmProofJobOptions::default(),
+                rando.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
             )
             .await
             .unwrap();
@@ -4614,7 +4614,7 @@ pub(crate) mod tests {
                 composer_parameters.clone(),
                 now,
                 TritonVmJobQueue::dummy(),
-                TritonVmProofJobOptions::default(),
+                global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
             )
             .await
             .unwrap();

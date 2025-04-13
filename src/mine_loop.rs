@@ -1156,7 +1156,7 @@ pub(crate) mod mine_loop_tests {
             &genesis_block,
             &global_state_lock,
             network.launch_date(),
-            (TritonVmJobPriority::Normal, None).into(),
+            global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
         )
         .await
         .unwrap();
@@ -1421,7 +1421,7 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             &global_state_lock,
             launch_date,
-            (TritonVmJobPriority::Normal, None).into(),
+            global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
         )
         .await
         .unwrap();
@@ -1495,7 +1495,7 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             &global_state_lock,
             ten_seconds_ago,
-            (TritonVmJobPriority::Normal, None).into(),
+            global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
         )
         .await
         .unwrap();
@@ -1809,7 +1809,7 @@ pub(crate) mod mine_loop_tests {
                 &genesis_block,
                 &global_state_lock,
                 launch_date,
-                (TritonVmJobPriority::Normal, None).into(),
+                global_state_lock.cli().proof_job_options_capability(TxProvingCapability::PrimitiveWitness),
             )
             .await
             .unwrap();
