@@ -525,7 +525,7 @@ impl Args {
             },
             cancel_job_rx: None,
         }
-    }    
+    }
 
     pub(crate) fn proof_job_options_defaults(&self) -> TritonVmProofJobOptions {
         TritonVmProofJobOptions {
@@ -539,18 +539,19 @@ impl Args {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn proof_job_options_capability(
+        &self,
+        capability: TxProvingCapability,
+    ) -> TritonVmProofJobOptions {
+        let mut options = self.proof_job_options_defaults();
+        options.job_settings.tx_proving_capability = capability;
+        options
+    }
 
     #[cfg(test)]
-    pub(crate) fn proof_job_options_capability(&self, tx_proving_capability: TxProvingCapability) -> TritonVmProofJobOptions {
-        TritonVmProofJobOptions {
-            job_priority: TritonVmJobPriority::default(),
-            job_settings: ProverJobSettings {
-                max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
-                network: self.network,
-                tx_proving_capability,
-            },
-            cancel_job_rx: None,
-        }
+    pub(crate) fn proof_job_options_singleproof(&self) -> TritonVmProofJobOptions {
+        self.proof_job_options_capability(TxProvingCapability::SingleProof);
     }
 
     /// Get the proving capability CLI argument or estimate it if it is not set.
