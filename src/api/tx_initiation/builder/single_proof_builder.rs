@@ -24,7 +24,6 @@ use crate::models::proof_abstractions::tasm::program::ConsensusProgram;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::SecretWitness;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
 
@@ -41,9 +40,7 @@ pub struct SingleProofBuilder<'a> {
     claim_and_nondeterminism: Option<(Claim, NonDeterminism)>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
-    tx_proving_capability: Option<TxProvingCapability>,
     valid_mock: Option<bool>,
-    suppress_capability_warning: bool,
 }
 
 impl<'a> SingleProofBuilder<'a> {
@@ -119,18 +116,6 @@ impl<'a> SingleProofBuilder<'a> {
         self
     }
 
-    /// specify the device's proving capability.  (optional)
-    pub fn tx_proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
-        self.tx_proving_capability = Some(tx_proving_capability);
-        self
-    }
-
-    /// suppress warning if proving capability is not supplied.
-    pub fn suppress_capability_warning(mut self) -> Self {
-        self.suppress_capability_warning = true;
-        self
-    }
-
     /// create valid or invalid mock proof. (optional)
     ///
     /// default = true
@@ -166,7 +151,6 @@ impl<'a> SingleProofBuilder<'a> {
     /// they can be generated instantly.
     ///
     /// When network is RegTest, these options are ignored by the builder:
-    /// * tx_proving_capability()
     /// * proof_job_options()
     /// * job_queue()
     ///
@@ -199,9 +183,7 @@ impl<'a> SingleProofBuilder<'a> {
             claim_and_nondeterminism,
             job_queue,
             proof_job_options,
-            tx_proving_capability,
             valid_mock,
-            suppress_capability_warning,
         } = self;
 
         if proof_job_options.job_settings.network.use_mock_proof() {
@@ -210,17 +192,12 @@ impl<'a> SingleProofBuilder<'a> {
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);
 
-        match tx_proving_capability {
-            Some(capability) => {
-                if !capability.can_prove(TransactionProofType::SingleProof) {
-                    return Err(CreateProofError::TooWeak);
-                }
-            }
-            None => {
-                if !suppress_capability_warning {
-                    tracing::warn!("tx_proving_capability not set. proving might fail.")
-                }
-            }
+        if !proof_job_options
+            .job_settings
+            .tx_proving_capability
+            .can_prove(TransactionProofType::SingleProof)
+        {
+            return Err(CreateProofError::TooWeak);
         }
 
         let job_queue_clone = job_queue.clone();
@@ -237,14 +214,7 @@ impl<'a> SingleProofBuilder<'a> {
 
         match claim_and_nondeterminism {
             Some((claim, nondeterminism)) => {
-                Self::prove_single_proof(
-                    claim,
-                    nondeterminism,
-                    job_queue,
-                    proof_job_options,
-                    tx_proving_capability,
-                )
-                .await
+                Self::prove_single_proof(claim, nondeterminism, job_queue, proof_job_options).await
             }
             _ => match single_proof_witness {
                 Some(witness) => {
@@ -253,7 +223,6 @@ impl<'a> SingleProofBuilder<'a> {
                         witness.nondeterminism(),
                         job_queue,
                         proof_job_options,
-                        tx_proving_capability,
                     )
                     .await
                 }
@@ -265,7 +234,6 @@ impl<'a> SingleProofBuilder<'a> {
                             witness.nondeterminism(),
                             job_queue,
                             proof_job_options,
-                            tx_proving_capability,
                         )
                         .await
                     }
@@ -289,7 +257,6 @@ impl<'a> SingleProofBuilder<'a> {
         nondeterminism: NonDeterminism,
         job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-        tx_proving_capability: Option<TxProvingCapability>,
     ) -> Result<Proof, CreateProofError> {
         ProofBuilder::new()
             .program(SingleProof.program())
@@ -297,7 +264,6 @@ impl<'a> SingleProofBuilder<'a> {
             .nondeterminism(nondeterminism)
             .job_queue(job_queue)
             .proof_job_options(proof_job_options)
-            .tx_proving_capability_option(tx_proving_capability)
             .build()
             .await
     }

@@ -100,7 +100,6 @@ use crate::models::state::light_state::LightState;
 use crate::models::state::mempool::Mempool;
 use crate::models::state::networking_state::NetworkingState;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::generation_address;
 use crate::models::state::wallet::address::generation_address::GenerationReceivingAddress;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
@@ -288,7 +287,6 @@ pub(crate) async fn state_with_premine_and_self_mined_blocks<T: RngCore>(
             rng.random(),
             0.5,
             guesser_preimage,
-            network,
         )
         .await;
 
@@ -766,7 +764,6 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
     seed: [u8; 32],
     guesser_fraction: f64,
     guesser_preimage: Digest,
-    network: Network,
 ) -> (Block, Vec<ExpectedUtxo>) {
     let mut rng: StdRng = SeedableRng::from_seed(seed);
 
@@ -785,16 +782,12 @@ pub(crate) async fn make_mock_block_guesser_preimage_and_guesser_fraction(
         FeeNotificationPolicy::OffChain,
     );
 
-    let proving_capability = TxProvingCapability::PrimitiveWitness;
-
     let (tx, composer_txos) = make_coinbase_transaction_stateless(
         previous_block,
         composer_parameters,
         block_timestamp,
-        proving_capability,
         TritonVmJobQueue::dummy(),
         (TritonVmJobPriority::Normal, None).into(),
-        network,
     )
     .await
     .unwrap();
@@ -827,10 +820,6 @@ pub(crate) async fn make_mock_block(
     composer_key: generation_address::GenerationSpendingKey,
     seed: [u8; 32],
 ) -> (Block, Vec<ExpectedUtxo>) {
-    // for now we hard-code this since there are 100 plus callers.
-    // It is used by proof-builder to generate mock proofs for regtest-mode *only*.
-    let network = Network::Main;
-
     make_mock_block_guesser_preimage_and_guesser_fraction(
         previous_block,
         block_timestamp,
@@ -838,7 +827,6 @@ pub(crate) async fn make_mock_block(
         seed,
         0f64,
         Digest::default(),
-        network,
     )
     .await
 }

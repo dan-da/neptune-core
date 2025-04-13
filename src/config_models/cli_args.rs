@@ -521,6 +521,7 @@ impl Args {
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
                 network: self.network,
+                tx_proving_capability: self.proving_capability(),
             },
             cancel_job_rx: None,
         }
@@ -532,6 +533,7 @@ impl Args {
             job_settings: ProverJobSettings {
                 max_log2_padded_height_for_proofs: self.max_log2_padded_height_for_proofs,
                 network: self.network,
+                tx_proving_capability: self.proving_capability(),
             },
             cancel_job_rx: None,
         }

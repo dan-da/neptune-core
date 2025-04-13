@@ -38,7 +38,6 @@ use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
 use crate::models::blockchain::transaction::TransactionProof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// a builder for [TransactionProof]
 ///
@@ -50,10 +49,8 @@ pub struct TransactionProofBuilder<'a> {
     primitive_witness_ref: Option<&'a PrimitiveWitness>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
-    tx_proving_capability: Option<TxProvingCapability>,
     proof_type: Option<TransactionProofType>,
     valid_mock: Option<bool>,
-    suppress_capability_warning: bool,
 }
 
 impl<'a> TransactionProofBuilder<'a> {
@@ -118,12 +115,6 @@ impl<'a> TransactionProofBuilder<'a> {
         self
     }
 
-    /// specify the device's proving capability.  (optional)
-    pub fn tx_proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
-        self.tx_proving_capability = Some(tx_proving_capability);
-        self
-    }
-
     /// create valid or invalid mock proof. (optional)
     ///
     /// default = true
@@ -133,14 +124,6 @@ impl<'a> TransactionProofBuilder<'a> {
     /// does not apply to TransactionProof::PrimitiveWitness
     pub fn valid_mock(mut self, valid_mock: bool) -> Self {
         self.valid_mock = Some(valid_mock);
-        self
-    }
-
-    /// suppress warning if proving capability is not supplied.
-    ///
-    /// does not apply if proof_type is PrimitiveWitness
-    pub fn suppress_capability_warning(mut self) -> Self {
-        self.suppress_capability_warning = true;
         self
     }
 
@@ -170,7 +153,6 @@ impl<'a> TransactionProofBuilder<'a> {
     ///
     /// When network is RegTest, these options are ignored by the builder:
     /// * proof_type(),
-    /// * tx_proving_capability()
     /// * proof_job_options()
     /// * job_queue()
     ///
@@ -200,13 +182,12 @@ impl<'a> TransactionProofBuilder<'a> {
             primitive_witness_ref,
             job_queue,
             proof_job_options,
-            tx_proving_capability,
             valid_mock,
             proof_type,
-            suppress_capability_warning,
         } = self;
 
-        let proof_type = Self::get_proof_type(proof_type, tx_proving_capability)?;
+        let capability = proof_job_options.job_settings.tx_proving_capability;
+        let proof_type = proof_type.unwrap_or(capability.into());
 
         let valid_mock = valid_mock.unwrap_or(true);
 
@@ -230,18 +211,8 @@ impl<'a> TransactionProofBuilder<'a> {
                 return Ok(proof);
             }
 
-            match tx_proving_capability {
-                Some(capability) => {
-                    if !capability.can_prove(proof_type) {
-                        return Err(CreateProofError::TooWeak);
-                    }
-                }
-                None if proof_type != TransactionProofType::PrimitiveWitness => {
-                    if !suppress_capability_warning {
-                        tracing::warn!("tx_proving_capability not set. proving might fail.")
-                    }
-                }
-                _ => {}
+            if !capability.can_prove(proof_type) {
+                return Err(CreateProofError::TooWeak);
             }
 
             let transaction_proof = match proof_type {
@@ -269,19 +240,6 @@ impl<'a> TransactionProofBuilder<'a> {
                     Some(d) => build_inner(Cow::Owned(d.primitive_witness())).await,
                     None => Err(CreateProofError::MissingRequirement),
                 },
-            },
-        }
-    }
-
-    fn get_proof_type(
-        proof_type: Option<TransactionProofType>,
-        tx_proving_capability: Option<TxProvingCapability>,
-    ) -> Result<TransactionProofType, CreateProofError> {
-        match proof_type {
-            Some(pt) => Ok(pt),
-            None => match tx_proving_capability {
-                Some(c) => Ok(c.into()),
-                None => Err(CreateProofError::MissingRequirement),
             },
         }
     }

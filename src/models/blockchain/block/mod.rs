@@ -1494,7 +1494,6 @@ pub(crate) mod block_tests {
                 &block1,
                 &alice,
                 plus_eight_months,
-                TxProvingCapability::SingleProof,
                 (TritonVmJobPriority::Normal, None).into(),
             )
             .await
@@ -1558,7 +1557,6 @@ pub(crate) mod block_tests {
                     &block2_without_valid_pow,
                     &alice,
                     plus_nine_months,
-                    TxProvingCapability::SingleProof,
                     (TritonVmJobPriority::Normal, None).into(),
                 )
                 .await
@@ -1768,7 +1766,6 @@ pub(crate) mod block_tests {
                 rng.random(),
                 0.4,
                 guesser_preimage,
-                Network::Main,
             )
             .await;
             let ars = block1.guesser_fee_addition_records();
@@ -1946,7 +1943,6 @@ pub(crate) mod block_tests {
                 &blocks[i - 1],
                 &alice,
                 launch_date,
-                TxProvingCapability::SingleProof,
                 TritonVmProofJobOptions::from((TritonVmJobPriority::Normal, None)),
             )
             .await

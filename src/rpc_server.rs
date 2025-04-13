@@ -4793,6 +4793,7 @@ mod rpc_server_tests {
             use cli_args::Args;
 
             use super::*;
+            use crate::models::state::tx_proving_capability::TxProvingCapability;
             use crate::tests::shared::invalid_block_with_transaction;
             use crate::tests::shared::invalid_empty_block;
 

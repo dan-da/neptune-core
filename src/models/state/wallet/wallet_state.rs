@@ -2512,7 +2512,6 @@ pub(crate) mod tests {
                 mock_block_seed,
                 guesser_fraction,
                 guesser_preimage_1a,
-                network,
             )
             .await;
 
@@ -2547,7 +2546,6 @@ pub(crate) mod tests {
                 mock_block_seed,
                 guesser_fraction,
                 guesser_preimage_1b,
-                network,
             )
             .await;
 
@@ -3430,7 +3428,6 @@ pub(crate) mod tests {
                     rng.random(),
                     guesser_fraction,
                     guesser_preimage,
-                    network,
                 )
                 .await;
 
@@ -4065,7 +4062,6 @@ pub(crate) mod tests {
                     rng.random(),
                     guesser_fraction,
                     guesser_preimage,
-                    network,
                 )
                 .await;
 
@@ -4486,10 +4482,8 @@ pub(crate) mod tests {
                 &previous_block,
                 composer_parameters.clone(),
                 now,
-                TxProvingCapability::PrimitiveWitness,
                 TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),
-                network,
             )
             .await
             .unwrap();
@@ -4619,10 +4613,8 @@ pub(crate) mod tests {
                 &genesis_block,
                 composer_parameters.clone(),
                 now,
-                TxProvingCapability::PrimitiveWitness,
                 TritonVmJobQueue::dummy(),
                 TritonVmProofJobOptions::default(),
-                network,
             )
             .await
             .unwrap();

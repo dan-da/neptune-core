@@ -132,7 +132,6 @@ impl TransactionSender {
             .primitive_witness(witness)
             .job_queue(vm_job_queue())
             .proof_job_options(gsl.cli().proof_job_options_defaults())
-            .tx_proving_capability(gsl.cli().proving_capability())
             .proof_type(target_proof_type)
             .build()
             .await?;

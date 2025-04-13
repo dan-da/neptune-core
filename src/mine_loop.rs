@@ -47,13 +47,11 @@ use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::models::proof_abstractions::tasm::prover_job;
-use crate::models::proof_abstractions::tasm::prover_job::ProverJobSettings;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
 use crate::models::state::mining_status::MiningStatus;
 use crate::models::state::transaction_details::TransactionDetails;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::models::state::wallet::address::hash_lock_key::HashLockKey;
 use crate::models::state::wallet::expected_utxo::ExpectedUtxo;
 use crate::models::state::wallet::transaction_output::TxOutput;
@@ -78,18 +76,10 @@ async fn compose_block(
 ) -> Result<()> {
     let timestamp = max(now, latest_block.header().timestamp + MINIMUM_BLOCK_TIME);
 
-    let triton_vm_job_queue = vm_job_queue();
-
-    let job_options = TritonVmProofJobOptions {
-        job_priority: TritonVmJobPriority::High,
-        job_settings: ProverJobSettings {
-            max_log2_padded_height_for_proofs: global_state_lock
-                .cli()
-                .max_log2_padded_height_for_proofs,
-            network: global_state_lock.cli().network,
-        },
-        cancel_job_rx: Some(cancel_compose_rx),
-    };
+    let mut job_options = global_state_lock
+        .cli()
+        .proof_job_options(TritonVmJobPriority::High);
+    job_options.cancel_job_rx = Some(cancel_compose_rx);
 
     let (transaction, composer_utxos) = create_block_transaction(
         &latest_block,
@@ -104,7 +94,7 @@ async fn compose_block(
         transaction,
         timestamp,
         None,
-        triton_vm_job_queue,
+        vm_job_queue(),
         job_options,
     )
     .await;
@@ -383,16 +373,14 @@ pub(crate) async fn make_coinbase_transaction_stateless(
     latest_block: &Block,
     composer_parameters: ComposerParameters,
     timestamp: Timestamp,
-    proving_power: TxProvingCapability,
     vm_job_queue: Arc<TritonVmJobQueue>,
     job_options: TritonVmProofJobOptions,
-    network: Network,
 ) -> Result<(Transaction, TxOutputList)> {
     let (composer_outputs, transaction_details) = prepare_coinbase_transaction_stateless(
         latest_block,
         composer_parameters,
         timestamp,
-        network,
+        job_options.job_settings.network,
     )?;
 
     let witness = PrimitiveWitness::from_transaction_details(&transaction_details);
@@ -411,7 +399,6 @@ pub(crate) async fn make_coinbase_transaction_stateless(
         .primitive_witness(witness)
         .job_queue(vm_job_queue)
         .proof_job_options(job_options)
-        .tx_proving_capability(proving_power)
         .build()
         .await?;
 
@@ -598,10 +585,8 @@ pub(crate) async fn create_block_transaction_from(
         predecessor_block,
         composer_parameters.clone(),
         timestamp,
-        TxProvingCapability::SingleProof,
         vm_job_queue.clone(),
         job_options.clone(),
-        global_state_lock.cli().network,
     )
     .await?;
 
@@ -635,7 +620,6 @@ pub(crate) async fn create_block_transaction_from(
             .primitive_witness_ref(&nop)
             .job_queue(vm_job_queue.clone())
             .proof_job_options(job_options.clone())
-            .tx_proving_capability(global_state_lock.cli().proving_capability())
             .proof_type(TransactionProofType::SingleProof)
             .build()
             .await?;
@@ -1030,6 +1014,7 @@ pub(crate) mod mine_loop_tests {
     use crate::models::proof_abstractions::verifier::verify;
     use crate::models::state::mempool::TransactionOrigin;
     use crate::models::state::tx_creation_config::TxCreationConfig;
+    use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::models::state::wallet::transaction_output::TxOutput;
     use crate::models::state::wallet::wallet_entropy::WalletEntropy;
     use crate::tests::shared::dummy_expected_utxo;
@@ -1047,7 +1032,6 @@ pub(crate) mod mine_loop_tests {
         latest_block: &Block,
         global_state_lock: &GlobalStateLock,
         timestamp: Timestamp,
-        proving_power: TxProvingCapability,
         job_options: TritonVmProofJobOptions,
     ) -> Result<(Transaction, Vec<ExpectedUtxo>)> {
         // It's important to use the input `latest_block` here instead of
@@ -1065,10 +1049,8 @@ pub(crate) mod mine_loop_tests {
             latest_block,
             composer_parameters.clone(),
             timestamp,
-            proving_power,
             vm_job_queue,
             job_options,
-            global_state_lock.cli().network,
         )
         .await?;
 
@@ -1174,7 +1156,6 @@ pub(crate) mod mine_loop_tests {
             &genesis_block,
             &global_state_lock,
             network.launch_date(),
-            TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),
         )
         .await
@@ -1440,7 +1421,6 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             &global_state_lock,
             launch_date,
-            TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),
         )
         .await
@@ -1515,7 +1495,6 @@ pub(crate) mod mine_loop_tests {
             &tip_block_orig,
             &global_state_lock,
             ten_seconds_ago,
-            TxProvingCapability::PrimitiveWitness,
             (TritonVmJobPriority::Normal, None).into(),
         )
         .await
@@ -1830,7 +1809,6 @@ pub(crate) mod mine_loop_tests {
                 &genesis_block,
                 &global_state_lock,
                 launch_date,
-                TxProvingCapability::PrimitiveWitness,
                 (TritonVmJobPriority::Normal, None).into(),
             )
             .await

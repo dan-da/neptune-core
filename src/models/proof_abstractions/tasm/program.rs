@@ -207,6 +207,7 @@ pub mod test {
                 job_settings: ProverJobSettings {
                     max_log2_padded_height_for_proofs,
                     network: Default::default(),
+                    tx_proving_capability: Default::default(),
                 },
                 cancel_job_rx: None,
             }

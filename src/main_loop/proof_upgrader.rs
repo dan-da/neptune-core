@@ -530,8 +530,6 @@ impl UpgradeJob {
         let gobbling_fee = self.gobbling_fee();
         let mutator_set = self.mutator_set();
         let old_tx_timestamp = self.old_tx_timestamp();
-        // if we are here, we must be capable of producing SingleProof.
-        let tx_proving_capability = TxProvingCapability::SingleProof;
 
         let (maybe_gobbler, expected_utxos) = if gobbling_fee.is_positive() {
             info!("Producing gobbler-transaction for a value of {gobbling_fee}");
@@ -564,7 +562,6 @@ impl UpgradeJob {
                 .primitive_witness_ref(&gobbler_witness)
                 .job_queue(triton_vm_job_queue.clone())
                 .proof_job_options(proof_job_options.clone())
-                .tx_proving_capability(tx_proving_capability)
                 .proof_type(TransactionProofType::SingleProof)
                 .build()
                 .await?;
@@ -669,7 +666,6 @@ impl UpgradeJob {
                     .primitive_witness_ref(&witness)
                     .job_queue(triton_vm_job_queue.clone())
                     .proof_job_options(proof_job_options.clone())
-                    .tx_proving_capability(tx_proving_capability)
                     .proof_type(TransactionProofType::ProofCollection)
                     .build()
                     .await?;
@@ -691,7 +687,6 @@ impl UpgradeJob {
                     .primitive_witness_ref(&witness)
                     .job_queue(triton_vm_job_queue.clone())
                     .proof_job_options(proof_job_options.clone())
-                    .tx_proving_capability(tx_proving_capability)
                     .proof_type(TransactionProofType::SingleProof)
                     .build()
                     .await?;

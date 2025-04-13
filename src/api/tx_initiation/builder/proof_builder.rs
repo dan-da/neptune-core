@@ -10,7 +10,6 @@ use crate::models::blockchain::transaction::transaction_proof::TransactionProofT
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
@@ -25,9 +24,7 @@ pub struct ProofBuilder {
     nondeterminism: Option<NonDeterminism>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: TritonVmProofJobOptions,
-    tx_proving_capability: Option<TxProvingCapability>,
     valid_mock: Option<bool>,
-    suppress_capability_warning: bool,
 }
 
 impl ProofBuilder {
@@ -66,27 +63,6 @@ impl ProofBuilder {
         self
     }
 
-    /// specify the device's proving capability.  (optional)
-    pub fn tx_proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
-        self.tx_proving_capability = Some(tx_proving_capability);
-        self
-    }
-
-    /// specify the device's proving capability.  (optional)
-    pub fn tx_proving_capability_option(
-        mut self,
-        tx_proving_capability: Option<TxProvingCapability>,
-    ) -> Self {
-        self.tx_proving_capability = tx_proving_capability;
-        self
-    }
-
-    /// suppress warning if proving capability is not supplied.
-    pub fn suppress_capability_warning(mut self) -> Self {
-        self.suppress_capability_warning = true;
-        self
-    }
-
     /// create valid or invalid mock proof. (optional)
     ///
     /// default = true
@@ -106,9 +82,7 @@ impl ProofBuilder {
             nondeterminism,
             job_queue,
             proof_job_options,
-            tx_proving_capability,
             valid_mock,
-            suppress_capability_warning,
         } = self;
 
         let (Some(program), Some(claim), Some(nondeterminism)) = (program, claim, nondeterminism)
@@ -123,17 +97,9 @@ impl ProofBuilder {
         }
         tracing::debug!("NOT IN USE MOCK PROOF");
 
-        match tx_proving_capability {
-            Some(capability) => {
-                if !capability.can_prove(TransactionProofType::SingleProof) {
-                    return Err(CreateProofError::TooWeak);
-                }
-            }
-            None => {
-                if !suppress_capability_warning {
-                    tracing::warn!("tx_proving_capability not set. proving might fail.")
-                }
-            }
+        let capability = proof_job_options.job_settings.tx_proving_capability;
+        if !capability.can_prove(TransactionProofType::SingleProof) {
+            return Err(CreateProofError::TooWeak);
         }
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);

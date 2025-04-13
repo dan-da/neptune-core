@@ -23,12 +23,14 @@ use crate::job_queue::traits::JobCompletion;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;
 use crate::macros::log_scope_duration;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 #[cfg(test)]
 use crate::models::proof_abstractions::tasm::program::test;
 use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 use crate::triton_vm::vm::VMState;
 
 /// represents an error running a [ProverJob]
@@ -39,6 +41,9 @@ pub enum ProverJobError {
 
     #[error("external proving process failed")]
     TritonVmProverFailed(#[from] VmProcessError),
+
+    #[error("device is not capable of generating single proofs.  capability: {0}")]
+    TooWeak(TxProvingCapability),
 }
 
 /// represents an error invoking external prover process
@@ -131,6 +136,7 @@ impl From<ProverJobError> for ProverJobResult {
 pub struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
     pub(crate) network: Network,
+    pub(crate) tx_proving_capability: TxProvingCapability,
 }
 
 #[derive(Debug, Clone)]
@@ -164,8 +170,18 @@ impl ProverJob {
     // corresponding proof.  In this case a `ProofComplexityLimitExceeded`
     // error is returned.
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
-        tracing::debug!("executing VM program to determine complexity (padded-height)");
         tracing::debug!("job settings: {:?}", self.job_settings);
+
+        if !self
+            .job_settings
+            .tx_proving_capability
+            .can_prove(TransactionProofType::SingleProof)
+        {
+            let capability = self.job_settings.tx_proving_capability;
+            return Err(ProverJobError::TooWeak(capability));
+        }
+
+        tracing::debug!("executing VM program to determine complexity (padded-height)");
 
         assert_eq!(self.program.hash(), self.claim.program_digest);
 
