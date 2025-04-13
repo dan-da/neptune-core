@@ -183,6 +183,7 @@ pub mod test {
 
     use super::*;
     use crate::models::blockchain::shared::Hash;
+    use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
     use crate::models::proof_abstractions::tasm::environment;
     use crate::models::state::tx_proving_capability::TxProvingCapability;
     use crate::triton_vm::stark::Stark;
@@ -194,6 +195,7 @@ pub mod test {
         fn from(job_priority: TritonVmJobPriority) -> Self {
             let mut job_settings = ProverJobSettings::default();
             job_settings.tx_proving_capability = TxProvingCapability::SingleProof;
+            job_settings.proof_type = TransactionProofType::SingleProof;
             Self {
                 job_priority,
                 job_settings,
@@ -211,6 +213,7 @@ pub mod test {
                     max_log2_padded_height_for_proofs,
                     network: Default::default(),
                     tx_proving_capability: TxProvingCapability::SingleProof,
+                    proof_type: TransactionProofType::SingleProof,
                 },
                 cancel_job_rx: None,
             }

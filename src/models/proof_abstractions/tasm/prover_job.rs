@@ -42,8 +42,11 @@ pub enum ProverJobError {
     #[error("external proving process failed")]
     TritonVmProverFailed(#[from] VmProcessError),
 
-    #[error("device is not capable of generating single proofs.  capability: {0}")]
-    TooWeak(TxProvingCapability),
+    #[error("machine's capability {capability} is not sufficient to produce proof: {proof_type}")]
+    TooWeak {
+        capability: TxProvingCapability,
+        proof_type: TransactionProofType,
+    },
 }
 
 /// represents an error invoking external prover process
@@ -132,11 +135,23 @@ impl From<ProverJobError> for ProverJobResult {
     }
 }
 
-#[derive(Debug, Clone, Default, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProverJobSettings {
     pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
     pub(crate) network: Network,
     pub(crate) tx_proving_capability: TxProvingCapability,
+    pub(crate) proof_type: TransactionProofType,
+}
+
+impl Default for ProverJobSettings {
+    fn default() -> Self {
+        Self {
+            max_log2_padded_height_for_proofs: None,
+            network: Network::default(),
+            tx_proving_capability: TxProvingCapability::default(),
+            proof_type: TxProvingCapability::default().into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -172,13 +187,14 @@ impl ProverJob {
     async fn check_if_allowed(&self) -> Result<(), ProverJobError> {
         tracing::debug!("job settings: {:?}", self.job_settings);
 
-        if !self
-            .job_settings
-            .tx_proving_capability
-            .can_prove(TransactionProofType::SingleProof)
-        {
+        let capability = self.job_settings.tx_proving_capability;
+        let proof_type = self.job_settings.proof_type;
+        if !capability.can_prove(proof_type) {
             let capability = self.job_settings.tx_proving_capability;
-            return Err(ProverJobError::TooWeak(capability));
+            return Err(ProverJobError::TooWeak {
+                capability,
+                proof_type,
+            });
         }
 
         tracing::debug!("executing VM program to determine complexity (padded-height)");
