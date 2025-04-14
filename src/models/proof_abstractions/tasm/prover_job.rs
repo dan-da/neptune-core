@@ -137,10 +137,10 @@ impl From<ProverJobError> for ProverJobResult {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ProverJobSettings {
-    pub(crate) max_log2_padded_height_for_proofs: Option<u8>,
-    pub(crate) network: Network,
-    pub(crate) tx_proving_capability: TxProvingCapability,
-    pub(crate) proof_type: TransactionProofType,
+    pub max_log2_padded_height_for_proofs: Option<u8>,
+    pub network: Network,
+    pub tx_proving_capability: TxProvingCapability,
+    pub proof_type: TransactionProofType,
 }
 
 #[cfg(test)]
