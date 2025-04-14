@@ -65,6 +65,9 @@ pub enum CreateProofError {
         capability: TxProvingCapability,
     },
 
+    #[error("target proof type {0} is not a triton-vm proof.")]
+    NotVmProof(TransactionProofType),
+
     // catch-all error, eg for anyhow errors
     #[error("transaction could not be created.  reason: {0}")]
     Failed(String),

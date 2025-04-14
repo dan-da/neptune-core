@@ -191,7 +191,6 @@ impl ProverJob {
         let capability = self.job_settings.tx_proving_capability;
         let proof_type = self.job_settings.proof_type;
         if !capability.can_prove(proof_type) {
-            let capability = self.job_settings.tx_proving_capability;
             return Err(ProverJobError::TooWeak {
                 capability,
                 proof_type,

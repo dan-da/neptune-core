@@ -155,11 +155,29 @@ pub(crate) async fn prove_consensus_program(
     Ok(result?)
 }
 
+/// Options for executing the triton-vm proving job
 #[derive(Clone, Debug)]
 #[cfg_attr(test, derive(Default))]
 pub struct TritonVmProofJobOptions {
+    /// priority of this job in the job-queue
+    ///
+    /// used when selecting the next job to run.
+    ///
+    /// note that if a lower priority job is already running then a higher
+    /// priority job still must wait for it to complete.
     pub job_priority: TritonVmJobPriority,
+
+    /// job-specific settings
     pub job_settings: ProverJobSettings,
+
+    /// Cancellation:
+    ///
+    /// It is possible to cancel a proving-job by:
+    ///
+    /// 1. create a [tokio::sync::watch] channel and set the receiver in the
+    ///    `cancel_job_rx` field.
+    ///
+    /// 2. call send() on the channel sender to cancel the job.
     pub cancel_job_rx: Option<tokio::sync::watch::Receiver<()>>,
 }
 
@@ -194,9 +212,11 @@ pub mod test {
 
     impl From<TritonVmJobPriority> for TritonVmProofJobOptions {
         fn from(job_priority: TritonVmJobPriority) -> Self {
-            let mut job_settings = ProverJobSettings::default();
-            job_settings.tx_proving_capability = TxProvingCapability::SingleProof;
-            job_settings.proof_type = TransactionProofType::SingleProof;
+            let job_settings = ProverJobSettings {
+                tx_proving_capability: TxProvingCapability::SingleProof,
+                proof_type: TransactionProofType::SingleProof,
+                ..Default::default()
+            };
             Self {
                 job_priority,
                 job_settings,

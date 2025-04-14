@@ -12,6 +12,8 @@ use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
+use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
+use crate::models::state::tx_proving_capability::TxProvingCapability;
 
 /// a builder for [Proof]
 ///
@@ -23,6 +25,8 @@ pub struct ProofBuilder {
     nondeterminism: Option<NonDeterminism>,
     job_queue: Option<Arc<TritonVmJobQueue>>,
     proof_job_options: Option<TritonVmProofJobOptions>,
+    tx_proving_capability: Option<TxProvingCapability>,
+    proof_type: Option<TransactionProofType>,
     valid_mock: Option<bool>,
 }
 
@@ -32,33 +36,58 @@ impl ProofBuilder {
         Default::default()
     }
 
-    /// add program
+    /// add program (required)
     pub fn program(mut self, program: Program) -> Self {
         self.program = Some(program);
         self
     }
 
-    /// add claim
+    /// add claim (required)
     pub fn claim(mut self, claim: Claim) -> Self {
         self.claim = Some(claim);
         self
     }
 
-    /// add nondeterminism
+    /// add nondeterminism (required)
     pub fn nondeterminism(mut self, nondeterminism: NonDeterminism) -> Self {
         self.nondeterminism = Some(nondeterminism);
         self
     }
 
-    /// add job queue (required)
+    /// add job queue (optional)
+    ///
+    /// if not provided then the process-wide [vm_job_queue()] will be used.
     pub fn job_queue(mut self, job_queue: Arc<TritonVmJobQueue>) -> Self {
         self.job_queue = Some(job_queue);
         self
     }
 
-    /// add job options. (optional)
+    /// add job options. (required)
+    ///
+    /// note: can be obtained via `TritonVmProofJobOptions::from(Args)`
     pub fn proof_job_options(mut self, proof_job_options: TritonVmProofJobOptions) -> Self {
         self.proof_job_options = Some(proof_job_options);
+        self
+    }
+
+    /// specify the machine's proving capability.  (optional)
+    ///
+    /// if present, this will override the value in `ProverJobSettings` which is
+    /// part of [TritonVmProofJobOptions]
+    pub fn proving_capability(mut self, tx_proving_capability: TxProvingCapability) -> Self {
+        self.tx_proving_capability = Some(tx_proving_capability);
+        self
+    }
+
+    /// specify the target proof type.  (optional)
+    ///
+    /// if present, this will override the value in `ProverJobSettings` which is
+    /// part of [TritonVmProofJobOptions]
+    ///
+    /// if the type is not single-proof or proof-collection an error will result
+    /// when building.
+    pub fn proof_type(mut self, proof_type: TransactionProofType) -> Self {
+        self.proof_type = Some(proof_type);
         self
     }
 
@@ -74,6 +103,45 @@ impl ProofBuilder {
         self
     }
 
+    /// generate the proof.
+    ///
+    /// if the network uses mock proofs (eg Network::RegTest), this will return
+    /// immediately with a mock [Proof].
+    ///
+    /// otherwise it will initiate an async job that could take many minutes.
+    ///
+    /// note that these jobs occur in a global (per process) job queue that only
+    /// permits one VM job to process at a time.  This prevents parallel jobs
+    /// from bringing the machine to its knees when each is using all available
+    /// CPU cores and RAM.
+    ///
+    /// Given the serialized nature of the job-queue, it is possible or even likely
+    /// that other jobs may precede this one.
+    ///
+    /// One can query the job_queue to determine how many jobs are in the queue.
+    ///
+    /// RegTest mode:
+    ///
+    /// mock proofs are used on the regtest network (only) because
+    /// they can be generated instantly.
+    ///
+    /// External Process:
+    ///
+    /// Proofs are generated in the Triton VM. The proof generation occurs in a
+    /// separate executable, `triton-vm-prover`, which is spawned by the
+    /// job-queue for each proving job.  Only one `triton-vm-prover` process
+    /// should be executing at a time for a given neptune-core instance.
+    ///
+    /// If the external process is killed for any reason, the proof-generation job will fail
+    /// and this method will return an error.
+    ///
+    /// Cancellation:
+    ///
+    /// See [TritonVmProofJobOptions::cancel_job_rx].
+    ///
+    /// note that cancelling the future returned by build() will NOT cancel the
+    /// job in the job-queue, as that runs in a separately spawned tokio task
+    /// managed by the job-queue.
     pub async fn build(self) -> Result<Proof, CreateProofError> {
         let Self {
             program,
@@ -82,20 +150,34 @@ impl ProofBuilder {
             job_queue,
             proof_job_options,
             valid_mock,
+            tx_proving_capability,
+            proof_type,
         } = self;
 
-        let (Some(program), Some(claim), Some(nondeterminism), Some(proof_job_options)) =
-            (program, claim, nondeterminism, proof_job_options)
+        let (Some(program), Some(claim), Some(nondeterminism)) = (program, claim, nondeterminism)
         else {
             return Err(CreateProofError::MissingRequirement);
         };
 
+        let proof_job_options = match proof_job_options {
+            Some(mut pjo) => {
+                // if tx_proving_capability is provided, it overrides value in job_settings
+                if let Some(tx_proving_capability) = tx_proving_capability {
+                    pjo.job_settings.tx_proving_capability = tx_proving_capability;
+                }
+                // if proof_type is provided, it overrides value in job_settings
+                if let Some(proof_type) = proof_type {
+                    pjo.job_settings.proof_type = proof_type;
+                }
+                pjo
+            }
+            None => return Err(CreateProofError::MissingRequirement),
+        };
+
         if proof_job_options.job_settings.network.use_mock_proof() {
-            tracing::debug!("USE MOCK PROOF");
             let proof = Proof::mock(valid_mock.unwrap_or(true));
             return Ok(proof);
         }
-        tracing::debug!("NOT IN USE MOCK PROOF");
 
         let capability = proof_job_options.job_settings.tx_proving_capability;
         let proof_type = proof_job_options.job_settings.proof_type;
@@ -104,6 +186,10 @@ impl ProofBuilder {
                 proof_type,
                 capability,
             });
+        }
+        // this builder only supports proofs that can be executed in triton-vm.
+        if !proof_type.is_vm_proof() {
+            return Err(CreateProofError::NotVmProof(proof_type));
         }
 
         let job_queue = job_queue.unwrap_or_else(vm_job_queue);

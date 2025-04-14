@@ -12,7 +12,6 @@ use tracing::info;
 use tracing::warn;
 
 use super::TransactionOrigin;
-use crate::api::tx_initiation::builder::single_proof_builder::SingleProofBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
@@ -584,7 +583,7 @@ impl UpgradeJob {
             UpgradeJob::ProofCollectionToSingleProof { kernel, proof, .. } => {
                 let single_proof_witness = SingleProofWitness::from_collection(proof.to_owned());
 
-                let single_proof = SingleProofBuilder::new()
+                let single_proof = TransactionProofBuilder::new()
                     .single_proof_witness(&single_proof_witness)
                     .job_queue(triton_vm_job_queue.clone())
                     .proof_job_options(proof_job_options.clone())
@@ -594,7 +593,7 @@ impl UpgradeJob {
 
                 let upgraded_tx = Transaction {
                     kernel,
-                    proof: TransactionProof::SingleProof(single_proof),
+                    proof: single_proof,
                 };
 
                 let tx = if let Some(gobbler) = maybe_gobbler {

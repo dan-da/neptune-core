@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::api::tx_initiation::builder::single_proof_builder::SingleProofBuilder;
+use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
@@ -173,7 +173,7 @@ impl Transaction {
         let new_single_proof_witness = SingleProofWitness::from_update(update_witness);
 
         info!("starting single proof via update ...");
-        let proof = SingleProofBuilder::new()
+        let proof = TransactionProofBuilder::new()
             .single_proof_witness(&new_single_proof_witness)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
@@ -183,7 +183,7 @@ impl Transaction {
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(proof),
+            proof,
         })
     }
 
@@ -237,7 +237,7 @@ impl Transaction {
 
         info!("Start: creating new single proof through merge");
 
-        let proof = SingleProofBuilder::new()
+        let proof = TransactionProofBuilder::new()
             .single_proof_witness(&new_single_proof_witness)
             .job_queue(triton_vm_job_queue)
             .proof_job_options(proof_job_options)
@@ -248,7 +248,7 @@ impl Transaction {
 
         Ok(Transaction {
             kernel: new_kernel,
-            proof: TransactionProof::SingleProof(proof),
+            proof,
         })
     }
 

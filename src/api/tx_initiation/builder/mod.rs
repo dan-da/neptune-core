@@ -133,7 +133,6 @@
 //! # }
 //! ```
 pub mod proof_builder;
-pub mod single_proof_builder;
 pub mod transaction_builder;
 pub mod transaction_details_builder;
 pub mod transaction_proof_builder;
