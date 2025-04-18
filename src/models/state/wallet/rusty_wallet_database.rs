@@ -16,6 +16,9 @@ use crate::prelude::twenty_first;
 pub struct RustyWalletDatabase {
     storage: SimpleRustyStorage,
 
+    #[allow(dead_code)]
+    schema_version: DbtSingleton<u16>,
+
     // list of utxos we have already received in a block
     monitored_utxos: DbtVec<MonitoredUtxo>,
 
@@ -44,6 +47,8 @@ pub struct RustyWalletDatabase {
     sent_transactions: DbtVec<SentTransaction>,
 }
 
+const SCHEMA_VERSION: u16 = 2;
+
 impl RustyWalletDatabase {
     pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
         let mut storage = SimpleRustyStorage::new_with_callback(
@@ -51,6 +56,27 @@ impl RustyWalletDatabase {
             "RustyWalletDatabase-Schema",
             crate::LOG_TOKIO_LOCK_EVENT_CB,
         );
+
+        let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
+        let mut schema_version = storage.schema.new_singleton::<u16>("schema_version").await;
+
+        // if the DB is brand-new then we set the schema version.  else we check
+        // if using an older schema, and migrate to current schema if necessary
+        // or panic if schema is newer than we use.
+
+        let is_new_db = schema_version.get() == 0 && sync_label.get() == Digest::default();
+        if is_new_db {
+            schema_version.set(SCHEMA_VERSION).await;
+        } else {
+            if schema_version.get() < SCHEMA_VERSION {
+                migrate_db::migrate_range(&mut storage, schema_version.get(), SCHEMA_VERSION)
+                    .await
+                    .unwrap();
+                schema_version.set(SCHEMA_VERSION).await;
+            } else if schema_version.get() > SCHEMA_VERSION {
+                panic!("Wallet database schema version is higher than expected.  It appears to come from a newer release of neptune-core.  expected schema version: {}, found: {}", SCHEMA_VERSION, schema_version.get());
+            }
+        }
 
         let monitored_utxos = storage
             .schema
@@ -67,7 +93,6 @@ impl RustyWalletDatabase {
             .new_vec::<SentTransaction>("sent_transactions")
             .await;
 
-        let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
         let counter = storage.schema.new_singleton::<u64>("counter").await;
 
         let generation_key_counter = storage
@@ -83,6 +108,7 @@ impl RustyWalletDatabase {
 
         Self {
             storage,
+            schema_version,
             monitored_utxos,
             expected_utxos,
             sent_transactions,
@@ -167,6 +193,136 @@ impl RustyWalletDatabase {
     /// set wallet derivation counter for symmetric keys
     pub async fn set_symmetric_key_counter(&mut self, counter: u64) {
         self.symmetric_key_counter.set(counter).await;
+    }
+}
+
+pub(crate) mod migrate_db {
+    use futures::pin_mut;
+    use itertools::Itertools;
+    use serde_derive::Deserialize;
+    use serde_derive::Serialize;
+
+    use super::SimpleRustyStorage;
+    use crate::database::storage::storage_schema::traits::StorageWriter;
+    use crate::database::storage::storage_vec::traits::*;
+
+    pub(crate) async fn migrate_range(
+        storage: &mut SimpleRustyStorage,
+        version_from: u16,
+        version_to: u16,
+    ) -> anyhow::Result<()> {
+        assert!(version_from < version_to);
+
+        tracing::info!(
+            "wallet database is at schema version: v{}.  migrating to version: v{}",
+            version_from,
+            version_to
+        );
+
+        let log_apply_version = |version| {
+            tracing::info!(
+                "db migration. applying updates from v{} to v{}",
+                version - 1,
+                version
+            )
+        };
+
+        for i in version_from..version_to {
+            let apply_version = i + 1;
+
+            match apply_version {
+                v if v == 1 => {
+                    log_apply_version(v);
+                    v0_to_v1::migrate(storage).await?
+                }
+                _ => unimplemented!(),
+            }
+            storage.persist().await;
+        }
+        Ok(())
+    }
+
+    mod v0_to_v1 {
+        use tasm_lib::prelude::Digest;
+
+        use super::*;
+        use crate::models::blockchain::transaction::utxo::Utxo;
+        use crate::models::state::wallet::sent_transaction::AoclLeafIndex;
+        use crate::models::state::wallet::sent_transaction::SentTransaction;
+        use crate::models::state::wallet::transaction_output::TxOutput;
+        use crate::models::state::wallet::transaction_output::TxOutputList;
+        use crate::models::state::wallet::utxo_notification::UtxoNotifyMethod;
+        use crate::models::state::NativeCurrencyAmount;
+        use crate::models::state::Timestamp;
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        struct TxOutputV1 {
+            utxo: Utxo,
+            sender_randomness: Digest,
+            receiver_digest: Digest,
+            notification_method: UtxoNotifyMethod,
+            owned: bool,
+        }
+        impl From<TxOutputV1> for TxOutput {
+            fn from(v0: TxOutputV1) -> Self {
+                Self::new(
+                    v0.utxo,
+                    v0.sender_randomness,
+                    v0.receiver_digest,
+                    v0.notification_method,
+                    v0.owned,
+                    v0.owned, // is_change.  default to owned (v0)
+                )
+            }
+        }
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        struct SentTransactionV1 {
+            tx_inputs: Vec<(AoclLeafIndex, Utxo)>,
+            tx_outputs: Vec<TxOutputV1>,
+            fee: NativeCurrencyAmount,
+            timestamp: Timestamp,
+            tip_when_sent: Digest,
+        }
+        impl From<SentTransactionV1> for SentTransaction {
+            fn from(v0: SentTransactionV1) -> Self {
+                let tx_outputs: TxOutputList = v0
+                    .tx_outputs
+                    .into_iter()
+                    .map(|t| TxOutput::from(t))
+                    .collect_vec()
+                    .into();
+                Self {
+                    tx_inputs: v0.tx_inputs,
+                    tx_outputs,
+                    fee: v0.fee,
+                    timestamp: v0.timestamp,
+                    tip_when_sent: v0.tip_when_sent,
+                }
+            }
+        }
+
+        // note: this fn implements the SQL equivalent of:
+        //  ALTER TABLE sent_transactions ADD COLUMN is_change BOOLEAN DEFAULT owned;
+        pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<()> {
+            let sent_transactions_v0 = storage
+                .schema
+                .new_vec::<SentTransactionV1>("sent_transactions")
+                .await;
+
+            let mut sent_transactions_v1 = storage
+                .schema
+                .new_vec::<SentTransaction>("sent_transactions")
+                .await;
+
+            let stream = sent_transactions_v0.stream_values().await;
+            pin_mut!(stream); // needed for iteration
+
+            while let Some(tx_v0) = stream.next().await {
+                sent_transactions_v1.push(tx_v0.into()).await;
+            }
+
+            Ok(())
+        }
     }
 }
 

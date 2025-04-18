@@ -29,8 +29,7 @@ use crate::util_types::mutator_set::commit;
 ///
 /// Contains data that a UTXO recipient requires in order to be notified about
 /// and claim a given UTXO.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(from = "fix_552::TxOutputVersioned")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TxOutput {
     utxo: Utxo,
     sender_randomness: Digest,
@@ -59,6 +58,7 @@ pub struct TxOutput {
 //
 // See:
 //   https://github.com/Neptune-Crypto/neptune-core/issues/552
+/*
 mod fix_552 {
     use super::*;
 
@@ -90,6 +90,7 @@ mod fix_552 {
         }
     }
 }
+*/
 
 impl From<&TxOutput> for AdditionRecord {
     /// retrieves public announcements from possible sub-set of the list
@@ -103,6 +104,25 @@ impl From<&TxOutput> for AdditionRecord {
 }
 
 impl TxOutput {
+    // note: normally use one of the other constructors.
+    pub(crate) fn new(
+        utxo: Utxo,
+        sender_randomness: Digest,
+        receiver_digest: Digest,
+        notification_method: UtxoNotifyMethod,
+        owned: bool,
+        is_change: bool,
+    ) -> Self {
+        Self {
+            utxo,
+            sender_randomness,
+            receiver_digest,
+            notification_method,
+            owned,
+            is_change,
+        }
+    }
+
     fn notification_payload(&self) -> UtxoNotificationPayload {
         UtxoNotificationPayload {
             utxo: self.utxo(),
@@ -806,5 +826,36 @@ mod tests {
             assert_eq!(tx_output.receiver_digest(), address.privacy_digest());
             assert_eq!(tx_output.utxo(), utxo);
         }
+    }
+
+    #[tokio::test]
+    async fn test_tx_output_upgrade_serialization() {
+        #[serde(Serialize)]
+        struct TxOutputV1 {
+            utxo: Utxo,
+            sender_randomness: Digest,
+            receiver_digest: Digest,
+            notification_method: UtxoNotifyMethod,
+            owned: bool,
+        }
+
+        let v1 = TxOutputV1 {
+            utxo: Utxo::random(),
+            sender_randomness: Digest::default(),
+            receiver_digest: Digest::default(),
+            notification_method: Default::default(),
+            owned: true,
+        };
+
+        let serialized_v1 = bincode_serialize(&v1).unwrap();
+
+        let v2 = bincode_deserialize(&serialized_v1).unwrap();
+
+        assert_eq!(v2.is_change, v1.owned);
+
+        let serialized_v2 = bincode_serialize(&v2).unwrap();
+        let v2_again = bincode_deserialize(&serialized_v2).unwrap();
+
+        assert_eq!(v2, v2_again);
     }
 }
