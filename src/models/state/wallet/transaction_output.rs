@@ -827,35 +827,36 @@ mod tests {
             assert_eq!(tx_output.utxo(), utxo);
         }
     }
+    /*
+        #[tokio::test]
+        async fn test_tx_output_upgrade_serialization() {
+            #[serde(Serialize)]
+            struct TxOutputV1 {
+                utxo: Utxo,
+                sender_randomness: Digest,
+                receiver_digest: Digest,
+                notification_method: UtxoNotifyMethod,
+                owned: bool,
+            }
 
-    #[tokio::test]
-    async fn test_tx_output_upgrade_serialization() {
-        #[serde(Serialize)]
-        struct TxOutputV1 {
-            utxo: Utxo,
-            sender_randomness: Digest,
-            receiver_digest: Digest,
-            notification_method: UtxoNotifyMethod,
-            owned: bool,
+            let v1 = TxOutputV1 {
+                utxo: Utxo::random(),
+                sender_randomness: Digest::default(),
+                receiver_digest: Digest::default(),
+                notification_method: Default::default(),
+                owned: true,
+            };
+
+            let serialized_v1 = bincode_serialize(&v1).unwrap();
+
+            let v2 = bincode_deserialize(&serialized_v1).unwrap();
+
+            assert_eq!(v2.is_change, v1.owned);
+
+            let serialized_v2 = bincode_serialize(&v2).unwrap();
+            let v2_again = bincode_deserialize(&serialized_v2).unwrap();
+
+            assert_eq!(v2, v2_again);
         }
-
-        let v1 = TxOutputV1 {
-            utxo: Utxo::random(),
-            sender_randomness: Digest::default(),
-            receiver_digest: Digest::default(),
-            notification_method: Default::default(),
-            owned: true,
-        };
-
-        let serialized_v1 = bincode_serialize(&v1).unwrap();
-
-        let v2 = bincode_deserialize(&serialized_v1).unwrap();
-
-        assert_eq!(v2.is_change, v1.owned);
-
-        let serialized_v2 = bincode_serialize(&v2).unwrap();
-        let v2_again = bincode_deserialize(&serialized_v2).unwrap();
-
-        assert_eq!(v2, v2_again);
-    }
+    */
 }

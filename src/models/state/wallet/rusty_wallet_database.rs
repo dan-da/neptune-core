@@ -256,15 +256,15 @@ pub(crate) mod migrate_db {
         use crate::models::state::Timestamp;
 
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct TxOutputV1 {
+        struct TxOutputV0 {
             utxo: Utxo,
             sender_randomness: Digest,
             receiver_digest: Digest,
             notification_method: UtxoNotifyMethod,
             owned: bool,
         }
-        impl From<TxOutputV1> for TxOutput {
-            fn from(v0: TxOutputV1) -> Self {
+        impl From<TxOutputV0> for TxOutput {
+            fn from(v0: TxOutputV0) -> Self {
                 Self::new(
                     v0.utxo,
                     v0.sender_randomness,
@@ -276,15 +276,15 @@ pub(crate) mod migrate_db {
             }
         }
         #[derive(Debug, Clone, Serialize, Deserialize)]
-        struct SentTransactionV1 {
+        struct SentTransactionV0 {
             tx_inputs: Vec<(AoclLeafIndex, Utxo)>,
-            tx_outputs: Vec<TxOutputV1>,
+            tx_outputs: Vec<TxOutputV0>,
             fee: NativeCurrencyAmount,
             timestamp: Timestamp,
             tip_when_sent: Digest,
         }
-        impl From<SentTransactionV1> for SentTransaction {
-            fn from(v0: SentTransactionV1) -> Self {
+        impl From<SentTransactionV0> for SentTransaction {
+            fn from(v0: SentTransactionV0) -> Self {
                 let tx_outputs: TxOutputList = v0
                     .tx_outputs
                     .into_iter()
@@ -306,7 +306,7 @@ pub(crate) mod migrate_db {
         pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<()> {
             let sent_transactions_v0 = storage
                 .schema
-                .new_vec::<SentTransactionV1>("sent_transactions")
+                .new_vec::<SentTransactionV0>("sent_transactions")
                 .await;
 
             let mut sent_transactions_v1 = storage
@@ -322,6 +322,109 @@ pub(crate) mod migrate_db {
             }
 
             Ok(())
+        }
+
+        #[cfg(test)]
+        mod test {
+            use super::*;
+            use crate::config_models::network::Network;
+            use crate::models::blockchain::transaction::utxo::pseudorandom_utxo;
+            use crate::models::state::transaction_details::TransactionDetails;
+            use crate::models::state::wallet::rusty_wallet_database::DbtVec;
+            use crate::models::state::wallet::rusty_wallet_database::NeptuneLevelDb;
+            use crate::models::state::wallet::rusty_wallet_database::RustyKey;
+            use crate::models::state::wallet::rusty_wallet_database::RustyValue;
+            use crate::models::state::wallet::rusty_wallet_database::RustyWalletDatabase;
+            use crate::models::state::wallet::transaction_input::TxInputList;
+            use crate::tests::shared::unit_test_data_directory;
+            use crate::DataDirectory;
+
+            struct RustyWalletDatabaseV0 {
+                pub storage: SimpleRustyStorage,
+                pub sent_transactions: DbtVec<SentTransaction>,
+            }
+            impl RustyWalletDatabaseV0 {
+                pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
+                    let mut storage = SimpleRustyStorage::new_with_callback(
+                        db,
+                        "RustyWalletDatabase-Schema",
+                        crate::LOG_TOKIO_LOCK_EVENT_CB,
+                    );
+                    let sent_transactions = storage
+                        .schema
+                        .new_vec::<SentTransaction>("sent_transactions")
+                        .await;
+
+                    Self {
+                        storage,
+                        sent_transactions,
+                    }
+                }
+            }
+
+            async fn open_db(
+                network: Network,
+            ) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
+                let data_dir = unit_test_data_directory(network)?;
+                let wallet_database_path = data_dir.wallet_database_dir_path();
+                DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
+                NeptuneLevelDb::new(
+                    &wallet_database_path,
+                    &crate::database::create_db_if_missing(),
+                )
+                .await
+            }
+
+            #[tracing_test::traced_test]
+            #[tokio::test]
+            async fn migrate() -> anyhow::Result<()> {
+                let network = Network::Main;
+
+                let tx_output1 = TxOutputV0 {
+                    utxo: pseudorandom_utxo(rand::random()),
+                    sender_randomness: Digest::default(),
+                    receiver_digest: Digest::default(),
+                    notification_method: UtxoNotifyMethod::None,
+                    owned: false,
+                };
+                let mut tx_output2 = tx_output1.clone();
+                tx_output2.owned = true;
+                let tx_outputs = vec![tx_output1, tx_output2];
+
+                // a mostly bogus tx_details, but we only care about the
+                // tx_outputs anyway.
+                let tx_details = TransactionDetails {
+                    tx_inputs: TxInputList::empty(),
+                    tx_outputs: tx_outputs.into(),
+                    fee: 0.into(),
+                    coinbase: None,
+                    timestamp: Timestamp::now(),
+                    mutator_set_accumulator: Default::default(),
+                };
+
+                {
+                    let db_v0 = open_db(network).await?;
+                    let mut wallet_db_v0 = RustyWalletDatabaseV0::connect(db_v0).await;
+
+                    let sent_tx = SentTransaction::new(&tx_details, Default::default());
+                    wallet_db_v0.sent_transactions.push(sent_tx).await;
+                    wallet_db_v0.storage.persist().await;
+                }
+
+                let db_v0 = open_db(network).await?;
+                let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
+
+                let sent_transactions = wallet_db_v1.sent_transactions();
+                assert_eq!(sent_transactions.len().await, 1);
+
+                let tx = sent_transactions.get(0).await;
+
+                for output in tx.tx_outputs.iter() {
+                    assert_eq!(output.is_change(), output.is_owned());
+                }
+
+                Ok(())
+            }
         }
     }
 }
