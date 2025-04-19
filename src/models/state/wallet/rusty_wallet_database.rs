@@ -47,7 +47,8 @@ pub struct RustyWalletDatabase {
     sent_transactions: DbtVec<SentTransaction>,
 }
 
-const SCHEMA_VERSION: u16 = 2;
+// note: the very first schema version was 0, ie u16::default()
+const SCHEMA_VERSION: u16 = 1;
 
 impl RustyWalletDatabase {
     pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
@@ -67,6 +68,7 @@ impl RustyWalletDatabase {
         let is_new_db = schema_version.get() == 0 && sync_label.get() == Digest::default();
         if is_new_db {
             schema_version.set(SCHEMA_VERSION).await;
+            tracing::info!("set new wallet database to schema version: v{}", SCHEMA_VERSION);
         } else {
             if schema_version.get() < SCHEMA_VERSION {
                 migrate_db::migrate_range(&mut storage, schema_version.get(), SCHEMA_VERSION)
@@ -304,10 +306,22 @@ pub(crate) mod migrate_db {
         // note: this fn implements the SQL equivalent of:
         //  ALTER TABLE sent_transactions ADD COLUMN is_change BOOLEAN DEFAULT owned;
         pub(super) async fn migrate(storage: &mut SimpleRustyStorage) -> anyhow::Result<()> {
+
+
+            // TODO
+            //
+            // Okay, our problem is that keys in the DB are prefixed with a key-prefix which
+            // is an integer that increases with each call to new_vec() or new_singleton().
+            //
+            // so we may need to load the DB, get all values, close, re-open, set all values.
+
+
             let sent_transactions_v0 = storage
                 .schema
                 .new_vec::<SentTransactionV0>("sent_transactions")
                 .await;
+
+            println!("sent_transactions_v0 len: {}", sent_transactions_v0.len().await);
 
             let mut sent_transactions_v1 = storage
                 .schema
@@ -318,6 +332,7 @@ pub(crate) mod migrate_db {
             pin_mut!(stream); // needed for iteration
 
             while let Some(tx_v0) = stream.next().await {
+                println!("upgraded tx");
                 sent_transactions_v1.push(tx_v0.into()).await;
             }
 
@@ -338,10 +353,12 @@ pub(crate) mod migrate_db {
             use crate::models::state::wallet::transaction_input::TxInputList;
             use crate::tests::shared::unit_test_data_directory;
             use crate::DataDirectory;
+            use crate::models::state::wallet::rusty_wallet_database::DbtSingleton;
 
             struct RustyWalletDatabaseV0 {
                 pub storage: SimpleRustyStorage,
-                pub sent_transactions: DbtVec<SentTransaction>,
+                pub sync_label: DbtSingleton<Digest>,
+                pub sent_transactions: DbtVec<SentTransactionV0>,
             }
             impl RustyWalletDatabaseV0 {
                 pub async fn connect(db: NeptuneLevelDb<RustyKey, RustyValue>) -> Self {
@@ -350,23 +367,25 @@ pub(crate) mod migrate_db {
                         "RustyWalletDatabase-Schema",
                         crate::LOG_TOKIO_LOCK_EVENT_CB,
                     );
+                    let sync_label = storage.schema.new_singleton::<Digest>("sync_label").await;
                     let sent_transactions = storage
                         .schema
-                        .new_vec::<SentTransaction>("sent_transactions")
+                        .new_vec::<SentTransactionV0>("sent_transactions")
                         .await;
 
                     Self {
                         storage,
+                        sync_label,
                         sent_transactions,
                     }
                 }
             }
 
             async fn open_db(
-                network: Network,
+                data_dir: &DataDirectory,
             ) -> anyhow::Result<NeptuneLevelDb<RustyKey, RustyValue>> {
-                let data_dir = unit_test_data_directory(network)?;
                 let wallet_database_path = data_dir.wallet_database_dir_path();
+                println!("path {} exists: {}", wallet_database_path.display(), wallet_database_path.exists());
                 DataDirectory::create_dir_if_not_exists(&wallet_database_path).await?;
                 NeptuneLevelDb::new(
                     &wallet_database_path,
@@ -379,6 +398,7 @@ pub(crate) mod migrate_db {
             #[tokio::test]
             async fn migrate() -> anyhow::Result<()> {
                 let network = Network::Main;
+                let data_dir = unit_test_data_directory(network)?;
 
                 let tx_output1 = TxOutputV0 {
                     utxo: pseudorandom_utxo(rand::random()),
@@ -393,25 +413,32 @@ pub(crate) mod migrate_db {
 
                 // a mostly bogus tx_details, but we only care about the
                 // tx_outputs anyway.
-                let tx_details = TransactionDetails {
-                    tx_inputs: TxInputList::empty(),
-                    tx_outputs: tx_outputs.into(),
+                let sent_tx_v0 = SentTransactionV0 {
+                    tx_inputs: vec![],
+                    tx_outputs,
                     fee: 0.into(),
-                    coinbase: None,
                     timestamp: Timestamp::now(),
-                    mutator_set_accumulator: Default::default(),
-                };
+                    tip_when_sent: rand::random(),
+                }; 
 
                 {
-                    let db_v0 = open_db(network).await?;
+                    tracing::info!("creating v0 DB");
+                    let db_v0 = open_db(&data_dir).await?;
                     let mut wallet_db_v0 = RustyWalletDatabaseV0::connect(db_v0).await;
 
-                    let sent_tx = SentTransaction::new(&tx_details, Default::default());
-                    wallet_db_v0.sent_transactions.push(sent_tx).await;
+                    // sync-label is required, else db is considered "new" on next open.
+                    wallet_db_v0.sync_label.set(rand::random()).await;
+
+                    wallet_db_v0.sent_transactions.push(sent_tx_v0).await;
+
+                    assert_eq!(wallet_db_v0.sent_transactions.len().await, 1);
+
                     wallet_db_v0.storage.persist().await;
+                    drop(wallet_db_v0);
                 }
 
-                let db_v0 = open_db(network).await?;
+                tracing::info!("opening existing v0 DB for migration to v1");
+                let db_v0 = open_db(&data_dir).await?;
                 let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
 
                 let sent_transactions = wallet_db_v1.sent_transactions();
