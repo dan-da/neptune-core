@@ -153,6 +153,15 @@ where
             .write(&WriteBatch::new(), true)
             .expect("Database flushing to disk must succeed");
     }
+
+    fn dump_database(&self) {
+        use std::io::Write;
+        for (key, val) in self.database.iter(&ReadOptions::new()) {
+            std::io::stdout().write(&key).unwrap();
+            std::io::stdout().write(b": ").unwrap();
+            std::io::stdout().write(&val).unwrap();
+        }
+    }
 }
 
 /// `NeptuneLevelDb` provides an async-friendly and clone-friendly wrapper
@@ -351,6 +360,13 @@ where
         .await??;
 
         Ok(Self(NeptuneLevelDbInternal::from(db)))
+    }
+
+    pub async fn dump_database(&self) {
+        let inner = self.0.clone();
+        task::spawn_blocking(move || inner.dump_database())
+            .await
+            .unwrap()
     }
 }
 

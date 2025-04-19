@@ -218,6 +218,11 @@ impl RustyWalletDatabase {
     pub async fn set_symmetric_key_counter(&mut self, counter: u64) {
         self.tables.symmetric_key_counter.set(counter).await;
     }
+
+    #[cfg(test)]
+    pub fn storage(&self) -> &SimpleRustyStorage {
+        &self.storage
+    }
 }
 
 pub(crate) mod migrate_db {
@@ -477,6 +482,8 @@ pub(crate) mod migrate_db {
                 tracing::info!("opening existing v0 DB for migration to v1");
                 let db_v0 = open_db(&data_dir).await?;
                 let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
+
+                wallet_db_v1.storage().db().dump_database().await;
 
                 let sent_transactions = wallet_db_v1.sent_transactions();
                 assert_eq!(sent_transactions.len().await, 1);

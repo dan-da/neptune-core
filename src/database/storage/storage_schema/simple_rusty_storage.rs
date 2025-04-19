@@ -84,4 +84,9 @@ impl SimpleRustyStorage {
             None,
         );
     }
+
+    #[cfg(test)]
+    pub(crate) fn db(&self) -> &NeptuneLevelDb<RustyKey, RustyValue> {
+        &self.db
+    }
 }
