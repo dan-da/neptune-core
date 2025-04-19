@@ -351,12 +351,14 @@ pub(crate) mod migrate_db {
             let mut tables = RustyWalletDatabase::load_schema_in_order(storage).await;
             let sent_transactions_v1 = &mut tables.sent_transactions;
 
-            let stream = sent_transactions_v0.stream_values().await;
+            assert_eq!(sent_transactions_v1.len().await, sent_transactions_v0.len().await);
+
+            let stream = sent_transactions_v0.stream().await;
             pin_mut!(stream); // needed for iteration
 
-            while let Some(tx_v0) = stream.next().await {
+            while let Some((index, tx_v0)) = stream.next().await {
                 println!("upgraded tx");
-                sent_transactions_v1.push(tx_v0.into()).await;
+                sent_transactions_v1.set(index, tx_v0.into()).await;
             }
 
             Ok(())
@@ -364,12 +366,12 @@ pub(crate) mod migrate_db {
 
         async fn load_v0_schema_in_order(
             storage: &mut SimpleRustyStorage,
-        ) -> DbtVec<SentTransaction> {
+        ) -> DbtVec<SentTransactionV0> {
             // let _ = storage.schema.new_singleton::<Digest>("s").await;
             // let _ = storage.schema.new_vec::<MonitoredUtxo>("m").await;
             // let _ = storage.schema.new_vec::<ExpectedUtxo>("e").await;
             storage.schema.table_count = 3;
-            storage.schema.new_vec::<SentTransaction>("st").await
+            storage.schema.new_vec::<SentTransactionV0>("st").await
 
             // let _ = storage.schema.new_singleton::<u64>("counter").await;
             // let _ = storage.schema.new_singleton::<u64>("generation_key_counter").await;
@@ -476,6 +478,10 @@ pub(crate) mod migrate_db {
                     assert_eq!(wallet_db_v0.sent_transactions.len().await, 1);
 
                     wallet_db_v0.storage.persist().await;
+
+                    println!("dump of v0 database");
+                    wallet_db_v0.storage.db().dump_database().await;
+
                     drop(wallet_db_v0);
                 }
 
@@ -483,6 +489,7 @@ pub(crate) mod migrate_db {
                 let db_v0 = open_db(&data_dir).await?;
                 let wallet_db_v1 = RustyWalletDatabase::connect(db_v0).await;
 
+                println!("dump of v1 (upgraded) database");
                 wallet_db_v1.storage().db().dump_database().await;
 
                 let sent_transactions = wallet_db_v1.sent_transactions();

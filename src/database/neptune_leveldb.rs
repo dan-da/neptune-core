@@ -157,11 +157,40 @@ where
     fn dump_database(&self) {
         use std::io::Write;
         for (key, val) in self.database.iter(&ReadOptions::new()) {
+            print!("Key (hex): ");
+            for byte in &key {
+                write!(std::io::stdout(), "{:02x} ", byte).unwrap();
+            }
+            println!(); // Newline after key
+
+            print!("Value (hex): ");
+            for byte in &val {
+                write!(std::io::stdout(), "{:02x} ", byte).unwrap();
+            }
+            println!(); // Newline after value
+
+            println!(); // Extra newline between value and the next key
+            std::io::stdout().flush().unwrap(); // Force immediate output
+        }
+    }    
+/*
+    fn dump_database(&self) {
+        use std::io::Write;
+        for (key, val) in self.database.iter(&ReadOptions::new()) {
+
+        print!("Key (hex): ");
+        for i in 0..std::cmp::min(20, key.len()) { // Print first 10 bytes or less
+            write!(std::io::stdout(), "{:02x} ", key[i]).unwrap();
+        }            
+        println!();
             std::io::stdout().write(&key).unwrap();
             std::io::stdout().write(b": ").unwrap();
             std::io::stdout().write(&val).unwrap();
+        println!();
+            std::io::stdout().flush().unwrap(); // Force immediate output
         }
     }
+*/
 }
 
 /// `NeptuneLevelDb` provides an async-friendly and clone-friendly wrapper
