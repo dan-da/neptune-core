@@ -74,4 +74,14 @@ impl SimpleRustyStorage {
         );
         Self { schema, db }
     }
+
+    pub(crate) fn reset_schema(&mut self) {
+        self.schema = DbtSchema::new(
+            SimpleRustyReader {
+                db: self.db.clone(),
+            },
+            None,
+            None,
+        );
+    }
 }
