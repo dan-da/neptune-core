@@ -140,6 +140,7 @@ mod test {
 
     use super::*;
     use crate::config_models::network::Network;
+    use crate::database::storage::storage_schema::traits::StorageWriter;
     use crate::database::storage::storage_schema::DbtSingleton;
     use crate::database::storage::storage_schema::DbtVec;
     use crate::database::storage::storage_schema::RustyKey;
@@ -195,10 +196,12 @@ mod test {
             wallet_db_v0.sent_transactions.push(sent_tx_v0).await;
             assert_eq!(wallet_db_v0.sent_transactions.len().await, 1);
 
+            wallet_db_v0.storage.persist().await;
+
             // dump the v0 database to stdout
             println!("dump of v0 database");
             wallet_db_v0.storage.db().dump_database().await;
-        } // <--- db drops, and is persisted and closed.
+        } // <--- db drops, and closed.
 
         // open v0 DB file
         tracing::info!("opening existing v0 DB for migration to v1");
