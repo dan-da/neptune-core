@@ -248,7 +248,8 @@ pub struct Args {
     ///
     /// e.g. `--tx-proving-capability=singleproof` or
     /// `--tx-proving-capability=proofcollection`.
-    #[clap(long)]
+    // #[clap(long, value_parser = clap::value_parser!(TxProvingCapability))]
+    #[clap(long, value_enum)]
     pub tx_proving_capability: Option<TxProvingCapability>,
 
     /// Cache for the proving capability. If the above parameter is not set, we
@@ -552,11 +553,11 @@ impl Args {
         let physical_core_count = s.physical_core_count().unwrap_or(1);
 
         if total_memory > SINGLE_PROOF_MEMORY_USAGE && physical_core_count > SINGLE_PROOF_CORE_REQ {
-            TxProvingCapability::SingleProof
+            TxProvingCapability::Log2PaddedHeight(22)
         } else if total_memory > PROOF_COLLECTION_MEMORY_USAGE
             && physical_core_count > PROOF_COLLECTION_CORE_REQ
         {
-            TxProvingCapability::ProofCollection
+            TxProvingCapability::Log2PaddedHeight(11)
         } else {
             TxProvingCapability::PrimitiveWitness
         }

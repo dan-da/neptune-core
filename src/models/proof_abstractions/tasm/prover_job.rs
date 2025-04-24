@@ -11,7 +11,6 @@
 #[cfg(not(test))]
 use std::process::Stdio;
 
-use tasm_lib::maybe_write_debuggable_vm_state_to_disk;
 use tasm_lib::triton_vm::error::InstructionError;
 #[cfg(not(test))]
 use tokio::io::AsyncWriteExt;
@@ -21,8 +20,6 @@ use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobCancelReceiver;
 use crate::job_queue::traits::JobCompletion;
 use crate::job_queue::traits::JobResult;
-use crate::macros::fn_name;
-use crate::macros::log_scope_duration;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 #[cfg(test)]
@@ -31,7 +28,6 @@ use crate::models::proof_abstractions::Claim;
 use crate::models::proof_abstractions::NonDeterminism;
 use crate::models::proof_abstractions::Program;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
-use crate::triton_vm::vm::VMState;
 
 /// represents an error running a [ProverJob]
 #[derive(Debug, thiserror::Error)]
@@ -189,81 +185,13 @@ impl ProverJob {
         tracing::debug!("job settings: {:?}", self.job_settings);
 
         let capability = self.job_settings.tx_proving_capability;
-        let proof_type = self.job_settings.proof_type;
-        if !capability.can_prove(proof_type) {
+        if !capability.can_prove_claim_triple(self.program.clone(), self.claim.clone(), self.nondeterminism.clone()) {
             return Err(ProverJobError::TooWeak {
                 capability,
-                proof_type,
+                proof_type: self.job_settings.proof_type,
             });
         }
-
-        tracing::debug!("executing VM program to determine complexity (padded-height)");
-
-        assert_eq!(self.program.hash(), self.claim.program_digest);
-
-        let mut vm_state = VMState::new(
-            self.program.clone(),
-            self.claim.input.clone().into(),
-            self.nondeterminism.clone(),
-        );
-        maybe_write_debuggable_vm_state_to_disk(&vm_state);
-
-        // run program in VM
-        //
-        // this is sometimes fast enough for async, but other times takes 1+ seconds.
-        // As such we run it in spawn-blocking. Eventually it might make sense
-        // to move into the external process.
-        vm_state = {
-            let join_result = tokio::task::spawn_blocking(move || {
-                log_scope_duration!(fn_name!() + "::vm_state.run()");
-                let r = vm_state.run();
-                (vm_state, r)
-            })
-            .await;
-
-            let (vm_state_moved, run_result) = match join_result {
-                Ok(r) => r,
-                Err(e) if e.is_panic() => std::panic::resume_unwind(e.into_panic()),
-                Err(e) if e.is_cancelled() => {
-                    panic!("VM::run() task was cancelled unexpectedly. error: {e}")
-                }
-                Err(e) => panic!("unexpected error from VM::run() spawn-blocking task. {e}"),
-            };
-
-            if let Err(e) = run_result {
-                return Err(ProverJobError::TritonVmProverFailed(
-                    VmProcessError::TritonVmFailed(e),
-                ));
-            }
-            vm_state_moved
-        };
-        assert_eq!(self.claim.program_digest, self.program.hash());
-        assert_eq!(self.claim.output, vm_state.public_output);
-
-        let padded_height_processor_table = vm_state.cycle_count.next_power_of_two();
-
-        tracing::info!(
-            "VM program execution finished: padded-height (processor table): {}",
-            padded_height_processor_table
-        );
-
-        match self.job_settings.max_log2_padded_height_for_proofs {
-            Some(limit) if 2u32.pow(limit.into()) < padded_height_processor_table => {
-                let ph_limit = 2u32.pow(limit.into());
-
-                tracing::warn!(
-                    "proof-complexity-limit-exceeded. ({} > {})  The proof will not be generated",
-                    padded_height_processor_table,
-                    ph_limit
-                );
-
-                Err(ProverJobError::ProofComplexityLimitExceeded {
-                    result: padded_height_processor_table,
-                    limit: ph_limit,
-                })
-            }
-            _ => Ok(()),
-        }
+        Ok(())
     }
 
     /// Run the program and generate a proof for it, assuming the Triton VM run

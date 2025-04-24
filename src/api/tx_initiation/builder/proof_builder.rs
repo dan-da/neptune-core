@@ -172,7 +172,7 @@ impl ProofBuilder {
 
         let proof_type = proof_job_options.job_settings.proof_type;
         let capability = proof_job_options.job_settings.tx_proving_capability;
-        if !capability.can_prove(proof_type) {
+        if !capability.can_prove_claim_triple(program.clone(), claim.clone(), nondeterminism.clone()).await {
             return Err(CreateProofError::TooWeak {
                 proof_type,
                 capability,

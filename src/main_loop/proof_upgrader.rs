@@ -159,6 +159,7 @@ impl UpgradeJob {
                 panic!("Client cannot have primitive witness capability only")
             }
             TxProvingCapability::LockScript => todo!("TODO: Add support for this"),
+            _ => todo!(),
         }
     }
 

@@ -320,7 +320,6 @@ async fn from_witness(
     proof_job_options: TritonVmProofJobOptions,
     valid_mock: bool,
 ) -> Result<TransactionProof, CreateProofError> {
-    let capability = proof_job_options.job_settings.tx_proving_capability;
     let proof_type = proof_job_options.job_settings.proof_type;
 
     // generate mock proof, if network uses mock proofs.
@@ -339,14 +338,6 @@ async fn from_witness(
             }
         };
         return Ok(proof);
-    }
-
-    // abort early if machine is too weak
-    if !capability.can_prove(proof_type) {
-        return Err(CreateProofError::TooWeak {
-            proof_type,
-            capability,
-        });
     }
 
     // produce proof of requested type
