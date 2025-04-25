@@ -107,47 +107,6 @@ pub mod test {
 
     use super::*;
 
-    // #[macro_export]
-    macro_rules! shared_tokio_test {
-        (
-            $(#[$fn_meta:meta])*
-            async fn $fn_name:ident() {
-                $($tt:tt)*
-            }
-        ) => {
-            $(#[$fn_meta])*
-            #[test]
-            fn $fn_name() {
-                static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-                let runtime = RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().unwrap());
-
-                runtime.block_on(async {
-                    $($tt)* // Execute the body as an async block
-                })
-            }
-        };
-    }
-
-    // macro_rules! shared_tokio_test {
-    //     (
-    //         $(#[$attr:meta])*
-    //         $vis:vis async fn $name:ident $args:tt $(-> $ret:ty)? $body:block
-    //     ) => {
-    //         $(#[$attr])*
-    //         #[test]
-    //         $vis fn $name() $args $(-> $ret)? {
-    //             static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> =
-    //                 once_cell::sync::Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
-
-    //             RUNTIME.block_on(async {
-    //                 $body
-    //             })
-    //         }
-    //     };
-    // }
-
-pub(crate) use shared_tokio_test;
-
     fn fibonacci(n: u32) -> u32 {
         match n {
             0 => 1,
