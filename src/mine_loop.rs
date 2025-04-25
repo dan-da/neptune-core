@@ -997,6 +997,8 @@ pub(crate) async fn mine(
 #[cfg(test)]
 pub(crate) mod mine_loop_tests {
     use std::hint::black_box;
+    use macro_rules_attr::apply;
+    use crate::macros::test::shared_tokio_test;
 
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
@@ -1180,7 +1182,7 @@ pub(crate) mod mine_loop_tests {
     }
 
     #[traced_test]
-    #[tokio::test]
+    #[apply(shared_tokio_test)]
     async fn block_proposal_for_height_one_is_valid_for_various_guesser_fee_fractions() {
         // Verify that a block template made with transaction from the mempool is a valid block
         let network = Network::Main;
