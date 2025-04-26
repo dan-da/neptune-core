@@ -24,4 +24,3 @@ macro_rules! shared_tokio_runtime {
 }
 
 pub(crate) use shared_tokio_runtime;
-
