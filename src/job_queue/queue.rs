@@ -16,9 +16,28 @@ use super::traits::JobResult;
 use super::traits::JobResultReceiver;
 use super::traits::JobResultSender;
 
+#[derive(Debug, Clone, Copy)]
+pub struct JobId([u8; 12]);
+
+impl std::fmt::Display for JobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in &self.0 {
+            write!(f, "{:02x}", byte)?;
+        }
+        Ok(())
+    }
+}
+
+impl JobId {
+    fn random() -> Self {
+        Self(rand::random())
+    }
+}
+
 /// A job-handle enables cancelling a job and awaiting results
 #[derive(Debug)]
 pub struct JobHandle {
+    job_id: JobId,
     result_rx: JobResultReceiver,
     cancel_tx: JobCancelSender,
 }
@@ -59,11 +78,16 @@ impl JobHandle {
     pub fn cancel_tx(&self) -> &JobCancelSender {
         &self.cancel_tx
     }
+
+    pub fn job_id(&self) -> JobId {
+        self.job_id
+    }
 }
 
 /// represents a msg to add a job to the queue.
 struct AddJobMsg<P> {
     job: Box<dyn Job>,
+    job_id: JobId,
     result_tx: JobResultSender,
     cancel_tx: JobCancelSender,
     cancel_rx: JobCancelReceiver,
@@ -164,8 +188,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     };
 
                     tracing::info!(
-                        "  *** JobQueue: begin job #{} - {} queued job(s) ***",
+                        "  *** JobQueue: begin job #{} - {} - {} queued job(s) ***",
                         job_num,
+                        msg.job_id,
                         pending
                     );
                     let timer = tokio::time::Instant::now();
@@ -191,8 +216,9 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
                     };
 
                     tracing::info!(
-                        "  *** JobQueue: ended job #{} - Completion: {} - {} secs ***",
+                        "  *** JobQueue: ended job #{} - {} - Completion: {} - {} secs ***",
                         job_num,
+                        msg.job_id,
                         job_completion,
                         timer.elapsed().as_secs_f32()
                     );
@@ -236,8 +262,11 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
 
+        let job_id = JobId::random();
+
         let m = AddJobMsg {
             job,
+            job_id,
             result_tx,
             cancel_tx: cancel_tx.clone(),
             cancel_rx: cancel_rx.clone(),
@@ -254,13 +283,15 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             (guard.jobs.len(), job_running)
         };
         tracing::info!(
-            "JobQueue: job added.  {} queued job(s).  job running: {}",
+            "JobQueue: job added - {}  {} queued job(s).  job running: {}",
+            job_id,
             num_jobs,
             job_running
         );
         let _ = self.tx_job_added.send(());
 
         Ok(JobHandle {
+            job_id,
             result_rx,
             cancel_tx,
         })
@@ -792,8 +823,8 @@ mod tests {
                 println!("job_result: {:#?}", job_result);
 
                 // verify that job_queue channels are still open
-                assert!(job_queue.tx.receiver_count() > 0);
-                assert!(!job_queue.tx.is_closed());
+                assert!(!job_queue.tx_job_added.is_closed());
+                assert!(!job_queue.tx_stop.is_closed());
 
                 // verify that we get an error with the job's panic msg.
                 assert!(matches!(

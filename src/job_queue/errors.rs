@@ -15,7 +15,7 @@ pub enum JobHandleError {
     #[error("channel send error cancelling job")]
     CancelJobError(#[from] tokio::sync::watch::error::SendError<()>),
 
-    #[error("channel recv error waiting for job results")]
+    #[error("channel recv error waiting for job results: {0}")]
     JobResultError(#[from] tokio::sync::oneshot::error::RecvError),
 }
 
@@ -39,7 +39,7 @@ pub enum JobHandleErrorSync {
     #[error("channel send error cancelling job")]
     CancelJobError(#[from] tokio::sync::watch::error::SendError<()>),
 
-    #[error("channel recv error waiting for job results")]
+    #[error("channel recv error waiting for job results: {0}")]
     JobResultError(#[from] tokio::sync::oneshot::error::RecvError),
 }
 
