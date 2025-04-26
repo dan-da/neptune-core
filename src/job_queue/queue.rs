@@ -61,13 +61,6 @@ impl JobHandle {
     }
 }
 
-/// messages that can be sent to job-queue inner task.
-#[derive(Debug, Clone)]
-enum JobQueueMsg {
-    JobAdded,
-    Stop,
-}
-
 /// represents a msg to add a job to the queue.
 struct AddJobMsg<P> {
     job: Box<dyn Job>,
@@ -90,7 +83,8 @@ struct Shared<P: Ord> {
 pub struct JobQueue<P: Ord + Send + Sync + 'static> {
     shared: Arc<Mutex<Shared<P>>>,
 
-    tx: tokio::sync::broadcast::Sender<JobQueueMsg>,
+    tx_job_added: tokio::sync::mpsc::UnboundedSender<()>,
+    tx_stop: tokio::sync::watch::Sender<()>,
 
     process_jobs_task_handle: Option<JoinHandle<()>>, // Store the job processing task handle
 }
@@ -115,15 +109,13 @@ impl<P: Ord + Send + Sync + 'static> std::fmt::Debug for JobQueue<P> {
 impl<P: Ord + Send + Sync + 'static> Drop for JobQueue<P> {
     fn drop(&mut self) {
         tracing::debug!("in JobQueue::drop()");
-        let _ = self.tx.send(JobQueueMsg::Stop);
+        let _ = self.tx_stop.send(());
     }
 }
 
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     /// creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
-        // let (tx, rx) = mpsc::unbounded_channel::<JobQueueMsg<P>>();
-        // let mut rx = LoggedReceiver(rx);
 
         let shared = Shared {
             jobs: VecDeque::new(),
@@ -131,8 +123,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         };
         let shared: Arc<Mutex<Shared<P>>> = Arc::new(Mutex::new(shared));
 
-        let (tx_deque, mut rx_deque) = tokio::sync::broadcast::channel::<JobQueueMsg>(usize::MAX);
-        let mut rx_deque_stop = tx_deque.subscribe();
+        let (tx_job_added, mut rx_job_added) = tokio::sync::mpsc::unbounded_channel();
+        let (tx_stop, mut rx_stop) = tokio::sync::watch::channel(());
 
         // spawns background task that processes job queue and runs jobs.
         let jobs_rc2 = shared.clone();
@@ -141,7 +133,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
             loop {
                 tokio::select!(
-                Ok(JobQueueMsg::Stop) = rx_deque_stop.recv() => {
+                _ = rx_stop.changed() => {
                     tracing::debug!("task process_jobs received Stop message.");
 
                     // if there is a presently executing job we need to cancel it.
@@ -155,7 +147,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
                     break;
                 }
-                Ok(JobQueueMsg::JobAdded) = rx_deque.recv() => {
+                _ = rx_job_added.recv() => {
                     tracing::debug!("task process_jobs received JobAdded message.");
                     let (msg, pending) = {
                         let mut guard = jobs_rc2.lock().unwrap();
@@ -217,7 +209,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         tracing::info!("JobQueue: started new queue.");
 
         Self {
-            tx: tx_deque,
+            tx_job_added,
+            tx_stop,
             shared,
             process_jobs_task_handle: Some(process_jobs_task_handle),
         }
@@ -226,7 +219,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         tracing::info!("JobQueue: stopping.");
 
-        self.tx.send(JobQueueMsg::Stop)?;
+        self.tx_stop.send(())?;
 
         if let Some(jh) = self.process_jobs_task_handle.take() {
             jh.await?;
@@ -265,36 +258,12 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             num_jobs,
             job_running
         );
-        let _ = self.tx.send(JobQueueMsg::JobAdded);
+        let _ = self.tx_job_added.send(());
 
         Ok(JobHandle {
             result_rx,
             cancel_tx,
         })
-
-        /*
-                let (result_tx, result_rx) = oneshot::channel();
-                let (cancel_tx, cancel_rx) = watch::channel::<()>(());
-
-                let msg = JobQueueMsg::AddJob(AddJobMsg {
-                    job,
-                    result_tx,
-                    cancel_tx: cancel_tx.clone(),
-                    cancel_rx: cancel_rx.clone(),
-                    priority,
-                });
-                if self.tx.is_closed() {
-                    tracing::error!("JobQueue::add_job() -- add-job channel is unexpectedly closed!!!");
-                }
-                self.tx
-                    .send(msg)
-                    .map_err(|e| JobQueueError::AddJobError(e.to_string()))?;
-
-                Ok(JobHandle {
-                    result_rx,
-                    cancel_tx,
-                })
-        */
     }
 }
 
@@ -822,7 +791,8 @@ mod tests {
 
                 println!("job_result: {:#?}", job_result);
 
-                // verify that job_queue channel still open
+                // verify that job_queue channels are still open
+                assert!(job_queue.tx.receiver_count() > 0);
                 assert!(!job_queue.tx.is_closed());
 
                 // verify that we get an error with the job's panic msg.
