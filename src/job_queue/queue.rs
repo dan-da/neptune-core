@@ -140,7 +140,6 @@ impl<P: Ord + Send + Sync + 'static> Drop for JobQueue<P> {
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     /// creates job queue and starts it processing.  returns immediately.
     pub fn start() -> Self {
-
         let shared = Shared {
             jobs: VecDeque::new(),
             current_job: None,

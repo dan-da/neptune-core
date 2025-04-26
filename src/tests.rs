@@ -1,5 +1,14 @@
 pub mod shared;
 
+use std::sync::OnceLock;
+
+use tokio::runtime::Runtime;
+
+pub fn tokio_runtime() -> &'static Runtime {
+    static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| Runtime::new().unwrap())
+}
+
 macro_rules! shared_tokio_runtime {
     (
         $(#[$fn_meta:meta])*
@@ -10,9 +19,7 @@ macro_rules! shared_tokio_runtime {
         $(#[$fn_meta])*
         #[test]
         fn $fn_name() $(-> $ret)? { // Propagate the return type to the #[test] fn
-            static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
-            let runtime = RUNTIME.get_or_init(|| tokio::runtime::Runtime::new().unwrap());
-
+            let runtime = $crate::tests::tokio_runtime();
             runtime.block_on(async {
                 async fn __inner() $(-> $ret)? {
                     $($tt)*
