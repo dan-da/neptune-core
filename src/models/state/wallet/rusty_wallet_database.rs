@@ -55,6 +55,7 @@ impl RustyWalletDatabase {
         let is_new_db = schema_version == 0 && tables.sync_label.get() == Digest::default();
         if is_new_db {
             tables.schema_version.set(WALLET_DB_SCHEMA_VERSION).await;
+            storage.persist().await;
             tracing::info!(
                 "set new wallet database to schema version: v{}",
                 WALLET_DB_SCHEMA_VERSION
