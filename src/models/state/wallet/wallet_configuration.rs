@@ -113,7 +113,7 @@ impl WalletConfiguration {
     /// a previous backup.
     ///
     /// notes:
-    /// 1. backup directory is <original_path>-schema-v<schema-version>.bak.<count>
+    /// 1. backup directory is <wallet_db_name>-schema-v<schema-version>.bak.<count>
     /// 2. will try up to 1000 backup directory names, incrementing a counter.
     ///
     /// Returns None if:
@@ -131,7 +131,7 @@ impl WalletConfiguration {
         (1..max_tries)
             .map(|i| {
                 path.join(format!(
-                    "{}.schema-{}.bak.{}",
+                    "{}.schema-v{}.bak.{}",
                     WALLET_DB_NAME, schema_version, i
                 ))
             })
