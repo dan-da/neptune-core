@@ -656,8 +656,7 @@ pub(crate) async fn create_block_transaction_from(
             vm_job_queue.clone(),
             job_options.clone(),
         )
-        .await
-        .expect("Must be able to merge transactions in mining context");
+        .await?;
     }
 
     let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
@@ -839,20 +838,27 @@ pub(crate) async fn mine(
                 restart_guessing = true;
             }
             Ok(Err(e)) = &mut composer_task => {
-                stop_composing = true;
 
-                match e.downcast_ref::<prover_job::ProverJobError>() {
-                    Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
-                        pause_mine = true;
-                        tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
-                    },
-                    _ => {
-                        // Ensure graceful shutdown in case of error during
-                        // composition.
-                        tracing::error!("Composition failed:\n{e}\n. \
-                            Try adjusting the environment variables \
-                            \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
-                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                let job_cancelled = e.downcast_ref::<JobHandleError>()
+                    .is_some_and(|jhe| matches!(jhe, JobHandleError::JobCancelled));
+
+                if !job_cancelled {
+
+                    stop_composing = true;
+
+                    match e.downcast_ref::<prover_job::ProverJobError>() {
+                        Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
+                            pause_mine = true;
+                            tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
+                        },
+                        _ => {
+                            // Ensure graceful shutdown in case of error during
+                            // composition.
+                            tracing::error!("Composition failed:\n{e}\n. \
+                                Try adjusting the environment variables \
+                                \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
+                            to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                        }
                     }
                 }
             },

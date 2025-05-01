@@ -135,7 +135,7 @@ pub(crate) async fn prove_consensus_program(
                 _ = cancel_job_rx.changed() => {
                     debug!("forwarding job cancellation request to job");
                     cancel_tx.send(())?;
-                    anyhow::bail!("job cancelled by caller");
+                    job_handle.result().await
                 }
                 // case: job completion.
                 result = job_handle.result() => result,
