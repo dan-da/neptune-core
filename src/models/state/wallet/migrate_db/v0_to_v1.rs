@@ -218,7 +218,7 @@ mod test {
 
         // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
         // migration occurs.
-        let wallet_db_v1 = RustyWalletDatabase::try_connect(db_v0).await?;
+        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
 
         // dump the (migrated) v1 database to stdout
         println!("dump of v1 (upgraded) database");
@@ -284,7 +284,7 @@ mod test {
 
         // connect to v0 Db with v1 RustyWalletDatabase.  This is where the
         // migration occurs.
-        let wallet_db_v1 = RustyWalletDatabase::try_connect(db_v0).await?;
+        let wallet_db_v1 = RustyWalletDatabase::try_connect_and_migrate(db_v0).await?;
 
         // dump the (migrated) v1 database to stdout
         println!("dump of v1 (upgraded) database");
