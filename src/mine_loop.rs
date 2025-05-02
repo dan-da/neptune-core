@@ -673,6 +673,7 @@ pub(crate) async fn mine(
     mut from_main: mpsc::Receiver<MainToMiner>,
     to_main: mpsc::Sender<MinerToMain>,
     mut global_state_lock: GlobalStateLock,
+    perform_initial_sleep: bool,
 ) -> Result<()> {
     // Wait before starting mining task to ensure that peers have sent us information about
     // their latest blocks. This should prevent the client from finding blocks that will later
@@ -684,7 +685,10 @@ pub(crate) async fn mine(
     // abort e.g. the composer.
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
 
-    tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    if perform_initial_sleep {
+        tracing::info!("sleeping for {} seconds while node initializes", INITIAL_MINING_SLEEP_IN_SECONDS);
+        tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
+    }
     let cli_args = global_state_lock.cli().clone();
 
     let guess_restart_interval = Duration::from_secs(GUESSING_RESTART_INTERVAL_IN_SECONDS);
@@ -1050,6 +1054,7 @@ pub(crate) mod tests {
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
+    use crate::MINER_CHANNEL_CAPACITY;
 
     /// Produce a transaction that allocates the given fraction of the block
     /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
@@ -1971,5 +1976,35 @@ pub(crate) mod tests {
                 "number of hash trials before finding valid pow exceeds statistical limit"
             )
         }
+    }
+
+    #[traced_test]
+    #[apply(shared_tokio_runtime)]
+    async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
+        let network = Network::Main;
+        let cli_args = cli_args::Args {
+            compose: true,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+
+        let (miner_to_main_tx, _miner_to_main_rx) =
+            mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
+        let (main_to_miner_tx, main_to_miner_rx) =
+            mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
+
+        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock, false);
+
+        let jh = tokio::task::spawn(mine_task);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        main_to_miner_tx.send(MainToMiner::Continue).await?;
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert!(!main_to_miner_tx.is_closed());
+        assert!(!jh.is_finished());
+
+        Ok(())
     }
 }
