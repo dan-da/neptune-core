@@ -33,6 +33,7 @@ use crate::api::tx_initiation::builder::transaction_builder::TransactionBuilder;
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::TritonVmProofJobOptionsBuilder;
 use crate::config_models::network::Network;
+use crate::job_queue::errors::JobHandleErrorSync;
 use crate::job_queue::triton_vm::vm_job_queue;
 use crate::job_queue::triton_vm::TritonVmJobPriority;
 use crate::job_queue::triton_vm::TritonVmJobQueue;
@@ -656,7 +657,7 @@ pub(crate) async fn create_block_transaction_from(
             vm_job_queue.clone(),
             job_options.clone(),
         )
-        .await?;
+        .await?; // fix #579.  propagate error up.
     }
 
     let own_expected_utxos = composer_parameters.extract_expected_utxos(composer_txos);
@@ -839,11 +840,18 @@ pub(crate) async fn mine(
             }
             Ok(Err(e)) = &mut composer_task => {
 
-                let job_cancelled = e.downcast_ref::<JobHandleError>()
-                    .is_some_and(|jhe| matches!(jhe, JobHandleError::JobCancelled));
+                // fix issue 579.
+                // we must check if error indicates job was cancelled.
+                // note that cancellation can occur any time that the cancellation
+                // channel Sender gets dropped, which occurs if composer_task gets aborted
+                // which occurs if any other branch of this select!{} resolves first.
+                // Common causes are NewBlock and NewBlockProposal messages from main.
+                let job_cancelled = e.downcast_ref::<JobHandleErrorSync>()
+                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
 
-                if !job_cancelled {
-
+                if job_cancelled {
+                    tracing::debug!("composer job was cancelled. continuing normal operation");
+                } else {
                     stop_composing = true;
 
                     match e.downcast_ref::<prover_job::ProverJobError>() {
