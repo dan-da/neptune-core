@@ -2027,4 +2027,34 @@ pub(crate) mod tests {
 
         Ok(())
     }
+
+    #[apply(shared_tokio_runtime)]
+    async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
+        let network = Network::Main;
+        let cli_args = cli_args::Args {
+            compose: true,
+            ..Default::default()
+        };
+        let global_state_lock =
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args).await;
+
+        let (miner_to_main_tx, _miner_to_main_rx) =
+            mpsc::channel::<MinerToMain>(MINER_CHANNEL_CAPACITY);
+        let (main_to_miner_tx, main_to_miner_rx) =
+            mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
+
+        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock, false);
+
+        let jh = tokio::task::spawn(mine_task);
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        main_to_miner_tx.send(MainToMiner::WaitForContinue).await?;
+        main_to_miner_tx.send(MainToMiner::Continue).await?;
+
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert!(!main_to_miner_tx.is_closed());
+        assert!(!jh.is_finished());
+
+        Ok(())
+    }    
 }
