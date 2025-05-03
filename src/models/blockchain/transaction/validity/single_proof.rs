@@ -16,6 +16,7 @@ use tasm_lib::structure::verify_nd_si_integrity::VerifyNdSiIntegrity;
 use tasm_lib::twenty_first::error::BFieldCodecError;
 use tasm_lib::verifier::stark_verify::StarkVerify;
 use tracing::info;
+use crate::api::tx_initiation::error::CreateProofError;
 
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernel;
 use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelField;
@@ -232,7 +233,7 @@ impl SingleProof {
         primitive_witness: &PrimitiveWitness,
         triton_vm_job_queue: Arc<TritonVmJobQueue>,
         proof_job_options: TritonVmProofJobOptions,
-    ) -> anyhow::Result<Proof> {
+    ) -> Result<Proof, CreateProofError> {
         let proof_collection = ProofCollection::produce(
             primitive_witness,
             triton_vm_job_queue.clone(),

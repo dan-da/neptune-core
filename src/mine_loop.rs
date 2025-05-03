@@ -686,7 +686,10 @@ pub(crate) async fn mine(
     const GUESSING_RESTART_INTERVAL_IN_SECONDS: u64 = 20;
 
     if perform_initial_sleep {
-        tracing::info!("sleeping for {} seconds while node initializes", INITIAL_MINING_SLEEP_IN_SECONDS);
+        tracing::info!(
+            "sleeping for {} seconds while node initializes",
+            INITIAL_MINING_SLEEP_IN_SECONDS
+        );
         tokio::time::sleep(Duration::from_secs(INITIAL_MINING_SLEEP_IN_SECONDS)).await;
     }
     let cli_args = global_state_lock.cli().clone();
@@ -1055,7 +1058,6 @@ pub(crate) mod tests {
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;
     use crate::MINER_CHANNEL_CAPACITY;
-    use crate::job_queue::errors::JobHandleErrorSync;
 
     /// Produce a transaction that allocates the given fraction of the block
     /// subsidy to the wallet in two UTXOs, one time-locked and one liquid.
@@ -1988,17 +1990,25 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let global_state_lock =
-            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone()).await;
+            mock_genesis_global_state(network, 2, WalletEntropy::devnet_wallet(), cli_args.clone())
+                .await;
 
         let (cancel_job_tx, cancel_job_rx) = tokio::sync::watch::channel(());
-        
+
         let mine_task = async move {
             let genesis_block = Block::genesis(network);
             let gsl = global_state_lock.clone();
             let cli = &cli_args;
             let mut job_options: TritonVmProofJobOptions = cli.into();
             job_options.cancel_job_rx = Some(cancel_job_rx);
-            create_block_transaction_from(&genesis_block, &gsl, Timestamp::now(), job_options, TxMergeOrigin::Mempool).await
+            create_block_transaction_from(
+                &genesis_block,
+                &gsl,
+                Timestamp::now(),
+                job_options,
+                TxMergeOrigin::Mempool,
+            )
+            .await
         };
 
         let jh = tokio::task::spawn(mine_task);
@@ -2014,15 +2024,15 @@ pub(crate) mod tests {
         let root_cause = error.root_cause();
 
         println!("root cause: {:?}", root_cause);
-        
-        let job_cancelled = root_cause.to_string().contains("cancelled");
-/*
-        let downcast = root_cause.downcast_ref::<JobHandleErrorSync>();
-        println!("downcast: {:?}", downcast);
 
-        let job_cancelled = root_cause.downcast_ref::<JobHandleErrorSync>()
-                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
-*/
+        let job_cancelled = root_cause.to_string().contains("cancelled");
+        /*
+                let downcast = root_cause.downcast_ref::<JobHandleErrorSync>();
+                println!("downcast: {:?}", downcast);
+
+                let job_cancelled = root_cause.downcast_ref::<JobHandleErrorSync>()
+                            .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
+        */
         assert!(job_cancelled);
 
         Ok(())
@@ -2056,5 +2066,5 @@ pub(crate) mod tests {
         assert!(!jh.is_finished());
 
         Ok(())
-    }    
+    }
 }
