@@ -1,9 +1,9 @@
 pub(crate) mod composer_parameters;
-
 use std::cmp::max;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::api::tx_initiation::error::CreateProofError;
 use anyhow::bail;
 use anyhow::Result;
 use block_header::BlockHeader;
@@ -48,7 +48,6 @@ use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurre
 use crate::models::channel::*;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
-use crate::models::proof_abstractions::tasm::prover_job;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::shared::MAX_NUM_TXS_TO_MERGE;
 use crate::models::shared::SIZE_20MB_IN_BYTES;
@@ -853,27 +852,15 @@ pub(crate) async fn mine(
                 // channel Sender gets dropped, which occurs if composer_task gets aborted
                 // which occurs if any other branch of this select!{} resolves first.
                 // Common causes are NewBlock and NewBlockProposal messages from main.
-                let job_cancelled = e.downcast_ref::<JobHandleErrorSync>()
-                    .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
-
-                if job_cancelled {
-                    tracing::debug!("composer job was cancelled. continuing normal operation");
-                } else {
-                    stop_composing = true;
-
-                    match e.downcast_ref::<prover_job::ProverJobError>() {
-                        Some(prover_job::ProverJobError::ProofComplexityLimitExceeded{..} ) => {
-                            pause_mine = true;
-                            tracing::error!("exceeded proof complexity limit.  mining paused.  details: {}", e.to_string())
-                        },
-                        _ => {
-                            // Ensure graceful shutdown in case of error during
-                            // composition.
-                            tracing::error!("Composition failed:\n{e}\n. \
-                                Try adjusting the environment variables \
-                                \"TVM_LDE_TRACE\" and \"RAYON_NUM_THREADS\".");
-                            to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
-                        }
+                match e.root_cause().downcast_ref::<CreateProofError>() {
+                    Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
+                        debug!("composer job was cancelled. continuing normal operation");
+                    }
+                    _ => {
+                        // Ensure graceful shutdown in case of error during composition.
+                        stop_composing = true;
+                        error!("Composition failed: {}", e);
+                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
                     }
                 }
             },
@@ -2021,23 +2008,19 @@ pub(crate) mod tests {
 
         println!("error: {}", error);
 
-        let root_cause = error.root_cause();
+        let job_cancelled = matches!(
+            error.root_cause().downcast_ref::<CreateProofError>(),
+            Some(CreateProofError::JobHandleError(
+                JobHandleErrorSync::JobCancelled
+            ))
+        );
 
-        println!("root cause: {:?}", root_cause);
-
-        let job_cancelled = root_cause.to_string().contains("cancelled");
-        /*
-                let downcast = root_cause.downcast_ref::<JobHandleErrorSync>();
-                println!("downcast: {:?}", downcast);
-
-                let job_cancelled = root_cause.downcast_ref::<JobHandleErrorSync>()
-                            .is_some_and(|jhe| matches!(jhe, JobHandleErrorSync::JobCancelled));
-        */
         assert!(job_cancelled);
 
         Ok(())
     }
 
+    #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
         let network = Network::Main;
@@ -2053,15 +2036,26 @@ pub(crate) mod tests {
         let (main_to_miner_tx, main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
 
-        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock, false);
+        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock.clone(), false);
 
         let jh = tokio::task::spawn(mine_task);
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        main_to_miner_tx.send(MainToMiner::WaitForContinue).await?;
-        main_to_miner_tx.send(MainToMiner::Continue).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert!(matches!(global_state_lock.lock_guard().await.mining_state.mining_status, MiningStatus::Composing(_)));
+        main_to_miner_tx.send(MainToMiner::StopMining).await?;
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        assert!(matches!(global_state_lock.lock_guard().await.mining_state.mining_status, MiningStatus::Inactive));
+
+        main_to_miner_tx.send(MainToMiner::StartMining).await?;
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        assert!(matches!(global_state_lock.lock_guard().await.mining_state.mining_status, MiningStatus::Composing(_)));
+
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
         assert!(!main_to_miner_tx.is_closed());
         assert!(!jh.is_finished());
 
