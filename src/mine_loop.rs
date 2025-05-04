@@ -841,133 +841,135 @@ pub(crate) async fn mine(
         // Await a message from either the worker task or from the main loop,
         // or the restart of the guesser-task.
         select! {
-            _ = &mut guess_restart_timer => {
-                restart_guessing = true;
-            }
-            Ok(Err(e)) = &mut composer_task => {
-
-                // fix issue 579.
-                // we must check if error indicates job was cancelled.
-                // note that cancellation can occur any time that the cancellation
-                // channel Sender gets dropped, which occurs if composer_task gets aborted
-                // which occurs if any other branch of this select!{} resolves first.
-                // Common causes are NewBlock and NewBlockProposal messages from main.
-                match e.root_cause().downcast_ref::<CreateProofError>() {
-                    Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
-                        debug!("composer job was cancelled. continuing normal operation");
+                    _ = &mut guess_restart_timer => {
+                        restart_guessing = true;
                     }
-                    _ => {
-                        // Ensure graceful shutdown in case of error during composition.
-                        stop_composing = true;
-                        error!("Composition failed: {}", e);
-                        to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
-                    }
-                }
-            },
+                    Ok(Err(e)) = &mut composer_task => {
 
-            Some(main_message) = from_main.recv() => {
-                debug!("Miner received message type: {}", main_message.get_type());
-
-                match main_message {
-                    MainToMiner::Shutdown => {
-                        debug!("Miner shutting down.");
-
-                        stop_guessing = true;
-                        stop_composing = true;
-                        stop_looping = true;
-                    }
-                    MainToMiner::NewBlock => {
-                        stop_guessing = true;
-                        stop_composing = true;
-
-                        info!("Miner task received notification about new block");
-                    }
-                    MainToMiner::NewBlockProposal => {
-                        stop_guessing = true;
-                        stop_composing = true;
-
-                        info!("Miner received message about new block proposal for guessing.");
-                    }
-                    MainToMiner::WaitForContinue => {
-                        stop_guessing = true;
-                        stop_composing = true;
-
-                        wait_for_confirmation = true;
-                    }
-                    MainToMiner::Continue => {
-                        wait_for_confirmation = false;
-                    }
-                    MainToMiner::StopMining => {
-                        pause_mine = true;
-
-                        stop_guessing = true;
-                        stop_composing = true;
-                    }
-                    MainToMiner::StartMining => {
-                        pause_mine = false;
-                    }
-                    MainToMiner::StopSyncing => {
-                        // no need to do anything here.  Mining will
-                        // resume or not at top of loop depending on
-                        // pause_mine and syncing variables.
-                    }
-                    MainToMiner::StartSyncing => {
-                        // when syncing begins, we must halt the mining
-                        // task.  But we don't change the pause_mine
-                        // variable, because it reflects the logical on/off
-                        // of mining, which syncing can temporarily override
-                        // but not alter the setting.
-                        stop_guessing = true;
-                        stop_composing = true;
-                    }
-                }
-            }
-            new_composition = composer_rx => {
-                stop_composing = true;
-
-                match new_composition {
-                    Ok((new_block_proposal, composer_utxos)) => {
-                        to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
-                        wait_for_confirmation = true;
-                    },
-                    Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
-                };
-            }
-            new_block = guesser_rx => {
-                stop_guessing = true;
-
-                match new_block {
-                    Err(err) => {
-                        warn!("Mining task was cancelled prematurely. Got: {}", err);
-                    }
-                    Ok(new_block_found) => {
-                        debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
-
-                        // Sanity check, remove for more efficient mining.
-                        // The below PoW check could fail due to race conditions. So we don't panic,
-                        // we only ignore what the worker task sent us.
-                        let latest_block = global_state_lock
-                            .lock(|s| s.chain.light_state().to_owned())
-                            .await;
-
-                        if !new_block_found.block.has_proof_of_work(latest_block.header()) {
-                            error!("Own mined block did not have valid PoW Discarding.");
-                        } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now(), global_state_lock.cli().network).await {
-                                // Block could be invalid if for instance the proof and proof-of-work
-                                // took less time than the minimum block time.
-                                error!("Found block with valid proof-of-work but block is invalid.");
-                        } else {
-
-                            info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
-
-                            to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
-
-                            wait_for_confirmation = true;
+                        // fix issue 579.
+                        // we must check if error indicates job was cancelled.
+                        // note that cancellation can occur any time that the cancellation
+                        // channel Sender gets dropped, which occurs if composer_task gets aborted
+                        // which occurs if any other branch of this select!{} resolves first.
+                        // Common causes are NewBlock and NewBlockProposal messages from main.
+                        match e.root_cause().downcast_ref::<CreateProofError>() {
+        /*
+                            Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
+                                debug!("composer job was cancelled. continuing normal operation");
+                            }
+        */
+                            _ => {
+                                // Ensure graceful shutdown in case of error during composition.
+                                stop_composing = true;
+                                error!("Composition failed: {}", e);
+                                to_main.send(MinerToMain::Shutdown(COMPOSITION_FAILED_EXIT_CODE)).await?;
+                            }
                         }
                     },
-                };
-            }
-        }
+
+                    Some(main_message) = from_main.recv() => {
+                        debug!("Miner received message type: {}", main_message.get_type());
+
+                        match main_message {
+                            MainToMiner::Shutdown => {
+                                debug!("Miner shutting down.");
+
+                                stop_guessing = true;
+                                stop_composing = true;
+                                stop_looping = true;
+                            }
+                            MainToMiner::NewBlock => {
+                                stop_guessing = true;
+                                stop_composing = true;
+
+                                info!("Miner task received notification about new block");
+                            }
+                            MainToMiner::NewBlockProposal => {
+                                stop_guessing = true;
+                                stop_composing = true;
+
+                                info!("Miner received message about new block proposal for guessing.");
+                            }
+                            MainToMiner::WaitForContinue => {
+                                stop_guessing = true;
+                                stop_composing = true;
+
+                                wait_for_confirmation = true;
+                            }
+                            MainToMiner::Continue => {
+                                wait_for_confirmation = false;
+                            }
+                            MainToMiner::StopMining => {
+                                pause_mine = true;
+
+                                stop_guessing = true;
+                                stop_composing = true;
+                            }
+                            MainToMiner::StartMining => {
+                                pause_mine = false;
+                            }
+                            MainToMiner::StopSyncing => {
+                                // no need to do anything here.  Mining will
+                                // resume or not at top of loop depending on
+                                // pause_mine and syncing variables.
+                            }
+                            MainToMiner::StartSyncing => {
+                                // when syncing begins, we must halt the mining
+                                // task.  But we don't change the pause_mine
+                                // variable, because it reflects the logical on/off
+                                // of mining, which syncing can temporarily override
+                                // but not alter the setting.
+                                stop_guessing = true;
+                                stop_composing = true;
+                            }
+                        }
+                    }
+                    new_composition = composer_rx => {
+                        stop_composing = true;
+
+                        match new_composition {
+                            Ok((new_block_proposal, composer_utxos)) => {
+                                to_main.send(MinerToMain::BlockProposal(Box::new((new_block_proposal, composer_utxos)))).await?;
+                                wait_for_confirmation = true;
+                            },
+                            Err(e) => warn!("composing task was cancelled prematurely. Got: {}", e),
+                        };
+                    }
+                    new_block = guesser_rx => {
+                        stop_guessing = true;
+
+                        match new_block {
+                            Err(err) => {
+                                warn!("Mining task was cancelled prematurely. Got: {}", err);
+                            }
+                            Ok(new_block_found) => {
+                                debug!("Worker task reports new block of height {}", new_block_found.block.kernel.header.height);
+
+                                // Sanity check, remove for more efficient mining.
+                                // The below PoW check could fail due to race conditions. So we don't panic,
+                                // we only ignore what the worker task sent us.
+                                let latest_block = global_state_lock
+                                    .lock(|s| s.chain.light_state().to_owned())
+                                    .await;
+
+                                if !new_block_found.block.has_proof_of_work(latest_block.header()) {
+                                    error!("Own mined block did not have valid PoW Discarding.");
+                                } else if !new_block_found.block.is_valid(&latest_block, Timestamp::now(), global_state_lock.cli().network).await {
+                                        // Block could be invalid if for instance the proof and proof-of-work
+                                        // took less time than the minimum block time.
+                                        error!("Found block with valid proof-of-work but block is invalid.");
+                                } else {
+
+                                    info!("Found new {} block with block height {}. Hash: {}", global_state_lock.cli().network, new_block_found.block.kernel.header.height, new_block_found.block.hash());
+
+                                    to_main.send(MinerToMain::NewBlockFound(new_block_found)).await?;
+
+                                    wait_for_confirmation = true;
+                                }
+                            },
+                        };
+                    }
+                }
 
         if restart_guessing {
             if let Some(gt) = &guesser_task {
@@ -1968,6 +1970,12 @@ pub(crate) mod tests {
         }
     }
 
+    // tests that a job cancel message cancels composing and results in JobCancelled error
+    //
+    // This test spawns a task that executes create_block_transaction_from()
+    // and then sends a job cancellation message to that task.
+    //
+    // It verifies that the task ends and the result is a JobCancelled error.
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn job_cancel_msg_cancels_composing() -> anyhow::Result<()> {
@@ -2020,6 +2028,19 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    // tests that Stop/Start mining messages work as expected while composing.
+    //
+    // This test spawns task that executes the mining loop ie mine().
+    // and then sends StopMining, StartMining messages to the task.
+    //
+    // The StopMining message causes a job-cancelation message to be sent to
+    // prove_concensus_program() which forwards to to proving job.
+    //
+    // The result is that the composer_task terminates early with a JobCancelled error and for
+    // correct behavior, that error must not cause the mining loop to shut-down.
+    //
+    // The test verifies that the mining status actually changes after each message is
+    // sent and that the mining loop continues processing.
     #[traced_test]
     #[apply(shared_tokio_runtime)]
     async fn msg_from_main_does_not_crash_composer() -> anyhow::Result<()> {
@@ -2036,23 +2057,49 @@ pub(crate) mod tests {
         let (main_to_miner_tx, main_to_miner_rx) =
             mpsc::channel::<MainToMiner>(MINER_CHANNEL_CAPACITY);
 
-        let mine_task = mine(main_to_miner_rx, miner_to_main_tx, global_state_lock.clone(), false);
+        let mine_task = mine(
+            main_to_miner_rx,
+            miner_to_main_tx,
+            global_state_lock.clone(),
+            false,
+        );
 
         let jh = tokio::task::spawn(mine_task);
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        assert!(matches!(global_state_lock.lock_guard().await.mining_state.mining_status, MiningStatus::Composing(_)));
+        assert!(matches!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .mining_status,
+            MiningStatus::Composing(_)
+        ));
         main_to_miner_tx.send(MainToMiner::StopMining).await?;
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        assert!(matches!(global_state_lock.lock_guard().await.mining_state.mining_status, MiningStatus::Inactive));
+        assert!(matches!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .mining_status,
+            MiningStatus::Inactive
+        ));
 
         main_to_miner_tx.send(MainToMiner::StartMining).await?;
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-        assert!(matches!(global_state_lock.lock_guard().await.mining_state.mining_status, MiningStatus::Composing(_)));
+        assert!(matches!(
+            global_state_lock
+                .lock_guard()
+                .await
+                .mining_state
+                .mining_status,
+            MiningStatus::Composing(_)
+        ));
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 

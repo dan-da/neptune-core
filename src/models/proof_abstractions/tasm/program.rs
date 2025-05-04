@@ -135,8 +135,8 @@ pub(crate) async fn prove_consensus_program(
             tokio::select! {
                 // case: sender cancelled, or sender dropped.
                 _ = cancel_job_rx.changed() => {
-                    debug!("forwarding job cancellation request to job");
-                    cancel_tx.send(())?;
+                    debug!("received job cancellation request.  aborting");
+                    cancel_tx.send_replace(());
 
                     // Ideally we would await job_handle.result() but we
                     // can't because it takes self and upsets borrow checker.
@@ -148,6 +148,7 @@ pub(crate) async fn prove_consensus_program(
         }
         None => job_handle.result().await,
     };
+    tracing::info!("JobHandle should be dropped by now");
 
     // obtain resulting proof.
     let result: Result<Proof, ProverJobError> = job_result

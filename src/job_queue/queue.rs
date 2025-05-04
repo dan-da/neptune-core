@@ -295,6 +295,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, AddJobError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
+        let cancel_tx = super::traits::LogWhenDropped(cancel_tx);
+        let cancel_rx = super::traits::LogWhenDropped(cancel_rx);
 
         let job_id = JobId::random();
 
