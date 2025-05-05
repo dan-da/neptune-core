@@ -143,15 +143,14 @@ pub(crate) async fn prove_consensus_program(
                     Err(JobHandleError::JobCancelled)
                 }
                 // case: job completion.
-                result = job_handle.result() => result,
+                completion = job_handle => completion?.result(),
             }
         }
-        None => job_handle.result().await,
+        None => job_handle.await?.result(),
     };
 
     // obtain resulting proof.
-    let result: Result<Proof, ProverJobError> = job_result
-        .map_err(|e| e.into_sync())?
+    let result: Result<Proof, ProverJobError> = job_result?
         .into_any()
         .downcast::<ProverJobResult>()
         .expect("downcast should succeed, else bug")
