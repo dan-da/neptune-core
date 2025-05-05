@@ -17,6 +17,9 @@ use super::traits::JobCompletion;
 use super::traits::JobResult;
 use super::traits::JobResultReceiver;
 use super::traits::JobResultSender;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 /// a randomly generated Job identifier
 #[derive(Debug, Clone, Copy)]
@@ -51,8 +54,11 @@ impl JobHandle {
     /// wait for job to complete
     ///
     /// a completed job may either be finished, cancelled, or panicked.
-    pub async fn complete(self) -> Result<JobCompletion, JobHandleError> {
-        Ok(self.result_rx().await?)
+    pub async fn complete(mut self) -> Result<JobCompletion, JobHandleError> {
+        let (_, dummy_rx) = tokio::sync::oneshot::channel::<JobCompletion>();
+        let rx = std::mem::replace(&mut self.result_rx, dummy_rx);
+        
+        Ok(rx.await?)
     }
 
     /// wait for job result, or err if cancelled or a panic occurred within job.
@@ -92,11 +98,24 @@ impl JobHandle {
     }
 }
 
+impl Future for JobHandle {
+    type Output =  Result<JobCompletion, JobHandleError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // Directly poll the underlying result_rx
+        let result_rx = &mut self.get_mut().result_rx;
+        Pin::new(result_rx).poll(cx).map_err(|e| e.into())
+    }
+}
+
 impl Drop for JobHandle {
     fn drop(&mut self) {
+        tracing::debug!("JobHandle dropping for job: {}", self.job_id);
         if !self.cancel_tx.is_closed() {
             if let Err(e) = self.cancel_tx.send(()) {
                 tracing::error!("job-cancel message could not be sent. {}", e);
+            } else {
+                tracing::debug!("Sent job-cancel msg to job: {}", self.job_id);
             }
         }
     }
@@ -552,16 +571,14 @@ mod tests {
                 });
 
                 // process job and print results.
-                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?.result_rx());
+                handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?);
                 handles.push(
                     job_queue
                         .add_job(job2, DoubleJobPriority::Medium)?
-                        .result_rx(),
                 );
                 handles.push(
                     job_queue
                         .add_job(job3, DoubleJobPriority::High)?
-                        .result_rx(),
                 );
             }
 
