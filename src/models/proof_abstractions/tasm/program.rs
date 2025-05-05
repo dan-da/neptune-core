@@ -124,6 +124,7 @@ pub(crate) async fn prove_consensus_program(
     // instead of calling job_handle.cancel() inside select!()
     // we get a handle to the cancellation channel sender here.
     let cancel_tx = job_handle.cancel_tx().to_owned();
+    let job_id = job_handle.job_id();
 
     let job_result = match proof_job_options.cancel_job_rx {
         // fix for issue #348.
@@ -135,8 +136,8 @@ pub(crate) async fn prove_consensus_program(
             tokio::select! {
                 // case: sender cancelled, or sender dropped.
                 _ = cancel_job_rx.changed() => {
-                    debug!("received job cancellation request.  aborting");
-                    cancel_tx.send_replace(());
+                    debug!("received job cancellation request.  forwarding to job: {}", job_id);
+                    cancel_tx.send(())?;
 
                     // Ideally we would await job_handle.result() but we
                     // can't because it takes self and upsets borrow checker.

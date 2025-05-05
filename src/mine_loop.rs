@@ -1008,6 +1008,7 @@ pub(crate) async fn mine(
 pub(crate) mod tests {
     use std::hint::black_box;
 
+    use crate::job_queue::errors::JobHandleErrorSync;
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
     use block_header::tests::random_block_header;
@@ -2075,6 +2076,8 @@ pub(crate) mod tests {
                 .mining_status,
             MiningStatus::Composing(_)
         ));
+        assert_eq!(vm_job_queue().num_jobs(), 1);
+
         main_to_miner_tx.send(MainToMiner::StopMining).await?;
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -2087,6 +2090,7 @@ pub(crate) mod tests {
                 .mining_status,
             MiningStatus::Inactive
         ));
+        assert_eq!(vm_job_queue().num_jobs(), 0);
 
         main_to_miner_tx.send(MainToMiner::StartMining).await?;
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -2099,6 +2103,7 @@ pub(crate) mod tests {
                 .mining_status,
             MiningStatus::Composing(_)
         ));
+        assert_eq!(vm_job_queue().num_jobs(), 1);
 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
