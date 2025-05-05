@@ -149,7 +149,6 @@ pub(crate) async fn prove_consensus_program(
         }
         None => job_handle.result().await,
     };
-    tracing::info!("JobHandle should be dropped by now");
 
     // obtain resulting proof.
     let result: Result<Proof, ProverJobError> = job_result

@@ -142,14 +142,6 @@ impl From<anyhow::Error> for CreateTxError {
     }
 }
 
-// // convert anyhow::Error to a CreateProofError::Failed.
-// // note that anyhow Error is not serializable.
-// impl From<anyhow::Error> for CreateProofError {
-//     fn from(e: anyhow::Error) -> Self {
-//         Self::Failed(e.to_string())
-//     }
-// }
-
 // convert anyhow::Error to a SendError::Failed.
 // note that anyhow Error is not serializable.
 impl From<anyhow::Error> for SendError {

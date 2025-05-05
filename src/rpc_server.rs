@@ -3580,12 +3580,6 @@ pub mod error {
         ClaimError(String),
     }
 
-    // impl From<rpc_auth::error::AuthError> for RpcError {
-    //     fn from(err: rpc_auth::error::AuthError) -> Self {
-    //         RpcError::Auth(err.to_string())
-    //     }
-    // }
-
     impl From<tx_initiation::error::CreateTxError> for RpcError {
         fn from(err: tx_initiation::error::CreateTxError) -> Self {
             RpcError::CreateTxError(err.to_string())
@@ -3621,43 +3615,6 @@ pub mod error {
             RpcError::ClaimError(err.to_string())
         }
     }
-
-    /*
-        pub enum RpcError {
-            // auth error
-            #[error(transparent)]
-            Auth(#[from] rpc_auth::error::AuthError),
-
-            // catch-all error, eg for anyhow errors
-            #[error("rpc call failed")]
-            Failed(String),
-
-            // API specific error variants.
-            #[error("cookie hints are disabled on this node")]
-            CookieHintDisabled,
-
-            #[error("capacity to store exported block proposals exceeded")]
-            ExportedBlockProposalStorageCapacityExceeded,
-
-            #[error(transparent)]
-            CreateTxError(#[from] tx_initiation::error::CreateTxError),
-
-            #[error(transparent)]
-            UpgradeProofError(#[from] tx_initiation::error::UpgradeProofError),
-
-            #[error(transparent)]
-            SendError(#[from] tx_initiation::error::SendError),
-
-            #[error(transparent)]
-            RegTestError(#[from] api::regtest::error::RegTestError),
-
-            #[error(transparent)]
-            Error(#[from] api::wallet::error::WalletError),
-
-            #[error(transparent)]
-            ClaimError(#[from] ClaimError),
-        }
-    */
 
     // convert anyhow::Error to an RpcError::Failed.
     // note that anyhow Error is not serializable.
@@ -5363,19 +5320,6 @@ mod tests {
                     .clone()
                     .send(ctx, token, outputs.clone(), ChangePolicy::Burn, fee)
                     .await;
-
-                // .send_to_many_inner(
-                //     ctx,
-                //     outputs.clone(),
-                //     (
-                //         UtxoNotificationMedium::OnChain,
-                //         UtxoNotificationMedium::OnChain,
-                //     ),
-                //     fee,
-                //     timestamp,
-                //     TxProvingCapability::PrimitiveWitness,
-                // )
-                // .await;
 
                 // any attempts after the 2nd send should result in RateLimit error.
                 match i {

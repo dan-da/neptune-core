@@ -852,11 +852,9 @@ pub(crate) async fn mine(
                         // which occurs if any other branch of this select!{} resolves first.
                         // Common causes are NewBlock and NewBlockProposal messages from main.
                         match e.root_cause().downcast_ref::<CreateProofError>() {
-        /*
                             Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
                                 debug!("composer job was cancelled. continuing normal operation");
                             }
-        */
                             _ => {
                                 // Ensure graceful shutdown in case of error during composition.
                                 stop_composing = true;
