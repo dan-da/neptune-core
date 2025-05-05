@@ -1252,3 +1252,49 @@ pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::R
     }
     Ok(())
 }
+
+/// Waits for an async predicate to return true or a timeout.
+///
+/// # Arguments
+///
+/// * `predicate`: `async || -> bool` closure to evaluate.
+/// * `timeout_secs`: Max seconds to wait (floating-point).
+///
+/// # Returns
+///
+/// `Ok(())` on success, `Err(_)` on timeout.
+///
+/// # Example
+///
+/// ```
+/// async fn is_ready() -> bool { true }
+///
+/// #[tokio::main]
+/// async fn main() -> Result<()> {
+///     wait_until(async || is_ready().await, 1.5).await?;
+///     Ok(())
+/// }
+/// ```
+pub async fn wait_until<F, Fut>(
+    timeout: std::time::Duration,
+    mut predicate: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = bool> + Send + 'static,
+{
+    let start = std::time::Instant::now();
+    loop {
+        if predicate().await {
+            break;
+        }
+        if start.elapsed() > timeout {
+            anyhow::bail!(
+                "timeout reached after {} seconds",
+                start.elapsed().as_secs_f32()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    Ok(())
+}

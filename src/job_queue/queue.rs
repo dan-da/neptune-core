@@ -343,7 +343,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     /// returns number of queued jobs
     pub fn num_queued_jobs(&self) -> usize {
         self.shared.lock().unwrap().jobs.len()
-    }    
+    }
 }
 
 #[cfg(test)]

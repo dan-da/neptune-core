@@ -276,7 +276,6 @@ impl ProverJob {
     ///
     /// If we are in a test environment, try reading it from disk. If it is not
     /// there, generate it and store it to disk.
-    #[cfg_attr(test, expect(clippy::unused_async))]
     async fn prove(&self, rx: JobCancelReceiver) -> JobCompletion {
         // produce mock proofs if network so requires. (ie RegTest)
         if self.job_settings.network.use_mock_proof() {

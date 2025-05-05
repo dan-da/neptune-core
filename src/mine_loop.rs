@@ -1008,7 +1008,6 @@ pub(crate) async fn mine(
 pub(crate) mod tests {
     use std::hint::black_box;
 
-    use crate::job_queue::errors::JobHandleErrorSync;
     use block_appendix::BlockAppendix;
     use block_body::BlockBody;
     use block_header::tests::random_block_header;
@@ -1025,6 +1024,7 @@ pub(crate) mod tests {
     use crate::config_models::cli_args;
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
+    use crate::job_queue::errors::JobHandleErrorSync;
     use crate::job_queue::triton_vm::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
@@ -1042,6 +1042,7 @@ pub(crate) mod tests {
     use crate::tests::shared::make_mock_transaction_with_mutator_set_hash;
     use crate::tests::shared::mock_genesis_global_state;
     use crate::tests::shared::random_transaction_kernel;
+    use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
@@ -2006,9 +2007,13 @@ pub(crate) mod tests {
             .await
         };
 
+        let timeout = std::time::Duration::from_secs(10);
+
         let jh = tokio::task::spawn(mine_task);
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // wait until 1 job in queue
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
+
         cancel_job_tx.send(()).unwrap();
         let job_result = jh.await?;
 
@@ -2066,7 +2071,10 @@ pub(crate) mod tests {
 
         let jh = tokio::task::spawn(mine_task);
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        let timeout = std::time::Duration::from_secs(10);
+
+        // wait until 1 job in queue
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
 
         assert!(matches!(
             global_state_lock
@@ -2076,11 +2084,11 @@ pub(crate) mod tests {
                 .mining_status,
             MiningStatus::Composing(_)
         ));
-        assert_eq!(vm_job_queue().num_jobs(), 1);
 
         main_to_miner_tx.send(MainToMiner::StopMining).await?;
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // wait until 0 jobs in queue
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 0).await?;
 
         assert!(matches!(
             global_state_lock
@@ -2093,7 +2101,9 @@ pub(crate) mod tests {
         assert_eq!(vm_job_queue().num_jobs(), 0);
 
         main_to_miner_tx.send(MainToMiner::StartMining).await?;
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+        // wait until 1 job in queue again
+        wait_until(timeout, async || vm_job_queue().num_jobs() == 1).await?;
 
         assert!(matches!(
             global_state_lock
@@ -2103,10 +2113,11 @@ pub(crate) mod tests {
                 .mining_status,
             MiningStatus::Composing(_)
         ));
-        assert_eq!(vm_job_queue().num_jobs(), 1);
 
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // wait 3 more secs for mine-loop processing.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
+        // ensure mine-loop is still up and running.
         assert!(!main_to_miner_tx.is_closed());
         assert!(!jh.is_finished());
 
