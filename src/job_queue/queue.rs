@@ -348,6 +348,17 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             cancel_tx,
         })
     }
+
+    /// returns total number of jobs, queued plus running.
+    pub fn num_jobs(&self) -> usize {
+        let guard = self.shared.lock().unwrap();
+        guard.jobs.len() + guard.current_job.as_ref().map(|_| 1).unwrap_or(0)
+    }
+
+    /// returns number of queued jobs
+    pub fn num_queued_jobs(&self) -> usize {
+        self.shared.lock().unwrap().jobs.len()
+    }
 }
 
 #[cfg(test)]
