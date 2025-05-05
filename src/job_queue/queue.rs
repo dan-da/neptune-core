@@ -38,6 +38,9 @@ impl JobId {
 }
 
 /// A job-handle enables cancelling a job and awaiting results
+///
+/// When the `JobHandle` is dropped a cancellation message is sent to the job
+/// task.
 #[derive(Debug)]
 pub struct JobHandle {
     job_id: JobId,
@@ -49,7 +52,7 @@ impl JobHandle {
     ///
     /// a completed job may either be finished, cancelled, or panicked.
     pub async fn complete(self) -> Result<JobCompletion, JobHandleError> {
-        Ok(self.result_rx.await?)
+        Ok(self.result_rx().await?)
     }
 
     /// wait for job result, or err if cancelled or a panic occurred within job.
@@ -73,8 +76,9 @@ impl JobHandle {
     }
 
     /// channel receiver for job results
-    pub fn result_rx(self) -> JobResultReceiver {
-        self.result_rx
+    pub fn result_rx(mut self) -> JobResultReceiver {
+        let (_, dummy_rx) = tokio::sync::oneshot::channel::<JobCompletion>();
+        std::mem::replace(&mut self.result_rx, dummy_rx)
     }
 
     /// channel sender for cancelling job.
@@ -82,8 +86,19 @@ impl JobHandle {
         &self.cancel_tx
     }
 
+    /// obtain randomly generated job identifier
     pub fn job_id(&self) -> JobId {
         self.job_id
+    }
+}
+
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        if !self.cancel_tx.is_closed() {
+            if let Err(e) = self.cancel_tx.send(()) {
+                tracing::error!("job-cancel message could not be sent. {}", e);
+            }
+        }
     }
 }
 
@@ -332,17 +347,6 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             result_rx,
             cancel_tx,
         })
-    }
-
-    /// returns total number of jobs, queued plus running.
-    pub fn num_jobs(&self) -> usize {
-        let guard = self.shared.lock().unwrap();
-        guard.jobs.len() + guard.current_job.as_ref().map(|_| 1).unwrap_or(0)
-    }
-
-    /// returns number of queued jobs
-    pub fn num_queued_jobs(&self) -> usize {
-        self.shared.lock().unwrap().jobs.len()
     }
 }
 

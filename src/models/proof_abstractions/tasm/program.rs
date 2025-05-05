@@ -121,9 +121,7 @@ pub(crate) async fn prove_consensus_program(
     let job_handle = triton_vm_job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
 
     // satisfy borrow checker.
-    // instead of calling job_handle.cancel() inside select!()
-    // we get a handle to the cancellation channel sender here.
-    let cancel_tx = job_handle.cancel_tx().to_owned();
+    // instead of calling job_handle.job_id() inside select!()
     let job_id = job_handle.job_id();
 
     let job_result = match proof_job_options.cancel_job_rx {
@@ -136,8 +134,9 @@ pub(crate) async fn prove_consensus_program(
             tokio::select! {
                 // case: sender cancelled, or sender dropped.
                 _ = cancel_job_rx.changed() => {
-                    debug!("received job cancellation request.  forwarding to job: {}", job_id);
-                    cancel_tx.send(())?;
+                    debug!("received cancellation request for job: {}.  cancelling.", job_id);
+
+                    // note: the job will be cancelled when job_handle is dropped.
 
                     // Ideally we would await job_handle.result() but we
                     // can't because it takes self and upsets borrow checker.
