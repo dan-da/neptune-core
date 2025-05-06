@@ -56,26 +56,12 @@ pub struct JobHandle {
     cancel_tx: JobCancelSender,
 }
 impl JobHandle {
-    /// cancel job and return immediately.
+    /// sends cancel message to job and returns immediately.
+    ///
+    /// note: await the JobHandle after calling `cancel()` to ensure the job has
+    /// ended and obtain a [JobCompletion]
     pub fn cancel(&self) -> Result<(), JobHandleError> {
         Ok(self.cancel_tx.send(())?)
-    }
-
-    /// cancel job and wait for it to complete.
-    pub async fn cancel_and_await(self) -> Result<JobCompletion, JobHandleError> {
-        self.cancel_tx.send(())?;
-        self.await
-    }
-
-    /// channel receiver for job results
-    pub fn result_rx(mut self) -> JobResultReceiver {
-        let (_, dummy_rx) = tokio::sync::oneshot::channel::<JobCompletion>();
-        std::mem::replace(&mut self.result_rx, dummy_rx)
-    }
-
-    /// channel sender for cancelling job.
-    pub fn cancel_tx(&self) -> &JobCancelSender {
-        &self.cancel_tx
     }
 
     /// obtain randomly generated job identifier
@@ -655,7 +641,8 @@ mod tests {
 
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
 
-            let completion = job_handle.cancel_and_await().await.unwrap();
+            job_handle.cancel().unwrap();
+            let completion = job_handle.await.unwrap();
             assert!(matches!(completion, JobCompletion::Cancelled));
 
             Ok(())
