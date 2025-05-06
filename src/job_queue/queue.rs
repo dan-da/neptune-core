@@ -397,6 +397,18 @@ mod tests {
         workers::cancel_job(true).await
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn cancel_sync_job_in_select() -> anyhow::Result<()> {
+        workers::cancel_job_in_select(false).await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn cancel_async_job_in_select() -> anyhow::Result<()> {
+        workers::cancel_job_in_select(true).await
+    }
+
     #[test]
     #[traced_test]
     fn runtime_shutdown_timeout_force_cancels_sync_job() -> anyhow::Result<()> {
@@ -644,6 +656,85 @@ mod tests {
             job_handle.cancel().unwrap();
             let completion = job_handle.await.unwrap();
             assert!(matches!(completion, JobCompletion::Cancelled));
+
+            Ok(())
+        }
+
+        // this test demonstrates how to listen for a cancellation message
+        // and cancel a job when it is received.
+        //
+        // The key concepts demonstrated are:
+        //  1. using tokio::select!{} to execute the job and listen for a
+        //     cancellation message simultaneously.
+        //  2. using tokio::pin!() to avoid borrow-checker complaints in the select.
+        //  3. using into_sync() to convert JobHandleError into JobHandleErrorSync for
+        //     inter-thread usage.
+        //  4. using downcast to obtain the job result.
+        pub async fn cancel_job_in_select(is_async: bool) -> anyhow::Result<()> {
+            async fn do_some_work(
+                is_async: bool,
+                cancel_work_rx: tokio::sync::oneshot::Receiver<()>,
+            ) -> Result<DoubleJobResult, JobHandleErrorSync> {
+                // create a job queue.  (this could be done elsewhere)
+                let job_queue = JobQueue::start();
+
+                // start a 1 hour job.
+                let duration = std::time::Duration::from_secs(3600); // 1 hour job.
+
+                let job = Box::new(DoubleJob {
+                    data: 10,
+                    duration,
+                    is_async,
+                });
+
+                // add the job to queue
+                let job_handle = job_queue.add_job(job, DoubleJobPriority::Low).unwrap();
+
+                // pin job_handle, so borrow checker knows the address can't change
+                // and it is safe to use in both select branches
+                tokio::pin!(job_handle);
+
+                // execute job and simultaneously listen for cancel msg from elsewhere
+                let completion = tokio::select! {
+                    // case: job completion.
+                    completion = &mut job_handle => completion,
+
+                    // case: sender cancelled, or sender dropped.
+                    _ = cancel_work_rx => {
+                        job_handle.cancel().map_err(|e| e.into_sync())?;
+                        job_handle.await
+                    }
+                };
+
+                // obtain job result (via downcast)
+                let result: DoubleJobResult = *completion
+                    .map_err(|e| e.into_sync())?
+                    .result()
+                    .map_err(|e| e.into_sync())?
+                    .into_any()
+                    .downcast::<DoubleJobResult>()
+                    .expect("downcast should succeed, else bug");
+
+                Ok(result)
+            }
+
+            // create cancellation channel for the worker task
+            let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+
+            // create the worker task, that will create and run the job
+            let worker_task = async move { do_some_work(is_async, cancel_rx).await };
+
+            // spawn the worker task
+            let jh = tokio::task::spawn(worker_task);
+
+            // send cancel message to the worker task
+            cancel_tx.send(()).unwrap();
+
+            // wait for worker task to finish (with an error)
+            let job_handle_error = jh.await?.unwrap_err();
+
+            // ensure the error indicates JobCancelled
+            assert!(matches!(job_handle_error, JobHandleErrorSync::JobCancelled));
 
             Ok(())
         }
