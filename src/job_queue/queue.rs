@@ -3,6 +3,7 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -20,14 +21,20 @@ use super::traits::Job;
 /// implements a job queue that sends result of each job to a listener.
 #[derive(Debug)]
 pub struct JobQueue<P: Ord + Send + Sync + 'static> {
-    shared: Arc<Mutex<Shared<P>>>,
+    // holds job-queue which is shared between tokio tasks
+    shared_queue: Arc<Mutex<SharedQueue<P>>>,
 
-    tx_job_added: tokio::sync::mpsc::UnboundedSender<()>,
+    // channel to inform process_jobs task that a job has been added
+    tx_job_added: mpsc::UnboundedSender<()>,
+
+    // channel to inform process_jobs task to stop processing.
     tx_stop: tokio::sync::watch::Sender<()>,
 
+    // JoinHandle of process_jobs task
     process_jobs_task_handle: Option<JoinHandle<()>>, // Store the job processing task handle
 }
 
+// we implement Drop so we can send stop message to process_jobs task
 impl<P: Ord + Send + Sync + 'static> Drop for JobQueue<P> {
     fn drop(&mut self) {
         tracing::debug!("in JobQueue::drop()");
@@ -41,119 +48,33 @@ impl<P: Ord + Send + Sync + 'static> Drop for JobQueue<P> {
 }
 
 impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
-    /// creates job queue and starts it processing.  returns immediately.
+    /// creates job queue and starts it processing.
+    ///
+    /// returns immediately.
     pub fn start() -> Self {
-        let shared = Shared {
+        // create a SharedQueue that is shared between tokio tasks.
+        let shared_queue = SharedQueue {
             jobs: VecDeque::new(),
             current_job: None,
         };
-        let shared: Arc<Mutex<Shared<P>>> = Arc::new(Mutex::new(shared));
+        let shared_queue: Arc<Mutex<SharedQueue<P>>> = Arc::new(Mutex::new(shared_queue));
 
-        let (tx_job_added, mut rx_job_added) = tokio::sync::mpsc::unbounded_channel();
-        let (tx_stop, mut rx_stop) = tokio::sync::watch::channel(());
+        // create 'job_added' and 'stop' channels for signalling to process_jobs task
+        let (tx_job_added, rx_job_added) = mpsc::unbounded_channel();
+        let (tx_stop, rx_stop) = watch::channel(());
 
-        // spawns background task that processes job queue and runs jobs.
-        let shared2 = shared.clone();
-        let process_jobs_task_handle = tokio::spawn(async move {
-            let mut job_num: usize = 1;
-
-            loop {
-                tokio::select!(
-                _ = rx_stop.changed() => {
-                    tracing::debug!("task process_jobs received Stop message.");
-
-                    // if there is a presently executing job we need to cancel it
-                    // and wait for it to complete.
-                    let maybe_info = shared2.lock().unwrap().current_job.as_ref().map(|cj| (cj.job_id, cj.cancel_tx.clone()) );
-                    if let Some((job_id, cancel_tx)) = maybe_info {
-                        match cancel_tx.send(()) {
-                            Ok(()) => {
-                                // wait for channel to close, indicating job has cancelled (or otherwise completed)
-                                tracing::debug!("JobQueue: notified current job {} to cancel.  waiting...", job_id);
-                                cancel_tx.closed().await;
-                                tracing::debug!("JobQueue: current job {} has cancelled.", job_id);
-                            }
-                            Err(e) => {
-                                tracing::warn!("could not send cancellation msg to current job {}. {}", job_id, e)
-                            }
-                        }
-                    }
-
-                    break;
-                }
-                _ = rx_job_added.recv() => {
-                    tracing::debug!("task process_jobs received JobAdded message.");
-                    let (next_job, num_pending) = {
-                        let mut guard = shared2.lock().unwrap();
-
-                        // This is where we pick the highest priority job
-                        guard
-                            .jobs
-                            .make_contiguous()
-                            .sort_by(|a, b| b.priority.cmp(&a.priority));
-                        let job = guard.jobs.pop_front().unwrap();
-
-                        guard.current_job = Some(CurrentJob {
-                            job_num,
-                            job_id: job.job_id,
-                            cancel_tx: job.cancel_tx.clone(),
-                        });
-                        (job, guard.jobs.len())
-                    };
-
-                    tracing::info!(
-                        "  *** JobQueue: begin job #{} - {} - {} queued job(s) ***",
-                        job_num,
-                        next_job.job_id,
-                        num_pending
-                    );
-                    let timer = tokio::time::Instant::now();
-                    let task_handle = if next_job.job.is_async() {
-                        tokio::spawn(async move {
-                            next_job.job.run_async_cancellable(next_job.cancel_rx).await
-                        })
-                    } else {
-                        tokio::task::spawn_blocking(move || next_job.job.run(next_job.cancel_rx))
-                    };
-
-                    let job_completion = match task_handle.await {
-                        Ok(jc) => jc,
-                        Err(e) => {
-                            if e.is_panic() {
-                                JobCompletion::Panicked(e.into_panic())
-                            } else if e.is_cancelled() {
-                                JobCompletion::Cancelled
-                            } else {
-                                unreachable!()
-                            }
-                        }
-                    };
-
-                    tracing::info!(
-                        "  *** JobQueue: ended job #{} - {} - Completion: {} - {} secs ***",
-                        job_num,
-                        next_job.job_id,
-                        job_completion,
-                        timer.elapsed().as_secs_f32()
-                    );
-                    job_num += 1;
-
-                    shared2.lock().unwrap().current_job = None;
-
-                    if let Err(e) = next_job.result_tx.send(job_completion) {
-                        tracing::warn!("job-handle dropped? {}", e);
-                    }
-                });
-            }
-            tracing::debug!("task process_jobs exiting");
-        });
+        // spawn the process_jobs task
+        let shared_queue2 = shared_queue.clone();
+        let process_jobs_task_handle =
+            tokio::spawn(process_jobs(shared_queue2, rx_stop, rx_job_added));
 
         tracing::info!("JobQueue: started new queue.");
 
+        // construct and return JobQueue
         Self {
             tx_job_added,
             tx_stop,
-            shared,
+            shared_queue,
             process_jobs_task_handle: Some(process_jobs_task_handle),
         }
     }
@@ -171,8 +92,10 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub async fn stop(mut self) -> Result<(), StopQueueError> {
         tracing::info!("JobQueue: stopping.");
 
+        // send stop message to process_jobs task
         self.tx_stop.send(())?;
 
+        // wait for process_jobs task to finish
         if let Some(jh) = self.process_jobs_task_handle.take() {
             jh.await?;
         }
@@ -188,8 +111,10 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
 
+        // each job gets a random JobId
         let job_id = JobId::random();
 
+        // represent a job in the queue
         let m = QueuedJob {
             job,
             job_id,
@@ -199,15 +124,25 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             priority,
         };
 
+        // add job to queue and obtain number of jobs in queue and current-job (if any)
         let (num_jobs, job_running) = {
-            let mut guard = self.shared.lock().unwrap();
+            // acquire mutex lock
+            let mut guard = self.shared_queue.lock().unwrap();
+
+            // add job to job-queue
             guard.jobs.push_back(m);
+
             let job_running = match &guard.current_job {
                 Some(j) => format!("#{} - {}", j.job_num, j.job_id),
                 None => "none".to_string(),
             };
             (guard.jobs.len(), job_running)
-        };
+        }; // mutex lock released on drop
+
+        // notify process_jobs task that a job was added.
+        self.tx_job_added.send(())?;
+
+        // log that job is added to the queue
         tracing::info!(
             "JobQueue: job added - {}  {} queued job(s).  job running: {}",
             job_id,
@@ -215,21 +150,168 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
             job_running
         );
 
-        self.tx_job_added.send(())?;
-
+        // create and return JobHandle
         Ok(JobHandle::new(job_id, result_rx, cancel_tx))
     }
 
     /// returns total number of jobs, queued plus running.
     pub fn num_jobs(&self) -> usize {
-        let guard = self.shared.lock().unwrap();
+        let guard = self.shared_queue.lock().unwrap();
         guard.jobs.len() + guard.current_job.as_ref().map(|_| 1).unwrap_or(0)
     }
 
     /// returns number of queued jobs
     pub fn num_queued_jobs(&self) -> usize {
-        self.shared.lock().unwrap().jobs.len()
+        self.shared_queue.lock().unwrap().jobs.len()
     }
+}
+
+// implements the process_jobs task, spawned by JobQueue::start().
+//
+// this fn calls tokio::select!{} in a loop.  The select has two branches:
+// 1. receive 'job_added' message over mpsc channel (unbounded)
+// 2. receive 'stop' message over watch channel
+//
+// job_added:
+//
+// When a 'job_added' msg is received, the highest priority queued job is picked
+// to run next.  We await the job, and then send results to the JobHandle.
+//
+// Note that jobs can take a long time to run and thus msgs can pile up in the
+// job_added channel, which is unbounded. These messages are of type "()" so
+// are as small as possible.
+//
+// stop:
+//
+// When a 'stop' msg is received we send a cancel msg to the current job (if any) and
+// wait for it to complete. Then we exit the loop and return.
+async fn process_jobs<P: Ord + Send + Sync + 'static>(
+    shared_queue: Arc<Mutex<SharedQueue<P>>>,
+    mut rx_stop: watch::Receiver<()>,
+    mut rx_job_added: mpsc::UnboundedReceiver<()>,
+) {
+    // job number starts at 1 and increments with each job that is processed.
+    // note that processing order may be different than order in which jobs
+    // are added due to job priorities.
+    let mut job_num: usize = 1;
+
+    // loop until 'stop' msg is received.
+    loop {
+        tokio::select! {
+
+            // handle msg over 'stop' channel which indicates we must exit the loop.
+            _ = rx_stop.changed() => {
+                tracing::debug!("task process_jobs received Stop message.");
+
+                // acquire mutex lock and obtain current_job info, if any.
+                let maybe_info = shared_queue.lock().unwrap().current_job.as_ref().map(|cj| (cj.job_id.clone(), cj.cancel_tx.clone()) );
+
+                // if there is a presently executing job we need to cancel it
+                // and wait for it to complete.
+                if let Some((job_id, cancel_tx)) = maybe_info {
+                    match cancel_tx.send(()) {
+                        Ok(()) => {
+                            // wait for channel to close, indicating job has cancelled (or otherwise completed)
+                            tracing::debug!("JobQueue: notified current job {} to cancel.  waiting...", job_id);
+                            cancel_tx.closed().await;
+                            tracing::debug!("JobQueue: current job {} has cancelled.", job_id);
+                        }
+                        Err(e) => {
+                            tracing::warn!("could not send cancellation msg to current job {}. {}", job_id, e)
+                        }
+                    }
+                }
+
+                // exit loop, processing ends.
+                break;
+            }
+
+            // handle msg over job_added channel
+            //
+            // note:  this unbounded channel will grow in size as new job(s) are
+            // added while an existing job is running.  ie, we read from the
+            // channel after each job completes.
+            _ = rx_job_added.recv() => {
+
+                // Find the next job to run, and the number of jobs left in queue
+                tracing::debug!("task process_jobs received JobAdded message.");
+                let (next_job, num_pending) = {
+
+                    // acquire mutex lock
+                    let mut guard = shared_queue.lock().unwrap();
+
+                    // pick the highest priority job
+                    guard
+                        .jobs
+                        .make_contiguous()
+                        .sort_by(|a, b| b.priority.cmp(&a.priority));
+                    let job = guard.jobs.pop_front().unwrap();
+
+                    // set highest priority job as the current job
+                    guard.current_job = Some(CurrentJob {
+                        job_num,
+                        job_id: job.job_id.clone(),
+                        cancel_tx: job.cancel_tx.clone(),
+                    });
+
+                    (job, guard.jobs.len())
+                }; // mutex lock is released when guard drops.
+
+                // log that we are starting a job
+                tracing::info!(
+                    "  *** JobQueue: begin job #{} - {} - {} queued job(s) ***",
+                    job_num,
+                    next_job.job_id,
+                    num_pending
+                );
+
+                // record time that job starts
+                let timer = tokio::time::Instant::now();
+
+                // spawn task that performs the job, either async or blocking.
+                let task_handle = if next_job.job.is_async() {
+                    tokio::spawn(async move {
+                        next_job.job.run_async_cancellable(next_job.cancel_rx).await
+                    })
+                } else {
+                    tokio::task::spawn_blocking(move || next_job.job.run(next_job.cancel_rx))
+                };
+
+                // create JobCompletion from task results
+                let job_completion = match task_handle.await {
+                    Ok(jc) => jc,
+                    Err(e) => {
+                        if e.is_panic() {
+                            JobCompletion::Panicked(e.into_panic())
+                        } else if e.is_cancelled() {
+                            JobCompletion::Cancelled
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                };
+
+                // log that job has ended.
+                tracing::info!(
+                    "  *** JobQueue: ended job #{} - {} - Completion: {} - {} secs ***",
+                    job_num,
+                    next_job.job_id,
+                    job_completion,
+                    timer.elapsed().as_secs_f32()
+                );
+                job_num += 1;
+
+                // obtain mutex lock and set current-job to None
+                shared_queue.lock().unwrap().current_job = None;
+
+                // send job results to the JobHandle receiver
+                if let Err(e) = next_job.result_tx.send(job_completion) {
+                    tracing::warn!("job-handle dropped? {}", e);
+                }
+            }
+        }
+    }
+    tracing::debug!("task process_jobs exiting");
 }
 
 /// represents a job in the queue.
@@ -265,7 +347,7 @@ pub(super) struct CurrentJob {
 
 /// represents data shared between tasks/threads
 #[derive(Debug)]
-pub(super) struct Shared<P: Ord> {
+pub(super) struct SharedQueue<P: Ord> {
     jobs: VecDeque<QueuedJob<P>>,
     current_job: Option<CurrentJob>,
 }

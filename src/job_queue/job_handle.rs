@@ -42,6 +42,56 @@ impl JobHandle {
     ///
     /// note: await the JobHandle after calling `cancel()` to ensure the job has
     /// ended and obtain a [JobCompletion]
+    ///
+    /// Basic example:
+    ///
+    /// ```
+    /// fn add_and_cancel_job(job_queue: &mut JobQueue, job: Box<dyn Job>) -> anyhow::Error {
+    ///
+    ///     let job_priority: usize = 10;
+    ///     let job_handle = job_queue.add_job(job, job_priority)?;
+    ///
+    ///     // some time later...
+    ///     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+    ///
+    ///     job_handle.cancel()?;
+    ///
+    ///     let completion = job_handle.await?;
+    ///     assert!(matches!(completion, JobCompletion::Cancelled));
+    /// }
+    /// ```
+    ///
+    /// Sometimes it is necessary to listen for an application message that
+    /// the job needs to cancel.  This can be achieved with tokio::select!{}
+    ///
+    /// Example:
+    ///
+    /// ```
+    /// fn do_some_work(job_queue: &mut JobQueue, job: Box<dyn Job>, cancel_work_rx: tokio::sync::oneshot::Receiver<()>) -> Result<JobCompletion, JobHandleErrorSync> {
+    ///
+    ///     // add the job to queue
+    ///     let job_priority: usize = 10;
+    ///     let job_handle = job_queue.add_job(job, job_priority).unwrap();
+    ///
+    ///     // pin job_handle, so borrow checker knows the address can't change
+    ///     // and it is safe to use in both select branches
+    ///     tokio::pin!(job_handle);
+    ///
+    ///     // execute job and simultaneously listen for cancel msg from elsewhere
+    ///     let completion_result = tokio::select! {
+    ///         // case: job completion.
+    ///         completion = &mut job_handle => completion,
+    ///
+    ///         // case: sender cancelled, or sender dropped.
+    ///         _ = cancel_work_rx => {
+    ///             job_handle.cancel().map_err(|e| e.into_sync())?;
+    ///             job_handle.await
+    ///         }
+    ///     }
+    ///     completion_result
+    /// }
+    /// ```
+    /// *note: also demonstrates mapping JobHandleError to JobHandleErrorSync which implements Send+Sync.*
     pub fn cancel(&self) -> Result<(), JobHandleError> {
         Ok(self.cancel_tx.send(())?)
     }
