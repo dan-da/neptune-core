@@ -26,9 +26,17 @@
 //! in a single JobQueue instance.  Any type that implements the Job trait
 //! may be a job.
 
+pub mod channels;
 pub mod errors;
-mod queue;
+pub mod job_completion;
+pub mod job_handle;
+pub mod job_id;
 pub mod traits;
-pub mod triton_vm;
+
+mod queue;
 
 pub use queue::JobQueue;
+
+// this holds types specific to neptune-core, and should be moved
+// out of job_queue module.
+pub mod triton_vm;

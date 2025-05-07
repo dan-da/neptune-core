@@ -1,135 +1,22 @@
 use std::collections::VecDeque;
 use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::task::Context;
-use std::task::Poll;
 
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use super::channels::JobCancelReceiver;
+use super::channels::JobCancelSender;
+use super::channels::JobResultSender;
+use super::channels::LogWhenDropped;
 use super::errors::AddJobError;
-use super::errors::JobHandleError;
 use super::errors::StopQueueError;
+use super::job_completion::JobCompletion;
+use super::job_handle::JobHandle;
+use super::job_id::JobId;
 use super::traits::Job;
-use super::traits::JobCancelReceiver;
-use super::traits::JobCancelSender;
-use super::traits::JobCompletion;
-use super::traits::JobResultReceiver;
-use super::traits::JobResultSender;
-
-/// a randomly generated Job identifier
-#[derive(Debug, Clone, Copy)]
-pub struct JobId([u8; 12]);
-
-impl std::fmt::Display for JobId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for byte in &self.0 {
-            write!(f, "{:02x}", byte)?;
-        }
-        Ok(())
-    }
-}
-
-impl JobId {
-    fn random() -> Self {
-        Self(rand::random())
-    }
-}
-
-/// A job-handle enables cancelling a job and awaiting results
-///
-/// A JobHandle can be awaited directly.  It returns a
-/// `Result<JobCompletion, JobHandleError>`
-///
-/// See [JobCompletion] and [JobHandleError] for details.
-///
-/// When the `JobHandle` is dropped a cancellation message is sent to the job
-/// task.
-#[derive(Debug)]
-pub struct JobHandle {
-    job_id: JobId,
-    result_rx: JobResultReceiver,
-    cancel_tx: JobCancelSender,
-}
-impl JobHandle {
-    /// sends cancel message to job and returns immediately.
-    ///
-    /// note: await the JobHandle after calling `cancel()` to ensure the job has
-    /// ended and obtain a [JobCompletion]
-    pub fn cancel(&self) -> Result<(), JobHandleError> {
-        Ok(self.cancel_tx.send(())?)
-    }
-
-    /// obtain randomly generated job identifier
-    pub fn job_id(&self) -> JobId {
-        self.job_id
-    }
-}
-
-impl Future for JobHandle {
-    type Output = Result<JobCompletion, JobHandleError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Directly poll the underlying result_rx
-        let result_rx = &mut self.get_mut().result_rx;
-        Pin::new(result_rx).poll(cx).map_err(|e| e.into())
-    }
-}
-
-impl Drop for JobHandle {
-    fn drop(&mut self) {
-        tracing::debug!("JobHandle dropping for job: {}", self.job_id);
-        if !self.cancel_tx.is_closed() {
-            if let Err(e) = self.cancel_tx.send(()) {
-                tracing::error!("job-cancel message could not be sent. {}", e);
-            } else {
-                tracing::debug!("Sent job-cancel msg to job: {}", self.job_id);
-            }
-        }
-    }
-}
-
-/// represents a job in the queue.
-struct QueuedJob<P> {
-    job: Box<dyn Job>,
-    job_id: JobId,
-    result_tx: JobResultSender,
-    cancel_tx: JobCancelSender,
-    cancel_rx: JobCancelReceiver,
-    priority: P,
-}
-
-impl<P: fmt::Debug> fmt::Debug for QueuedJob<P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("QueuedJob")
-            .field("job", &"Box<dyn Job>")
-            .field("job_id", &self.job_id)
-            .field("result_tx", &"JobResultSender")
-            .field("cancel_tx", &"JobCancelSender")
-            .field("cancel_rx", &"JobCancelReceiver")
-            .field("priority", &self.priority)
-            .finish()
-    }
-}
-
-/// represents the currently executing job
-#[derive(Debug)]
-struct CurrentJob {
-    job_num: usize,
-    job_id: JobId,
-    cancel_tx: JobCancelSender,
-}
-
-/// represents data shared between tasks/threads
-#[derive(Debug)]
-struct Shared<P: Ord> {
-    jobs: VecDeque<QueuedJob<P>>,
-    current_job: Option<CurrentJob>,
-}
 
 /// implements a job queue that sends result of each job to a listener.
 #[derive(Debug)]
@@ -301,8 +188,8 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, AddJobError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
-        let cancel_tx = super::traits::LogWhenDropped(cancel_tx);
-        let cancel_rx = super::traits::LogWhenDropped(cancel_rx);
+        let cancel_tx = LogWhenDropped(cancel_tx);
+        let cancel_rx = LogWhenDropped(cancel_rx);
 
         let job_id = JobId::random();
 
@@ -333,11 +220,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         self.tx_job_added.send(())?;
 
-        Ok(JobHandle {
-            job_id,
-            result_rx,
-            cancel_tx,
-        })
+        Ok(JobHandle::new(job_id, result_rx, cancel_tx))
     }
 
     /// returns total number of jobs, queued plus running.
@@ -350,6 +233,44 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub fn num_queued_jobs(&self) -> usize {
         self.shared.lock().unwrap().jobs.len()
     }
+}
+
+/// represents a job in the queue.
+pub(super) struct QueuedJob<P> {
+    job: Box<dyn Job>,
+    job_id: JobId,
+    result_tx: JobResultSender,
+    cancel_tx: JobCancelSender,
+    cancel_rx: JobCancelReceiver,
+    priority: P,
+}
+
+impl<P: fmt::Debug> fmt::Debug for QueuedJob<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QueuedJob")
+            .field("job", &"Box<dyn Job>")
+            .field("job_id", &self.job_id)
+            .field("result_tx", &"JobResultSender")
+            .field("cancel_tx", &"JobCancelSender")
+            .field("cancel_rx", &"JobCancelReceiver")
+            .field("priority", &self.priority)
+            .finish()
+    }
+}
+
+/// represents the currently executing job
+#[derive(Debug)]
+pub(super) struct CurrentJob {
+    job_num: usize,
+    job_id: JobId,
+    cancel_tx: JobCancelSender,
+}
+
+/// represents data shared between tasks/threads
+#[derive(Debug)]
+pub(super) struct Shared<P: Ord> {
+    jobs: VecDeque<QueuedJob<P>>,
+    current_job: Option<CurrentJob>,
 }
 
 #[cfg(test)]
