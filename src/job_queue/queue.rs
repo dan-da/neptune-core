@@ -10,7 +10,6 @@ use tokio::task::JoinHandle;
 use super::channels::JobCancelReceiver;
 use super::channels::JobCancelSender;
 use super::channels::JobResultSender;
-use super::channels::LogWhenDropped;
 use super::errors::AddJobError;
 use super::errors::StopQueueError;
 use super::job_completion::JobCompletion;
@@ -188,8 +187,6 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, AddJobError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
-        let cancel_tx = LogWhenDropped(cancel_tx);
-        let cancel_rx = LogWhenDropped(cancel_rx);
 
         let job_id = JobId::random();
 

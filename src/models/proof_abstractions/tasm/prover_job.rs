@@ -18,7 +18,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::config_models::network::Network;
 use crate::job_queue::channels::JobCancelReceiver;
-use crate::job_queue::job_completion::JobCompletion;
+use crate::job_queue::JobCompletion;
 use crate::job_queue::traits::Job;
 use crate::job_queue::traits::JobResult;
 use crate::macros::fn_name;

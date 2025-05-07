@@ -52,6 +52,8 @@ impl JobHandle {
     }
 }
 
+// we implement Future for JobHandle so that a JobHandle can be
+// directly awaited (like a tokio JoinHandle).
 impl Future for JobHandle {
     type Output = Result<JobCompletion, JobHandleError>;
 

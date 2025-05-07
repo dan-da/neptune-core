@@ -1,6 +1,4 @@
 use std::any::Any;
-
-
 use super::channels::JobCancelReceiver;
 use super::job_completion::JobCompletion;
 
