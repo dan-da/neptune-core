@@ -2095,12 +2095,12 @@ pub(crate) mod tests {
 
         // wait until mining status is inactive.
         // job should have been cancelled and removed from queue, but we have no way to verify
-        let gsl = global_state_lock.clone();
+        let gsl2 = global_state_lock.clone();
         wait_until(timeout, move || {
-            let gsl = gsl.clone();
+            let gsl2 = gsl2.clone();
             async move {
                 matches!(
-                    gsl.lock_guard().await.mining_state.mining_status,
+                    gsl2.lock_guard().await.mining_state.mining_status,
                     MiningStatus::Inactive
                 )
             }
@@ -2112,12 +2112,12 @@ pub(crate) mod tests {
 
         // wait until mining-status is Composing again.
         // there should be a proving job in queue again
-        let gsl = global_state_lock.clone();
+        let gsl3 = global_state_lock.clone();
         wait_until(timeout, move || {
-            let gsl = gsl.clone();
+            let gsl3 = gsl3.clone();
             async move {
                 matches!(
-                    gsl.lock_guard().await.mining_state.mining_status,
+                    gsl3.lock_guard().await.mining_state.mining_status,
                     MiningStatus::Composing(_)
                 )
             }
