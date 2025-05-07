@@ -204,7 +204,7 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
                 tracing::debug!("task process_jobs received Stop message.");
 
                 // acquire mutex lock and obtain current_job info, if any.
-                let maybe_info = shared_queue.lock().unwrap().current_job.as_ref().map(|cj| (cj.job_id.clone(), cj.cancel_tx.clone()) );
+                let maybe_info = shared_queue.lock().unwrap().current_job.as_ref().map(|cj| (cj.job_id, cj.cancel_tx.clone()) );
 
                 // if there is a presently executing job we need to cancel it
                 // and wait for it to complete.
@@ -250,7 +250,7 @@ async fn process_jobs<P: Ord + Send + Sync + 'static>(
                     // set highest priority job as the current job
                     guard.current_job = Some(CurrentJob {
                         job_num,
-                        job_id: job.job_id.clone(),
+                        job_id: job.job_id,
                         cancel_tx: job.cancel_tx.clone(),
                     });
 
