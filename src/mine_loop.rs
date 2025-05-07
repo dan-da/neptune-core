@@ -846,13 +846,29 @@ pub(crate) async fn mine(
             }
             Ok(Err(e)) = &mut composer_task => {
 
-                // fix issue 579.
-                // we must check if error indicates job was cancelled.
-                // note that cancellation can occur any time that the cancellation
-                // channel Sender gets dropped, which occurs if composer_task gets aborted
-                // which occurs if any other branch of this select!{} resolves first.
-                // Common causes are NewBlock and NewBlockProposal messages from main.
                 match e.root_cause().downcast_ref::<CreateProofError>() {
+                    // address issue 579.
+                    //
+                    // we check if error indicates job was cancelled.
+                    //
+                    // if so, we simply log and continue. ignoring the error.
+                    //
+                    // this is a fail-safe and appears unreachable for present
+                    // codebase during normal mining-loop operation.
+                    //
+                    // job cancellation can occur any time that the cancellation
+                    // channel Sender gets dropped, which occurs if
+                    // composer_task gets aborted which occurs if any other
+                    // branch of this select!{} resolves first.  Common causes
+                    // are NewBlock and NewBlockProposal messages from main.
+                    //
+                    // HOWEVER: if the composer_task is aborted because another
+                    // branch of the select resolves first then this branch
+                    // should not execute making this check unnecessary.
+                    //
+                    // The remaining sources of cancellation are:
+                    // 1. mining loop exits, eg during graceful shutdown.
+                    // 2. some future change to codebase
                     Some(CreateProofError::JobHandleError(JobHandleErrorSync::JobCancelled)) => {
                         debug!("composer job was cancelled. continuing normal operation");
                     }
