@@ -1053,8 +1053,8 @@ pub mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::shared::Hash;
     use crate::models::blockchain::transaction::lock_script::LockScriptAndWitness;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;

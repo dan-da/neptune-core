@@ -22,7 +22,7 @@ use super::transaction::transaction_kernel::TransactionKernel;
 use super::transaction::utxo::Coin;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::ConsensusProgram;

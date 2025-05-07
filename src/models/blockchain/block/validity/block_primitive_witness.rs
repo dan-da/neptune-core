@@ -131,8 +131,8 @@ pub(crate) mod tests {
     use tasm_lib::triton_vm::prelude::Tip5;
 
     use super::BlockPrimitiveWitness;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::block_appendix::BlockAppendix;
     use crate::models::blockchain::block::block_body::BlockBody;
     use crate::models::blockchain::block::block_header::BlockHeader;

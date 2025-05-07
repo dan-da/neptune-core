@@ -1962,7 +1962,7 @@ pub(crate) mod tests {
     use crate::api::export::Transaction;
     use crate::config_models::cli_args;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::transaction::transaction_kernel::TransactionKernelModifier;
     use crate::models::blockchain::transaction::utxo::Coin;
     use crate::models::state::tx_creation_config::TxCreationConfig;

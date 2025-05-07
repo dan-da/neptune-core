@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::api::tx_initiation::builder::transaction_proof_builder::TransactionProofBuilder;
 use crate::config_models::network::Network;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
 use crate::models::proof_abstractions::mast_hash::MastHash;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
@@ -305,7 +305,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
     use crate::models::proof_abstractions::timestamp::Timestamp;
     use crate::tests::shared::make_mock_transaction;

@@ -42,7 +42,7 @@ use crate::api::tx_initiation::builder::tx_input_list_builder::InputSelectionPol
 use crate::api::tx_initiation::builder::tx_input_list_builder::TxInputListBuilder;
 use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat;
 use crate::api::tx_initiation::builder::tx_output_list_builder::TxOutputListBuilder;
-use crate::job_queue::triton_vm::vm_job_queue;
+use crate::triton_vm_job_queue::vm_job_queue;
 use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
 use crate::models::proof_abstractions::timestamp::Timestamp;
 use crate::models::state::tx_creation_artifacts::TxCreationArtifacts;

@@ -1710,8 +1710,8 @@ mod tests {
     use super::*;
     use crate::api::export::TxOutputList;
     use crate::config_models::network::Network;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::mine_loop::tests::make_coinbase_transaction_from_state;
     use crate::models::blockchain::block::Block;
     use crate::models::state::tx_creation_config::TxCreationConfig;

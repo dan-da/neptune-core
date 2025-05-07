@@ -50,7 +50,7 @@ use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
@@ -1277,24 +1277,40 @@ pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::R
 /// ```
 pub async fn wait_until<F, Fut>(
     timeout: std::time::Duration,
-    mut predicate: F,
+    predicate: F,
 ) -> anyhow::Result<()>
 where
-    F: FnMut() -> Fut + Send + 'static,
+    F: FnOnce() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = bool> + Send + 'static,
 {
-    let start = std::time::Instant::now();
-    loop {
-        if predicate().await {
-            break;
-        }
-        if start.elapsed() > timeout {
-            anyhow::bail!(
-                "timeout reached after {} seconds",
-                start.elapsed().as_secs_f32()
-            );
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    let result = tokio::time::timeout(timeout, predicate()).await;
+    match result {
+        Ok(true) => Ok(()),
+        Ok(false) => anyhow::bail!("predicate returned false before timeout"),
+        Err(_) => anyhow::bail!("timeout reached"),
     }
-    Ok(())
 }
+
+// pub async fn wait_until<F, Fut>(
+//     timeout: std::time::Duration,
+//     mut predicate: F,
+// ) -> anyhow::Result<()>
+// where
+//     F: FnMut() -> Fut + Send + 'static,
+//     Fut: std::future::Future<Output = bool> + Send + 'static,
+// {
+//     let start = std::time::Instant::now();
+//     loop {
+//         if predicate().await {
+//             break;
+//         }
+//         if start.elapsed() > timeout {
+//             anyhow::bail!(
+//                 "timeout reached after {} seconds",
+//                 start.elapsed().as_secs_f32()
+//             );
+//         }
+//         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+//     }
+//     Ok(())
+// }

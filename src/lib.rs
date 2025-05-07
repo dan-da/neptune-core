@@ -27,7 +27,7 @@ pub mod api;
 pub mod config_models;
 pub mod connect_to_peers;
 pub mod database;
-pub mod job_queue;
+pub(crate) mod job_queue;
 pub mod locks;
 pub mod macros;
 pub mod main_loop;
@@ -38,6 +38,7 @@ pub mod prelude;
 pub mod rpc_auth;
 pub mod rpc_server;
 pub mod util_types;
+pub mod triton_vm_job_queue;
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

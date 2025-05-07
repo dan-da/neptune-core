@@ -7,7 +7,7 @@ pub use crate::api::tx_initiation::builder::tx_output_list_builder::OutputFormat
 pub use crate::api::wallet::WalletBalances;
 pub use crate::config_models::cli_args::Args;
 pub use crate::config_models::network::Network;
-pub use crate::job_queue::triton_vm::TritonVmJobPriority;
+pub use crate::triton_vm_job_queue::TritonVmJobPriority;
 pub use crate::models::blockchain::block::block_height::BlockHeight;
 pub use crate::models::blockchain::transaction::primitive_witness::WitnessValidationError;
 pub use crate::models::blockchain::transaction::transaction_proof::TransactionProof;

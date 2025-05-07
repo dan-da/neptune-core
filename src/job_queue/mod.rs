@@ -36,7 +36,3 @@ pub mod traits;
 mod queue;
 
 pub use queue::JobQueue;
-
-// this holds types specific to neptune-core, and should be moved
-// out of job_queue module.
-pub mod triton_vm;

@@ -682,8 +682,8 @@ pub(crate) mod tests {
     use tasm_lib::triton_vm::prelude::*;
 
     use super::*;
-    use crate::job_queue::triton_vm::TritonVmJobPriority;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::triton_vm_job_queue::TritonVmJobPriority;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::mutator_set_update::MutatorSetUpdate;
     use crate::models::blockchain::transaction::PrimitiveWitness;
     use crate::models::blockchain::transaction::Transaction;

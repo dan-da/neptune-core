@@ -15,7 +15,7 @@ use twenty_first::math::tip5::Digest;
 use super::utxo::Utxo;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
 use crate::api::tx_initiation::error::CreateProofError;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::transaction::Proof;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::prelude::twenty_first;

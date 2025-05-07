@@ -9,8 +9,8 @@ use super::tx_proving_capability::TxProvingCapability;
 use super::wallet::address::SpendingKey;
 use super::wallet::change_policy::ChangePolicy;
 use super::wallet::utxo_notification::UtxoNotificationMedium;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 
 /// Options and configuration settings for creating transactions

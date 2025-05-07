@@ -34,9 +34,9 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
 use crate::job_queue::errors::JobHandleErrorSync;
-use crate::job_queue::triton_vm::vm_job_queue;
-use crate::job_queue::triton_vm::TritonVmJobPriority;
-use crate::job_queue::triton_vm::TritonVmJobQueue;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -1024,7 +1024,7 @@ pub(crate) mod tests {
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::errors::JobHandleErrorSync;
-    use crate::job_queue::triton_vm::TritonVmJobQueue;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
