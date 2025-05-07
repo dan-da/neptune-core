@@ -50,7 +50,6 @@ use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
 use crate::config_models::network::Network;
 use crate::database::storage::storage_vec::traits::StorageVecBase;
 use crate::database::NeptuneLevelDb;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::mine_loop::composer_parameters::ComposerParameters;
 use crate::mine_loop::make_coinbase_transaction_stateless;
 use crate::mine_loop::prepare_coinbase_transaction_stateless;
@@ -108,6 +107,7 @@ use crate::models::state::wallet::wallet_entropy::WalletEntropy;
 use crate::models::state::wallet::wallet_state::WalletState;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::util_types::mutator_set::addition_record::AdditionRecord;
 use crate::util_types::mutator_set::mutator_set_accumulator::MutatorSetAccumulator;
 use crate::util_types::mutator_set::removal_record::RemovalRecord;
@@ -1275,42 +1275,27 @@ pub fn copy_dir_recursive(source: &PathBuf, destination: &PathBuf) -> std::io::R
 ///     Ok(())
 /// }
 /// ```
+
 pub async fn wait_until<F, Fut>(
     timeout: std::time::Duration,
-    predicate: F,
+    mut predicate: F,
 ) -> anyhow::Result<()>
 where
-    F: FnOnce() -> Fut + Send + 'static,
+    F: FnMut() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = bool> + Send + 'static,
 {
-    let result = tokio::time::timeout(timeout, predicate()).await;
-    match result {
-        Ok(true) => Ok(()),
-        Ok(false) => anyhow::bail!("predicate returned false before timeout"),
-        Err(_) => anyhow::bail!("timeout reached"),
+    let start = std::time::Instant::now();
+    loop {
+        if predicate().await {
+            break;
+        }
+        if start.elapsed() > timeout {
+            anyhow::bail!(
+                "timeout reached after {} seconds",
+                start.elapsed().as_secs_f32()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
+    Ok(())
 }
-
-// pub async fn wait_until<F, Fut>(
-//     timeout: std::time::Duration,
-//     mut predicate: F,
-// ) -> anyhow::Result<()>
-// where
-//     F: FnMut() -> Fut + Send + 'static,
-//     Fut: std::future::Future<Output = bool> + Send + 'static,
-// {
-//     let start = std::time::Instant::now();
-//     loop {
-//         if predicate().await {
-//             break;
-//         }
-//         if start.elapsed() > timeout {
-//             anyhow::bail!(
-//                 "timeout reached after {} seconds",
-//                 start.elapsed().as_secs_f32()
-//             );
-//         }
-//         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-//     }
-//     Ok(())
-// }

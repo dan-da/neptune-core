@@ -34,9 +34,6 @@ use crate::api::tx_initiation::builder::triton_vm_proof_job_options_builder::Tri
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::config_models::network::Network;
 use crate::job_queue::errors::JobHandleErrorSync;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobPriority;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::block::block_height::BlockHeight;
 use crate::models::blockchain::block::block_kernel::BlockKernel;
 use crate::models::blockchain::block::block_kernel::BlockKernelField;
@@ -59,6 +56,9 @@ use crate::models::state::wallet::transaction_output::TxOutput;
 use crate::models::state::wallet::transaction_output::TxOutputList;
 use crate::models::state::GlobalStateLock;
 use crate::prelude::twenty_first;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobPriority;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::COMPOSITION_FAILED_EXIT_CODE;
 
 /// Information related to the resources to be used for guessing.
@@ -1024,7 +1024,6 @@ pub(crate) mod tests {
     use crate::config_models::fee_notification_policy::FeeNotificationPolicy;
     use crate::config_models::network::Network;
     use crate::job_queue::errors::JobHandleErrorSync;
-    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::models::blockchain::block::validity::block_primitive_witness::tests::deterministic_block_primitive_witness;
     use crate::models::blockchain::transaction::validity::single_proof::SingleProof;
     use crate::models::blockchain::type_scripts::native_currency_amount::NativeCurrencyAmount;
@@ -1043,6 +1042,7 @@ pub(crate) mod tests {
     use crate::tests::shared::random_transaction_kernel;
     use crate::tests::shared::wait_until;
     use crate::tests::shared_tokio_runtime;
+    use crate::triton_vm_job_queue::TritonVmJobQueue;
     use crate::util_types::test_shared::mutator_set::pseudorandom_addition_record;
     use crate::util_types::test_shared::mutator_set::random_mmra;
     use crate::util_types::test_shared::mutator_set::random_mutator_set_accumulator;

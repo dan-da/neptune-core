@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use crate::api::tx_initiation::error::CreateProofError;
 use crate::api::tx_initiation::error::ProofRequirement;
-use crate::triton_vm_job_queue::vm_job_queue;
-use crate::triton_vm_job_queue::TritonVmJobQueue;
 use crate::models::blockchain::transaction::validity::neptune_proof::Proof;
 use crate::models::proof_abstractions::tasm::program::prove_consensus_program;
 use crate::models::proof_abstractions::tasm::program::TritonVmProofJobOptions;
 use crate::triton_vm::prelude::Program;
 use crate::triton_vm::proof::Claim;
 use crate::triton_vm::vm::NonDeterminism;
+use crate::triton_vm_job_queue::vm_job_queue;
+use crate::triton_vm_job_queue::TritonVmJobQueue;
 
 /// a builder for [Proof]
 ///

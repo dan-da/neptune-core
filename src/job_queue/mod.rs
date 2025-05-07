@@ -28,13 +28,13 @@
 
 pub mod channels;
 pub mod errors;
-pub mod traits;
 mod job_completion;
 mod job_handle;
 mod job_id;
 mod queue;
+pub mod traits;
 
-pub use queue::JobQueue;
-pub use job_handle::JobHandle;
 pub use job_completion::JobCompletion;
+pub use job_handle::JobHandle;
 pub use job_id::JobId;
+pub use queue::JobQueue;

@@ -1,6 +1,6 @@
-use std::any::Any;
 use super::channels::JobCancelReceiver;
 use super::job_completion::JobCompletion;
+use std::any::Any;
 
 /// represents a job result, which can be any type.
 pub trait JobResult: Any + Send + Sync + std::fmt::Debug {
