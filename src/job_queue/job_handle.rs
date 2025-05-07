@@ -46,18 +46,25 @@ impl JobHandle {
     /// Basic example:
     ///
     /// ```
-    /// fn add_and_cancel_job(job_queue: &mut JobQueue, job: Box<dyn Job>) -> anyhow::Error {
+    /// use neptune_cash::job_queue::JobQueue;
+    /// use neptune_cash::job_queue::JobCompletion;
+    /// use neptune_cash::job_queue::traits::Job;
+    /// use neptune_cash::job_queue::errors::JobHandleError;
     ///
-    ///     let job_priority: usize = 10;
-    ///     let job_handle = job_queue.add_job(job, job_priority)?;
+    /// async fn add_and_cancel_job(job_queue: &mut JobQueue<u8>, job: Box<dyn Job>) -> Result<JobCompletion, JobHandleError> {
+    ///
+    ///     let job_priority: u8 = 10;
+    ///     let job_handle = job_queue.add_job(job, job_priority).unwrap();
     ///
     ///     // some time later...
     ///     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
     ///
     ///     job_handle.cancel()?;
     ///
-    ///     let completion = job_handle.await?;
-    ///     assert!(matches!(completion, JobCompletion::Cancelled));
+    ///     let job_completion_result = job_handle.await;
+    ///     assert!(matches!(job_completion_result, Ok(JobCompletion::Cancelled)));
+    ///
+    ///     job_completion_result
     /// }
     /// ```
     ///
@@ -67,10 +74,15 @@ impl JobHandle {
     /// Example:
     ///
     /// ```
-    /// fn do_some_work(job_queue: &mut JobQueue, job: Box<dyn Job>, cancel_work_rx: tokio::sync::oneshot::Receiver<()>) -> Result<JobCompletion, JobHandleErrorSync> {
+    /// use neptune_cash::job_queue::JobQueue;
+    /// use neptune_cash::job_queue::JobCompletion;
+    /// use neptune_cash::job_queue::traits::Job;
+    /// use neptune_cash::job_queue::errors::JobHandleErrorSync;
+    ///
+    /// async fn do_some_work(job_queue: &mut JobQueue<u8>, job: Box<dyn Job>, cancel_work_rx: tokio::sync::oneshot::Receiver<()>) -> Result<JobCompletion, JobHandleErrorSync> {
     ///
     ///     // add the job to queue
-    ///     let job_priority: usize = 10;
+    ///     let job_priority: u8 = 10;
     ///     let job_handle = job_queue.add_job(job, job_priority).unwrap();
     ///
     ///     // pin job_handle, so borrow checker knows the address can't change
@@ -78,7 +90,7 @@ impl JobHandle {
     ///     tokio::pin!(job_handle);
     ///
     ///     // execute job and simultaneously listen for cancel msg from elsewhere
-    ///     let completion_result = tokio::select! {
+    ///     let job_completion_result = tokio::select! {
     ///         // case: job completion.
     ///         completion = &mut job_handle => completion,
     ///
@@ -87,8 +99,9 @@ impl JobHandle {
     ///             job_handle.cancel().map_err(|e| e.into_sync())?;
     ///             job_handle.await
     ///         }
-    ///     }
-    ///     completion_result
+    ///     };
+    ///     job_completion_result
+    ///         .map_err(|e| e.into_sync())
     /// }
     /// ```
     /// *note: also demonstrates mapping JobHandleError to JobHandleErrorSync which implements Send+Sync.*
