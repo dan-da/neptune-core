@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 
 use super::traits::JobResult;
-use crate::job_queue::errors::JobResultWrapperError;
+use crate::job_queue::errors::JobHandleError;
 
 /// A generic wrapper around a job-specific result type `T` that implements the
 /// [`JobResult`](super::traits::JobResult) trait.
@@ -74,9 +74,9 @@ impl<T: 'static + Send + Sync> From<JobResultWrapper<T>> for Box<dyn JobResult> 
 }
 
 impl<T: 'static + Send + Sync + Debug> TryFrom<Box<dyn JobResult>> for JobResultWrapper<T> {
-    type Error = JobResultWrapperError;
+    type Error = JobHandleError;
 
-    fn try_from(boxed_trait_object: Box<dyn JobResult>) -> Result<Self, JobResultWrapperError> {
+    fn try_from(boxed_trait_object: Box<dyn JobResult>) -> Result<Self, JobHandleError> {
         Self::try_from_boxed_job_result(boxed_trait_object)
     }
 }
@@ -84,18 +84,10 @@ impl<T: 'static + Send + Sync + Debug> TryFrom<Box<dyn JobResult>> for JobResult
 impl<'a, T: 'static + Send + Sync + Debug> TryFrom<&'a Box<dyn JobResult>>
     for &'a JobResultWrapper<T>
 {
-    type Error = JobResultWrapperError;
+    type Error = JobHandleError;
 
     fn try_from(boxed_trait_object: &'a Box<dyn JobResult>) -> Result<Self, Self::Error> {
-        let any = boxed_trait_object.as_any();
-        if let Some(concrete_wrapper) = any.downcast_ref::<JobResultWrapper<T>>() {
-            Ok(concrete_wrapper)
-        } else {
-            Err(JobResultWrapperError::DowncastError {
-                from: std::any::type_name::<dyn JobResult>(),
-                to: std::any::type_name::<JobResultWrapper<T>>(),
-            })
-        }
+        JobResultWrapper::try_from_boxed_job_result_ref(boxed_trait_object)
     }
 }
 
@@ -125,12 +117,12 @@ impl<T: 'static + Send + Sync + 'static> JobResultWrapper<T> {
     /// fallibly convert a boxed dyn JobResult into a JobResultWrapper<T>.
     pub fn try_from_boxed_job_result(
         boxed_trait_object: Box<dyn JobResult>,
-    ) -> Result<Self, JobResultWrapperError> {
+    ) -> Result<Self, JobHandleError> {
         let any = boxed_trait_object.into_any(); // Convert Box<dyn JobResult> to Box<dyn Any>
         if let Ok(concrete_wrapper) = any.downcast::<JobResultWrapper<T>>() {
             Ok(*concrete_wrapper) // Dereference the Box to get JobResultWrapper<T>
         } else {
-            Err(JobResultWrapperError::DowncastError {
+            Err(JobHandleError::JobResultWrapperError {
                 from: std::any::type_name::<dyn JobResult>(),
                 to: std::any::type_name::<JobResultWrapper<T>>(),
             })
@@ -140,12 +132,12 @@ impl<T: 'static + Send + Sync + 'static> JobResultWrapper<T> {
     /// fallibly convert a boxed dyn JobResult reference into a JobResultWrapper<T>.
     pub fn try_from_boxed_job_result_ref(
         boxed_trait_object: &Box<dyn JobResult>,
-    ) -> Result<&Self, JobResultWrapperError> {
+    ) -> Result<&Self, JobHandleError> {
         let any = boxed_trait_object.as_any();
         if let Some(concrete_wrapper) = any.downcast_ref::<JobResultWrapper<T>>() {
             Ok(concrete_wrapper)
         } else {
-            Err(JobResultWrapperError::DowncastError {
+            Err(JobHandleError::JobResultWrapperError {
                 from: std::any::type_name::<dyn JobResult>(),
                 to: std::any::type_name::<JobResultWrapper<T>>(),
             })

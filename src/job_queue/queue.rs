@@ -487,7 +487,6 @@ mod tests {
     mod workers {
         use super::*;
         use crate::job_queue::errors::JobHandleError;
-        use crate::job_queue::errors::JobHandleErrorSync;
         use crate::job_queue::traits::JobResult;
         use crate::job_queue::JobResultWrapper;
 
@@ -652,10 +651,8 @@ mod tests {
 
                 let result = job_queue
                     .add_job(job, DoubleJobPriority::Low)?
-                    .await
-                    .map_err(|e| e.into_sync())?
-                    .result()
-                    .map_err(|e| e.into_sync())?;
+                    .await?
+                    .result()?;
 
                 let job_result: DoubleJobResult = result.try_into()?;
 
@@ -739,14 +736,12 @@ mod tests {
         //  1. using tokio::select!{} to execute the job and listen for a
         //     cancellation message simultaneously.
         //  2. using tokio::pin!() to avoid borrow-checker complaints in the select.
-        //  3. using into_sync() to convert JobHandleError into JobHandleErrorSync for
-        //     inter-thread usage.
-        //  4. using downcast to obtain the job result.
+        //  3. obtaining the job result.
         pub async fn cancel_job_in_select(is_async: bool) -> anyhow::Result<()> {
             async fn do_some_work(
                 is_async: bool,
                 cancel_work_rx: tokio::sync::oneshot::Receiver<()>,
-            ) -> Result<DoubleJobResult, JobHandleErrorSync> {
+            ) -> Result<DoubleJobResult, JobHandleError> {
                 // create a job queue.  (this could be done elsewhere)
                 let job_queue = JobQueue::start();
 
@@ -773,7 +768,7 @@ mod tests {
 
                     // case: sender cancelled, or sender dropped.
                     _ = cancel_work_rx => {
-                        job_handle.cancel().map_err(|e| e.into_sync())?;
+                        job_handle.cancel()?;
                         job_handle.await
                     }
                 };
@@ -781,12 +776,7 @@ mod tests {
                 println!("job_completion: {:#?}", completion);
 
                 // obtain job result (via downcast)
-                let result: DoubleJobResult = completion
-                    .map_err(|e| e.into_sync())?
-                    .result()
-                    .map_err(|e| e.into_sync())?
-                    .try_into()
-                    .unwrap();
+                let result: DoubleJobResult = completion?.result()?.try_into()?;
 
                 println!("job_result: {:#?}", result);
 
@@ -809,7 +799,7 @@ mod tests {
             let job_handle_error = jh.await?.unwrap_err();
 
             // ensure the error indicates JobCancelled
-            assert!(matches!(job_handle_error, JobHandleErrorSync::JobCancelled));
+            assert!(matches!(job_handle_error, JobHandleError::JobCancelled));
 
             Ok(())
         }
@@ -1034,7 +1024,7 @@ mod tests {
                 };
                 let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
 
-                let job_result = job_handle.await.map_err(|e| e.into_sync())?.result();
+                let job_result = job_handle.await?.result();
 
                 // verify that job_queue channels are still open
                 assert!(!job_queue.tx_job_added.is_closed());
@@ -1042,8 +1032,8 @@ mod tests {
 
                 // verify that we get an error with the job's panic msg.
                 assert!(matches!(
-                    job_result.map_err(|e| e.into_sync()),
-                    Err(JobHandleErrorSync::JobPanicked(e)) if e == *PANIC_STR
+                    job_result,
+                    Err(e) if e.panic_message() == Some((*PANIC_STR).to_string())
                 ));
 
                 // ensure we can still run another job afterwards.
@@ -1057,11 +1047,7 @@ mod tests {
                 let new_job_handle = job_queue.add_job(newjob, DoubleJobPriority::Low)?;
 
                 // ensure job processes and returns a result without error.
-                assert!(new_job_handle
-                    .await
-                    .map_err(|e| e.into_sync())?
-                    .result()
-                    .is_ok());
+                assert!(new_job_handle.await?.result().is_ok());
 
                 Ok(())
             }
@@ -1096,12 +1082,7 @@ mod tests {
                 duration: std::time::Duration::from_secs(5),
             };
             let job_handle = job_queue.add_job(job, 10usize)?;
-            let job_result: MyJobResult = job_handle
-                .await
-                .map_err(|e| e.into_sync())?
-                .result()
-                .map_err(|e| e.into_sync())?
-                .try_into()?;
+            let job_result: MyJobResult = job_handle.await?.result()?.try_into()?;
             let answer = job_result.into_inner();
 
             assert_eq!(answer.0 * 2, answer.1);
