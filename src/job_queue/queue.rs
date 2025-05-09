@@ -1196,10 +1196,7 @@ mod tests {
                 };
                 println!("job: {:#?}", job);
 
-                let priority = QueueJobPriority::random();
-                println!("job priority: {}", priority);
-
-                let job_handle = job_queue.add_job(job, priority)?;
+                let job_handle = job_queue.add_job(job, QueueJobPriority::random())?;
                 job_handles.push(job_handle);
             }
 
@@ -1217,13 +1214,15 @@ mod tests {
                 let job_result: FindPrimesJobResult = job_handle.await?.result()?.try_into()?;
                 let found_primes = job_result.into_inner();
 
+                // check for last (highest) prime in the result set
                 if let Some(last_found) = found_primes.last() {
-                    max = std::cmp::max(max, *last_found);
-
                     // verify that max of each set is larger than previous set.
                     // which indicates that job results are in same order as jobs were added.
-                    assert!(*last_found, max);
+                    assert!(*last_found > max);
+
+                    max = std::cmp::max(max, *last_found);
                 }
+
                 println!(
                     "job {} found {} primes: {:?}",
                     job_id,
