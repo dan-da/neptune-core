@@ -1119,11 +1119,11 @@ mod tests {
             // conversions.
             type FindPrimesJobResult = JobResultWrapper<Vec<u128>>;
 
-            // define our custom job type that finds a range of prime numbers
+            // define our custom job type that finds prime numbers within a range
             #[derive(Debug)]
             pub struct FindPrimesJob {
                 start: u128,
-                end: u128,
+                len: u128,
             }
 
             // The prime-number finding algorithm can be described as:
@@ -1156,11 +1156,12 @@ mod tests {
 
                 async fn find_primes(&self) -> Vec<u128> {
                     let mut primes = Vec::new();
-                    for num in self.start..=self.end {
+                    for num in self.start..=self.start + self.len {
                         if Self::is_prime(num).await {
                             primes.push(num);
                         }
                     }
+
                     primes
                 }
             }
@@ -1186,20 +1187,28 @@ mod tests {
             // start the JobQueue running.
             let job_queue = JobQueue::<QueueJobPriority>::start();
 
-            // start 20 jobs, each finding 100 primes, with random job priorities
-            for n in 0..20 {
+            // start 100 jobs, each searching 100 numbers for primes, with random job priorities
+            // note that jobs begin processing right away while this loop is running.
+            for n in 0..100 {
                 let job = FindPrimesJob {
                     start: n * NUM_PRIMES_PER_JOB,
-                    end: n + NUM_PRIMES_PER_JOB,
+                    len: NUM_PRIMES_PER_JOB,
                 };
+                println!("job: {:#?}", job);
 
-                let job_handle = job_queue.add_job(job, QueueJobPriority::random())?;
+                let priority = QueueJobPriority::random();
+                println!("job priority: {}", priority);
+
+                let job_handle = job_queue.add_job(job, priority)?;
                 job_handles.push(job_handle);
             }
 
-            // await all the jobs to complete.  note that completion order will
-            // be different from order they were added due to the random priorities
-            // and thus the printed prime ranges will be out of order.
+            // await all the jobs to complete.  note that:
+            // 1. jobs will be processed in a different order than they were added due to the random priorities
+            // 2. we are awaiting the job_handles in the order of adding, thus results are printed
+            //    sequentially from lowest primes to highest.
+            // 3. if we moved the println!() inside FindPrimesJob::run_async() we would see the
+            //    order of processing, with prime ranges out-of-order.
             let mut max: u128 = 0;
             for job_handle in job_handles {
                 let job_id = job_handle.job_id();
@@ -1208,16 +1217,23 @@ mod tests {
                 let job_result: FindPrimesJobResult = job_handle.await?.result()?.try_into()?;
                 let found_primes = job_result.into_inner();
 
-                let last_found = found_primes[found_primes.len() - 1];
+                if let Some(last_found) = found_primes.last() {
+                    max = std::cmp::max(max, *last_found);
 
+                    // verify that max of each set is larger than previous set.
+                    // which indicates that job results are in same order as jobs were added.
+                    assert!(*last_found, max);
+                }
                 println!(
-                    "job {} found primes from {} to {}",
-                    job_id, found_primes[0], last_found,
+                    "job {} found {} primes: {:?}",
+                    job_id,
+                    found_primes.len(),
+                    found_primes
                 );
-                max = std::cmp::max(max, last_found);
             }
 
-            assert_eq!(17389, max); // 2000th prime
+            // verify
+            assert_eq!(9973, max); // 9973 is the largest prime number below 10000
 
             Ok(())
         }
