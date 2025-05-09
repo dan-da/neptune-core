@@ -35,12 +35,12 @@ pub mod errors;
 mod job_completion;
 mod job_handle;
 mod job_id;
-mod queue;
 mod job_result_wrapper;
+mod queue;
 pub mod traits;
 
 pub use job_completion::JobCompletion;
 pub use job_handle::JobHandle;
 pub use job_id::JobId;
-pub use queue::JobQueue;
 pub use job_result_wrapper::JobResultWrapper;
+pub use queue::JobQueue;

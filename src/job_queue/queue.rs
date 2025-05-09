@@ -474,9 +474,13 @@ mod tests {
         workers::stop_queue().await
     }
 
-    mod workers {
-        use std::any::Any;
+    #[tokio::test(flavor = "multi_thread")]
+    #[traced_test]
+    async fn job_result_wrapper() -> anyhow::Result<()> {
+        workers::job_result_wrapper().await
+    }
 
+    mod workers {
         use super::*;
         use crate::job_queue::errors::JobHandleError;
         use crate::job_queue::errors::JobHandleErrorSync;
@@ -490,16 +494,7 @@ mod tests {
             High = 3,
         }
 
-        #[derive(Debug, PartialEq, Clone)]
-        struct DoubleJobResult(u64, u64, Instant);
-        impl JobResult for DoubleJobResult {
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-            fn into_any(self: Box<Self>) -> Box<dyn Any> {
-                self
-            }
-        }
+        type DoubleJobResult = JobResultWrapper<(u64, u64, Instant)>;
 
         // represents a prover job.  implements Job.
         #[derive(Debug)]
@@ -530,24 +525,23 @@ mod tests {
 
                         std::thread::sleep(sleep_time);
                     } else {
-                        break JobCompletion::Finished(Box::new(DoubleJobResult(
+                        break JobCompletion::Finished(Box::new(DoubleJobResult::from((
                             self.data,
                             self.data * 2,
                             Instant::now(),
-                        )));
+                        ))));
                     }
                 };
 
                 tracing::info!("results: {:?}", r);
-                r
+                r.into()
             }
 
             async fn run_async(&self) -> Box<dyn JobResult> {
                 tokio::time::sleep(self.duration).await;
-                let r = DoubleJobResult(self.data, self.data * 2, Instant::now());
-
+                let r = DoubleJobResult::from((self.data, self.data * 2, Instant::now()));
                 tracing::info!("results: {:?}", r);
-                Box::new(r)
+                r.into()
             }
         }
 
@@ -602,9 +596,8 @@ mod tests {
             results.sort_by(
                 |a_completion, b_completion| match (a_completion, b_completion) {
                     (Ok(JobCompletion::Finished(a_dyn)), Ok(JobCompletion::Finished(b_dyn))) => {
-                        let a = a_dyn.as_any().downcast_ref::<DoubleJobResult>().unwrap().2;
-
-                        let b = b_dyn.as_any().downcast_ref::<DoubleJobResult>().unwrap().2;
+                        let a = <&DoubleJobResult>::try_from(a_dyn).unwrap().2;
+                        let b = <&DoubleJobResult>::try_from(b_dyn).unwrap().2;
 
                         a.cmp(&b)
                     }
@@ -616,13 +609,13 @@ mod tests {
             //   timestamp of each is greater than prev.
             //   input value of each is greater than prev, except every 9th item which should be < prev
             //     because there are nine jobs per level.
-            let mut prev = Box::new(DoubleJobResult(9999, 0, start_of_test));
+            let mut prev = DoubleJobResult::from((9999, 0, start_of_test));
             for (i, c) in results.into_iter().enumerate() {
                 let Ok(JobCompletion::Finished(dyn_result)) = c else {
                     panic!("A job did not finish");
                 };
 
-                let job_result = dyn_result.into_any().downcast::<DoubleJobResult>().unwrap();
+                let job_result: DoubleJobResult = dyn_result.try_into()?;
 
                 assert!(job_result.2 > prev.2);
 
@@ -661,7 +654,7 @@ mod tests {
                     .result()
                     .map_err(|e| e.into_sync())?;
 
-                let job_result = result.into_any().downcast::<DoubleJobResult>().unwrap();
+                let job_result: DoubleJobResult = result.try_into()?;
 
                 assert_eq!(i, job_result.0);
                 assert_eq!(i * 2, job_result.1);
@@ -785,13 +778,12 @@ mod tests {
                 println!("job_completion: {:#?}", completion);
 
                 // obtain job result (via downcast)
-                let result: DoubleJobResult = *completion
+                let result: DoubleJobResult = completion
                     .map_err(|e| e.into_sync())?
                     .result()
                     .map_err(|e| e.into_sync())?
-                    .into_any()
-                    .downcast::<DoubleJobResult>()
-                    .expect("downcast should succeed, else bug");
+                    .try_into()
+                    .unwrap();
 
                 println!("job_result: {:#?}", result);
 
@@ -1072,11 +1064,11 @@ mod tests {
             }
         }
 
-        async fn job_result_wrapper() -> anyhow::Result<()> {
+        // demonstrates/tests usage of JobResultWrapper
+        pub(super) async fn job_result_wrapper() -> anyhow::Result<()> {
+            type MyJobResult = JobResultWrapper<(u64, u64, Instant)>;
 
-            type MyJobResult = JobResultWrapper::<(u64, u64, Instant)>;
-
-            // represents a prover job.  implements Job.
+            // represents a custom job.  implements Job.
             #[derive(Debug)]
             struct MyJob {
                 data: u64,
@@ -1096,12 +1088,20 @@ mod tests {
             }
 
             let job_queue = JobQueue::start();
-            let job = MyJob { data: 15, duration: std::time::Duration::from_secs(5) };
+            let job = MyJob {
+                data: 15,
+                duration: std::time::Duration::from_secs(5),
+            };
             let job_handle = job_queue.add_job(job.into(), 10usize)?;
-            let job_result: MyJobResult = job_handle.await.map_err(|e| e.into_sync())?.result().map_err(|e| e.into_sync())?.try_into()?;
+            let job_result: MyJobResult = job_handle
+                .await
+                .map_err(|e| e.into_sync())?
+                .result()
+                .map_err(|e| e.into_sync())?
+                .try_into()?;
             let answer = job_result.into_inner();
 
-            assert_eq!(answer.0*2, answer.1);
+            assert_eq!(answer.0 * 2, answer.1);
 
             Ok(())
         }

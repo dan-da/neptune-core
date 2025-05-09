@@ -73,10 +73,13 @@ impl From<JobHandleError> for JobHandleErrorSync {
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-#[error("downcast failed converting {} to {}", from, to)]
-pub struct JobResultWrapperError {
-    pub from: &'static str,
-    pub to: &'static str,
+#[non_exhaustive]
+pub enum JobResultWrapperError {
+    #[error("downcast failed converting '{from}' to '{to}'")]
+    DowncastError {
+        from: &'static str,
+        to: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, thiserror::Error)]

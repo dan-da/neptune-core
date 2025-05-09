@@ -1,6 +1,7 @@
+use std::fmt;
+
 use super::errors::JobHandleError;
 use super::traits::JobResult;
-use std::fmt;
 
 /// represents completion state of a job
 #[derive(strum::Display)]
@@ -23,7 +24,10 @@ impl fmt::Debug for JobCompletion {
         match self {
             JobCompletion::Finished(result) => {
                 // Attempt to downcast and debug if the underlying JobResult implements Debug
-                if let Some(debuggable) = result.as_any().downcast_ref::<Box<dyn fmt::Debug + Send + Sync>>() {
+                if let Some(debuggable) = result
+                    .as_any()
+                    .downcast_ref::<Box<dyn fmt::Debug + Send + Sync>>()
+                {
                     write!(f, "Finished({:?})", debuggable)
                 } else {
                     write!(f, "Finished(Box<dyn JobResult>)")

@@ -8,7 +8,6 @@ use tasm_lib::triton_vm::prelude::*;
 use tracing::debug;
 
 use super::prover_job::ProverJob;
-use super::prover_job::ProverJobError;
 use super::prover_job::ProverJobResult;
 use super::prover_job::ProverJobSettings;
 use crate::api::tx_initiation::builder::proof_builder::ProofBuilder;
@@ -141,15 +140,10 @@ pub(crate) async fn prove_consensus_program(
         None => job_handle.await?,
     };
 
-    // obtain resulting proof.
-    let result: Result<Proof, ProverJobError> = completion
-        .result()?
-        .into_any()
-        .downcast::<ProverJobResult>()
-        .expect("downcast should succeed, else bug")
-        .into();
+    let prover_job_result: ProverJobResult = completion.result()?.try_into()?;
 
-    Ok(result?)
+    // obtain resulting proof.
+    Ok(prover_job_result.into_inner()?)
 }
 
 /// Options for executing the triton-vm proving job

@@ -8,6 +8,7 @@ use crate::api::export::WitnessValidationError;
 use crate::job_queue::errors::AddJobError;
 use crate::job_queue::errors::JobHandleError;
 use crate::job_queue::errors::JobHandleErrorSync;
+use crate::job_queue::errors::JobResultWrapperError;
 use crate::models::blockchain::transaction::transaction_proof::TransactionProofType;
 use crate::models::proof_abstractions::tasm::prover_job::ProverJobError;
 use crate::models::state::tx_proving_capability::TxProvingCapability;
@@ -88,6 +89,9 @@ pub enum CreateProofError {
 
     #[error(transparent)]
     JobHandleError(#[from] JobHandleErrorSync),
+
+    #[error(transparent)]
+    JobResultWrapperError(#[from] JobResultWrapperError),
 
     #[error("Could not forward job cancellation msg to proving job. {0}")]
     JobCancelSendError(#[from] tokio::sync::watch::error::SendError<()>),
