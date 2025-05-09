@@ -31,10 +31,10 @@ use crate::job_queue::errors::JobHandleError;
 ///
 /// # Type Parameters
 ///
-/// * `T`: The specific type of the job result being wrapped. This type must
-///     be `'static`, `Send`, and `Sync`. For convenient conversion back from
-///     `Box<dyn JobResult>`, it is recommended that `T` also implements
-///     [`Debug`](std::fmt::Debug).
+/// * `T`: The specific type of the job result being wrapped. This type must be
+///   `'static`, `Send`, and `Sync`. For convenient conversion back from
+///   `Box<dyn JobResult>`, it is recommended that `T` also implements
+///   [`Debug`](std::fmt::Debug).
 pub struct JobResultWrapper<T: 'static + Send + Sync>(T);
 
 impl<T: 'static + Send + Sync> JobResult for JobResultWrapper<T> {
@@ -81,12 +81,10 @@ impl<T: 'static + Send + Sync + Debug> TryFrom<Box<dyn JobResult>> for JobResult
     }
 }
 
-impl<'a, T: 'static + Send + Sync + Debug> TryFrom<&'a Box<dyn JobResult>>
-    for &'a JobResultWrapper<T>
-{
+impl<'a, T: 'static + Send + Sync + Debug> TryFrom<&'a dyn JobResult> for &'a JobResultWrapper<T> {
     type Error = JobHandleError;
 
-    fn try_from(boxed_trait_object: &'a Box<dyn JobResult>) -> Result<Self, Self::Error> {
+    fn try_from(boxed_trait_object: &'a dyn JobResult) -> Result<Self, Self::Error> {
         JobResultWrapper::try_from_boxed_job_result_ref(boxed_trait_object)
     }
 }
@@ -131,7 +129,7 @@ impl<T: 'static + Send + Sync + 'static> JobResultWrapper<T> {
 
     /// fallibly convert a boxed dyn JobResult reference into a JobResultWrapper<T>.
     pub fn try_from_boxed_job_result_ref(
-        boxed_trait_object: &Box<dyn JobResult>,
+        boxed_trait_object: &dyn JobResult,
     ) -> Result<&Self, JobHandleError> {
         let any = boxed_trait_object.as_any();
         if let Some(concrete_wrapper) = any.downcast_ref::<JobResultWrapper<T>>() {

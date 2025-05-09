@@ -29,11 +29,9 @@ impl JobHandleError {
             JobHandleError::JobPanicked(payload) => {
                 let guard = payload.lock().unwrap();
                 if let Some(s) = guard.downcast_ref::<&'static str>() {
-                    Some(s.to_string())
-                } else if let Some(s) = guard.downcast_ref::<String>() {
-                    Some(s.clone())
+                    Some((*s).to_string())
                 } else {
-                    None
+                    guard.downcast_ref::<String>().cloned()
                 }
             }
             _ => None,

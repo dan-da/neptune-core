@@ -536,7 +536,7 @@ mod tests {
                 };
 
                 tracing::info!("results: {:?}", r);
-                r.into()
+                r
             }
 
             async fn run_async(&self) -> Box<dyn JobResult> {
@@ -598,8 +598,8 @@ mod tests {
             results.sort_by(
                 |a_completion, b_completion| match (a_completion, b_completion) {
                     (Ok(JobCompletion::Finished(a_dyn)), Ok(JobCompletion::Finished(b_dyn))) => {
-                        let a = <&DoubleJobResult>::try_from(a_dyn).unwrap().2;
-                        let b = <&DoubleJobResult>::try_from(b_dyn).unwrap().2;
+                        let a = <&DoubleJobResult>::try_from(&**a_dyn).unwrap().2;
+                        let b = <&DoubleJobResult>::try_from(&**b_dyn).unwrap().2;
 
                         a.cmp(&b)
                     }
