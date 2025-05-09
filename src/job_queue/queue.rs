@@ -481,6 +481,7 @@ mod tests {
         use crate::job_queue::errors::JobHandleError;
         use crate::job_queue::errors::JobHandleErrorSync;
         use crate::job_queue::traits::JobResult;
+        use crate::job_queue::JobResultWrapper;
 
         #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
         pub enum DoubleJobPriority {
@@ -781,6 +782,8 @@ mod tests {
                     }
                 };
 
+                println!("job_completion: {:#?}", completion);
+
                 // obtain job result (via downcast)
                 let result: DoubleJobResult = *completion
                     .map_err(|e| e.into_sync())?
@@ -789,6 +792,8 @@ mod tests {
                     .into_any()
                     .downcast::<DoubleJobResult>()
                     .expect("downcast should succeed, else bug");
+
+                println!("job_result: {:#?}", result);
 
                 Ok(result)
             }
@@ -1036,8 +1041,6 @@ mod tests {
 
                 let job_result = job_handle.await.map_err(|e| e.into_sync())?.result();
 
-                println!("job_result: {:#?}", job_result);
-
                 // verify that job_queue channels are still open
                 assert!(!job_queue.tx_job_added.is_closed());
                 assert!(!job_queue.tx_stop.is_closed());
@@ -1067,6 +1070,40 @@ mod tests {
 
                 Ok(())
             }
+        }
+
+        async fn job_result_wrapper() -> anyhow::Result<()> {
+
+            type MyJobResult = JobResultWrapper::<(u64, u64, Instant)>;
+
+            // represents a prover job.  implements Job.
+            #[derive(Debug)]
+            struct MyJob {
+                data: u64,
+                duration: std::time::Duration,
+            }
+
+            #[async_trait::async_trait]
+            impl Job for MyJob {
+                fn is_async(&self) -> bool {
+                    true
+                }
+
+                async fn run_async(&self) -> Box<dyn JobResult> {
+                    tokio::time::sleep(self.duration).await;
+                    MyJobResult::from((self.data, self.data * 2, Instant::now())).into()
+                }
+            }
+
+            let job_queue = JobQueue::start();
+            let job = MyJob { data: 15, duration: std::time::Duration::from_secs(5) };
+            let job_handle = job_queue.add_job(job.into(), 10usize)?;
+            let job_result: MyJobResult = job_handle.await.map_err(|e| e.into_sync())?.result().map_err(|e| e.into_sync())?.try_into()?;
+            let answer = job_result.into_inner();
+
+            assert_eq!(answer.0*2, answer.1);
+
+            Ok(())
         }
     }
 }
