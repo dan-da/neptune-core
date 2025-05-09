@@ -106,7 +106,11 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
     ///
     /// job-results can be obtained by via JobHandle::results().await
     /// The job can be cancelled by JobHandle::cancel()
-    pub fn add_job(&self, job: Box<dyn Job>, priority: P) -> Result<JobHandle, AddJobError> {
+    pub fn add_job(
+        &self,
+        job: impl Into<Box<dyn Job>>,
+        priority: P,
+    ) -> Result<JobHandle, AddJobError> {
         let (result_tx, result_rx) = oneshot::channel();
         let (cancel_tx, cancel_rx) = watch::channel::<()>(());
 
@@ -115,7 +119,7 @@ impl<P: Ord + Send + Sync + 'static> JobQueue<P> {
 
         // represent a job in the queue
         let m = QueuedJob {
-            job,
+            job: job.into(),
             job_id,
             result_tx,
             cancel_tx: cancel_tx.clone(),
@@ -525,11 +529,10 @@ mod tests {
 
                         std::thread::sleep(sleep_time);
                     } else {
-                        break JobCompletion::Finished(Box::new(DoubleJobResult::from((
-                            self.data,
-                            self.data * 2,
-                            Instant::now(),
-                        ))));
+                        break JobCompletion::Finished(
+                            DoubleJobResult::from((self.data, self.data * 2, Instant::now()))
+                                .into(),
+                        );
                     }
                 };
 
@@ -559,21 +562,21 @@ mod tests {
 
             // create 30 jobs, 10 at each priority level.
             for i in (1..10).rev() {
-                let job1 = Box::new(DoubleJob {
+                let job1 = DoubleJob {
                     data: i,
                     duration,
                     is_async,
-                });
-                let job2 = Box::new(DoubleJob {
+                };
+                let job2 = DoubleJob {
                     data: i * 100,
                     duration,
                     is_async,
-                });
-                let job3 = Box::new(DoubleJob {
+                };
+                let job3 = DoubleJob {
                     data: i * 1000,
                     duration,
                     is_async,
-                });
+                };
 
                 // process job and print results.
                 handles.push(job_queue.add_job(job1, DoubleJobPriority::Low)?);
@@ -641,11 +644,11 @@ mod tests {
 
             // create 10 jobs
             for i in 0..10 {
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: i,
                     duration,
                     is_async,
-                });
+                };
 
                 let result = job_queue
                     .add_job(job, DoubleJobPriority::Low)?
@@ -671,16 +674,16 @@ mod tests {
             // start a 1 hour job.
             let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-            let job = Box::new(DoubleJob {
+            let job = DoubleJob {
                 data: 10,
                 duration,
                 is_async: true,
-            });
-            let job2 = Box::new(DoubleJob {
+            };
+            let job2 = DoubleJob {
                 data: 10,
                 duration,
                 is_async: true,
-            });
+            };
             let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
             let job2_handle = job_queue.add_job(job2, DoubleJobPriority::Low)?;
 
@@ -713,11 +716,11 @@ mod tests {
             // start a 1 hour job.
             let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-            let job = Box::new(DoubleJob {
+            let job = DoubleJob {
                 data: 10,
                 duration,
                 is_async,
-            });
+            };
             let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
 
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -750,11 +753,11 @@ mod tests {
                 // start a 1 hour job.
                 let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: 10,
                     duration,
                     is_async,
-                });
+                };
 
                 // add the job to queue
                 let job_handle = job_queue.add_job(job, DoubleJobPriority::Low).unwrap();
@@ -841,11 +844,11 @@ mod tests {
                 // start a 1 hour job.
                 let duration = std::time::Duration::from_secs(3600); // 1 hour job.
 
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: 10,
                     duration,
                     is_async,
-                });
+                };
                 let _rx = job_queue.add_job(job, DoubleJobPriority::Low)?;
 
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -890,11 +893,11 @@ mod tests {
                 // this job takes at least 5 secs to complete.
                 let duration = std::time::Duration::from_secs(5);
 
-                let job = Box::new(DoubleJob {
+                let job = DoubleJob {
                     data: 10,
                     duration,
                     is_async,
-                });
+                };
 
                 let rx_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
                 drop(rx_handle);
@@ -953,11 +956,11 @@ mod tests {
                     // the test will always succeed due to the await point.
                     std::thread::sleep(std::time::Duration::from_millis(200));
 
-                    let job = Box::new(DoubleJob {
+                    let job = DoubleJob {
                         data: 10,
                         duration: std::time::Duration::from_secs(1),
                         is_async,
-                    });
+                    };
 
                     let result = job_queue_cloned.add_job(job, DoubleJobPriority::Low);
 
@@ -1029,7 +1032,7 @@ mod tests {
                 let job = PanicJob {
                     is_async: async_job,
                 };
-                let job_handle = job_queue.add_job(Box::new(job), DoubleJobPriority::Low)?;
+                let job_handle = job_queue.add_job(job, DoubleJobPriority::Low)?;
 
                 let job_result = job_handle.await.map_err(|e| e.into_sync())?.result();
 
@@ -1044,11 +1047,11 @@ mod tests {
                 ));
 
                 // ensure we can still run another job afterwards.
-                let newjob = Box::new(DoubleJob {
+                let newjob = DoubleJob {
                     data: 10,
                     duration: std::time::Duration::from_millis(50),
                     is_async: false,
-                });
+                };
 
                 // ensure we can add another job.
                 let new_job_handle = job_queue.add_job(newjob, DoubleJobPriority::Low)?;
@@ -1092,7 +1095,7 @@ mod tests {
                 data: 15,
                 duration: std::time::Duration::from_secs(5),
             };
-            let job_handle = job_queue.add_job(job.into(), 10usize)?;
+            let job_handle = job_queue.add_job(job, 10usize)?;
             let job_result: MyJobResult = job_handle
                 .await
                 .map_err(|e| e.into_sync())?

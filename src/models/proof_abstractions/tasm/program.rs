@@ -115,7 +115,7 @@ pub(crate) async fn prove_consensus_program(
     );
 
     // queue the job and obtain a job handle.
-    let job_handle = triton_vm_job_queue.add_job(Box::new(job), proof_job_options.job_priority)?;
+    let job_handle = triton_vm_job_queue.add_job(job, proof_job_options.job_priority)?;
     tokio::pin!(job_handle);
 
     let completion = match proof_job_options.cancel_job_rx {
