@@ -111,7 +111,6 @@ impl<T> JobResultWrapper<T> {
 }
 
 impl<T: 'static> JobResultWrapper<T> {
-
     /// fallibly convert a boxed dyn JobResult into a JobResultWrapper<T>.
     pub fn try_from_boxed_job_result(
         boxed_trait_object: Box<dyn JobResult>,
