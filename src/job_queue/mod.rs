@@ -24,6 +24,9 @@
 //! Jobs may be of mixed (heterogenous) types in a single [JobQueue] instance.
 //! Any type that implements the [Job](traits::Job) trait may be a job.
 //!
+//! Jobs may be async or blocking.  Both types can be run in the same JobQueue
+//! instance concurrently.
+//!
 //! Job results also may be of any type.  Typically each type of Job will return
 //! a single concrete result type.  A [JobResultWrapper] is provided to
 //! facilitate this usage pattern.
@@ -62,10 +65,14 @@
 //!
 //! ### Async Job example: FindPrimes
 //!
-//! For an async job it is important the job yield regularly to the async
-//! runtime.  Our processing is inherently blocking, so we accomplish this
-//! simply by making the is_prime() fn async, which is called in every loop
-//! iteration.
+//! For an async job:
+//!
+//! 1. the Job::is_async() impl returns true.
+//! 2. Job::run_async() or Job::run_async_cancellable() must be implemented.
+//!
+//! It is important the job yield regularly to the async runtime.  Our
+//! processing is inherently blocking, so we accomplish this simply by making
+//! the is_prime() fn async, which is called in every loop iteration.
 //!
 //! ```
 //! use neptune_cash::job_queue::JobResultWrapper;
@@ -213,6 +220,174 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ### Blocking Job example: FindPrimes
+//!
+//! For a blocking job:
+//!
+//! 1. the Job::is_async() impl returns false.
+//! 2. Job::run() must be implemented.
+//! 3. it is necessary to regularly poll for a job-cancellation message in the
+//! job's main processing loop.
+//!
+//! ```
+//! use neptune_cash::job_queue::JobCompletion;
+//! use neptune_cash::job_queue::JobResultWrapper;
+//! use neptune_cash::job_queue::JobQueue;
+//! use neptune_cash::job_queue::channels::JobCancelReceiver;
+//! use neptune_cash::job_queue::traits::*;
+//! use rand::Rng;
+//!
+//! // define job priority levels for this job-queue.
+//! // note that the queue could process only one type of
+//! // job, or mixed job types.
+//! #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+//! enum QueueJobPriority {
+//!     Low = 1,
+//!     High = 2,
+//! }
+//! impl QueueJobPriority {
+//!     pub fn random() -> Self {
+//!         let variants = [QueueJobPriority::Low, QueueJobPriority::High];
+//!         variants[rand::rng().random_range(0..variants.len())]
+//!     }
+//! }
+//!
+//! // define type alias for a wrapper around the data returned by our
+//! // job type. The wrapper is not required, but simplifies
+//! // conversions.
+//! type FindPrimesJobResult = JobResultWrapper<Vec<u64>>;
+//!
+//! // define our custom job type that finds prime numbers within a range
+//! #[derive(Debug)]
+//! pub struct FindPrimesJob {
+//!     start: u64,
+//!     len: u64,
+//! }
+//!
+//! // The prime-number finding algorithm can be described as:
+//! // Trial Division with Square Root Limit and 6k ± 1 Optimization
+//! //
+//! // None of the functions are async because our "impl Job"
+//! // defines this as blocking job.  It will be run in tokio's blocking
+//! // threadpool via a spawn_blocking() call in the job-queue.
+//! impl FindPrimesJob {
+//!     fn is_prime(num: u64) -> bool {
+//!         if num <= 1 {
+//!             return false;
+//!         }
+//!         if num <= 3 {
+//!             return true;
+//!         }
+//!         if num % 2 == 0 || num % 3 == 0 {
+//!             return false;
+//!         }
+//!         let mut i = 5;
+//!         while i * i <= num {
+//!             if num % i == 0 || num % (i + 2) == 0 {
+//!                 return false;
+//!             }
+//!             i += 6;
+//!         }
+//!         true
+//!     }
+//! }
+//!
+//! // implement Job trait.
+//! #[async_trait::async_trait]
+//! impl Job for FindPrimesJob {
+//!     // we are *not* an async Job.
+//!     fn is_async(&self) -> bool {
+//!         false
+//!     }
+//!
+//!     // as a blocking job we must impl the run() method
+//!     fn run(&self, cancel_rx: JobCancelReceiver) -> JobCompletion {
+//!         let mut primes = Vec::new();
+//!
+//!         // this is the main processing loop of our job, so it should poll for
+//!         // a cancellation message.  It could be more efficient and poll
+//!         // every 100 iterations or n milliseconds, etc.
+//!         for num in self.start..=self.start + self.len {
+//!
+//!             match cancel_rx.has_changed() {
+//!                 Ok(changed) if changed => break JobCompletion::Cancelled,
+//!                 Err(_) => break JobCompletion::Cancelled,
+//!                 _ => {}
+//!             }
+//!
+//!             if Self::is_prime(num).await {
+//!                 primes.push(num);
+//!             }
+//!         }
+//!
+//!         JobCompletion::Finished(primes)
+//!     }
+//! }
+//!
+//! // note that main() is exactly the same as in the async example.
+//! // The blocking/async behavior is encapsulated in the Job itself.
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     // setup
+//!     const NUM_PRIMES_PER_JOB: u64 = 100;
+//!     let mut job_handles = vec![];
+//!
+//!     // start the JobQueue running.
+//!     let job_queue = JobQueue::<QueueJobPriority>::start();
+//!
+//!     // start 100 jobs, each searching 100 numbers for primes, with random job priorities
+//!     // note that jobs begin processing right away while this loop is running.
+//!     for n in 0..100 {
+//!         let job = FindPrimesJob {
+//!             start: n * NUM_PRIMES_PER_JOB,
+//!             len: NUM_PRIMES_PER_JOB,
+//!         };
+//!         println!("job: {:#?}", job);
+//!
+//!         let job_handle = job_queue.add_job(job, QueueJobPriority::random())?;
+//!         job_handles.push(job_handle);
+//!     }
+//!
+//!     // await all the jobs to complete.  note that:
+//!     // 1. jobs will be processed in a different order than they were added due to the random priorities
+//!     // 2. we are awaiting the job_handles in the order of adding, thus results are printed
+//!     //    sequentially from lowest primes to highest.
+//!     // 3. if we moved the println!() inside FindPrimesJob::run_async() we would see the
+//!     //    order of processing, with prime ranges out-of-order.
+//!     let mut max: u64 = 0;
+//!     for job_handle in job_handles {
+//!         let job_id = job_handle.job_id();
+//!
+//!         // await job to complete and obtain the (wrapped) job result
+//!         let job_result: FindPrimesJobResult = job_handle.await?.result()?.try_into()?;
+//!         let found_primes = job_result.into_inner();
+//!
+//!         // check for last (highest) prime in the result set
+//!         if let Some(last_found) = found_primes.last() {
+//!             // verify that max of each set is larger than previous set.
+//!             // which indicates that job results are in same order as jobs were added.
+//!             assert!(*last_found > max);
+//!
+//!             max = std::cmp::max(max, *last_found);
+//!         }
+//!
+//!         println!(
+//!             "job {} found {} primes: {:?}",
+//!             job_id,
+//!             found_primes.len(),
+//!             found_primes
+//!         );
+//!     }
+//!
+//!     // verify
+//!     assert_eq!(9973, max); // 9973 is the largest prime number below 10000
+//!
+//!     Ok(())
+//! }
+//! ```
+
 
 // please note that the job_queue module has zero neptune-core specific
 // code in it.  It is intended/planned to move job_queue into its own
