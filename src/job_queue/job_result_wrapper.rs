@@ -4,10 +4,10 @@
 //!
 //! It is useful for:
 //!
-//! 1. returning job results of type T as Box<dyn JobResults> when implementing
+//! 1. returning job results of type T as `Box<dyn JobResults>` when implementing
 //!    the `Job` trait.
 //!
-//! 2. converting the Box<dyn JobResults> from a completed `Job` back into `T`.
+//! 2. converting the `Box<dyn JobResults>` from a completed `Job` back into `T`.
 //!
 //! See [module docs](super) for usage examples.
 use std::any::Any;
@@ -111,7 +111,7 @@ impl<T> JobResultWrapper<T> {
 }
 
 impl<T: 'static> JobResultWrapper<T> {
-    /// fallibly convert a boxed dyn JobResult into a JobResultWrapper<T>.
+    /// fallibly convert a `Box<dyn JobResult>` into a `JobResultWrapper<T>`.
     pub fn try_from_boxed_job_result(
         boxed_trait_object: Box<dyn JobResult>,
     ) -> Result<Self, JobHandleError> {
@@ -126,7 +126,7 @@ impl<T: 'static> JobResultWrapper<T> {
         }
     }
 
-    /// fallibly convert a boxed dyn JobResult reference into a JobResultWrapper<T>.
+    /// fallibly convert an `&dyn JobResult` reference into a `JobResultWrapper<T>`.
     pub fn try_from_boxed_job_result_ref(
         boxed_trait_object: &dyn JobResult,
     ) -> Result<&Self, JobHandleError> {

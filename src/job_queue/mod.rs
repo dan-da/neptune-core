@@ -44,7 +44,7 @@
 //! We create 100 jobs, each searching a range of 100 numbers. So the first
 //! 10000 integers are searched by all jobs.
 //!
-//! We use a JobQueue<QueueJobPriority> where QueueJobPriority is an enum we
+//! We use a `JobQueue<QueueJobPriority>` where `QueueJobPriority` is an enum we
 //! define that simply has `Low` and `High` variants.
 //!
 //! The jobs are added to the queue in ascending order but each is assigned a
@@ -228,7 +228,7 @@
 //! 1. the Job::is_async() impl returns false.
 //! 2. Job::run() must be implemented.
 //! 3. it is necessary to regularly poll for a job-cancellation message in the
-//! job's main processing loop.
+//!    job's main processing loop.
 //!
 //! ```
 //! use neptune_cash::job_queue::JobCompletion;
@@ -311,17 +311,17 @@
 //!         for num in self.start..=self.start + self.len {
 //!
 //!             match cancel_rx.has_changed() {
-//!                 Ok(changed) if changed => break JobCompletion::Cancelled,
-//!                 Err(_) => break JobCompletion::Cancelled,
+//!                 Ok(changed) if changed => return JobCompletion::Cancelled,
+//!                 Err(_) => return JobCompletion::Cancelled,
 //!                 _ => {}
 //!             }
 //!
-//!             if Self::is_prime(num).await {
+//!             if Self::is_prime(num) {
 //!                 primes.push(num);
 //!             }
 //!         }
 //!
-//!         JobCompletion::Finished(primes)
+//!         JobCompletion::Finished(FindPrimesJobResult::from(primes).into())
 //!     }
 //! }
 //!
@@ -387,7 +387,6 @@
 //!     Ok(())
 //! }
 //! ```
-
 
 // please note that the job_queue module has zero neptune-core specific
 // code in it.  It is intended/planned to move job_queue into its own
