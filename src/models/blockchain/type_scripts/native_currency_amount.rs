@@ -47,7 +47,10 @@ use crate::triton_vm::prelude::triton_instr;
 /// the latter operation does not care about overflow. Not testing for overflow can cause
 /// inflation bugs.
 #[derive(Clone, Debug, Copy, Serialize, Deserialize, Eq, Default, BFieldCodec)]
-pub struct NativeCurrencyAmount(i128);
+pub struct NativeCurrencyAmount(
+    // so i128 can be serialized by serde-json-wasm crate.
+    #[serde(with = "crate::util_types::serde::i128")] i128,
+);
 
 impl TasmObject for NativeCurrencyAmount {
     fn label_friendly_name() -> String {
