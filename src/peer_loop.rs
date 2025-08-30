@@ -689,7 +689,7 @@ impl PeerLoopHandler {
                         self.now(),
                     ));
 
-                    debug!("sending challenge ...");
+                    debug!("sending challenge to {} ...", self.peer_address.ip());
                     peer.send(PeerMessage::SyncChallenge(challenge)).await?;
 
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -757,7 +757,7 @@ impl PeerLoopHandler {
                 Ok(KEEP_CONNECTION_ALIVE)
             }
             PeerMessage::SyncChallengeResponse(challenge_response) => {
-                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(45);
+                const SYNC_RESPONSE_TIMEOUT: Timestamp = Timestamp::seconds(3600);
 
                 log_slow_scope!(fn_name!() + "::PeerMessage::SyncChallengeResponse");
                 info!(
@@ -835,8 +835,17 @@ impl PeerLoopHandler {
                     return Ok(KEEP_CONNECTION_ALIVE);
                 }
 
+                let elapsed_duration = now - issued_challenge.issued_at;
+                debug!(
+                    "Checking sync-challenge timeout. now: {:?}, issued_at: {:?}, calculated_duration: {}, timeout_is: {}",
+                    now,
+                    issued_challenge.issued_at,
+                    elapsed_duration.format_human_duration(),
+                    SYNC_RESPONSE_TIMEOUT.format_human_duration()
+                );
+
                 // Did it come in time?
-                if now - issued_challenge.issued_at > SYNC_RESPONSE_TIMEOUT {
+                if elapsed_duration > SYNC_RESPONSE_TIMEOUT {
                     self.punish(NegativePeerSanction::TimedOutSyncChallengeResponse)
                         .await?;
                     return Ok(KEEP_CONNECTION_ALIVE);
@@ -1635,8 +1644,23 @@ impl PeerLoopHandler {
                 }
 
                 let max_response_len = std::cmp::min(
-                    STANDARD_BLOCK_BATCH_SIZE,
+                    5, //STANDARD_BLOCK_BATCH_SIZE,
                     self.global_state_lock.cli().sync_mode_threshold,
+                );
+
+                let tip_height = self
+                    .global_state_lock
+                    .lock_guard()
+                    .await
+                    .chain
+                    .light_state()
+                    .kernel
+                    .header
+                    .height;
+
+                debug!(
+                    "Requesting block batch with max {} blocks from peer {}. present tip: {}",
+                    max_response_len, self.peer_address, tip_height
                 );
 
                 peer.send(PeerMessage::BlockRequestBatch(BlockRequestBatch {
@@ -1780,11 +1804,17 @@ impl PeerLoopHandler {
 
                 // Handle messages from main task
                 main_msg_res = from_main_rx.recv() => {
-                    let main_msg = main_msg_res.unwrap_or_else(|err| {
-                        let err_msg = format!("Failed to read from main loop: {err}");
-                        error!(err_msg);
-                        panic!("{err_msg}");
-                    });
+                    let main_msg = match main_msg_res {
+                        Ok(msg) => msg,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                            warn!("A peer_loop receiver lagged and missed {n} messages. Continuing.");
+                            continue; // Skip this loop iteration, as the message was missed
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            warn!("Main loop broadcast channel closed. Exiting peer loop.");
+                            break; // Exit the loop as the sender is gone
+                        }
+                    };
                     let close_connection = self
                         .handle_main_task_message(main_msg, &mut peer, peer_state_info)
                         .await

@@ -74,7 +74,7 @@ const MP_RESYNC_INTERVAL: Duration = Duration::from_secs(59);
 const PROOF_UPGRADE_INTERVAL: Duration = Duration::from_secs(10);
 const EXPECTED_UTXOS_PRUNE_INTERVAL: Duration = Duration::from_secs(19 * 60);
 
-const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 40;
+const SANCTION_PEER_TIMEOUT_FACTOR: u64 = 120;
 
 /// Number of seconds within which an individual peer is expected to respond
 /// to a synchronization request.
@@ -1378,11 +1378,46 @@ impl MainLoopHandler {
         // Create the next request from the reported
         info!("Creating new sync request");
 
-        // Pick a random peer that has reported to have relevant blocks
+        // Get all potential sync candidates
         let candidate_peers = main_loop_state
             .sync_state
             .get_potential_peers_for_sync_request(own_cumulative_pow);
-        let chosen_peer = candidate_peers.choose(&mut rand::rng());
+
+        // Filter for candidates on a local/private IP address
+        let local_candidates: Vec<SocketAddr> = candidate_peers
+            .iter()
+            .filter(|sa| match sa.ip() {
+                std::net::IpAddr::V4(ipv4) => ipv4.is_private(),
+                std::net::IpAddr::V6(ipv6) => {
+                    // Check for the three types of "private" IPv6 addresses
+                    if ipv6.is_loopback() {
+                        return true;
+                    }
+                    // Check for Unique Local Address (ULA) range: fc00::/7
+                    if (ipv6.segments()[0] & 0xfe00) == 0xfc00 {
+                        return true;
+                    }
+                    // Check for Link-Local Address range: fe80::/10
+                    if (ipv6.segments()[0] & 0xffc0) == 0xfe80 {
+                        return true;
+                    }
+                    false
+                }
+            })
+            .copied()
+            .collect();
+
+        // Prioritize local candidates if any exist, otherwise use the full list
+        let chosen_peer = if !local_candidates.is_empty() {
+            let maybe_peer = local_candidates.choose(&mut rand::rng());
+            if let Some(peer) = maybe_peer {
+                debug!("Chose local peer {} for sync request.", peer);
+            }
+            maybe_peer
+        } else {
+            candidate_peers.choose(&mut rand::rng())
+        };
+
         assert!(
             chosen_peer.is_some(),
             "A synchronization candidate must be available for a request. \
