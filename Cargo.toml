@@ -296,3 +296,8 @@ harness = false
 [[bench]]
 name = "wallet_state"
 harness = false
+
+[patch.crates-io]
+twenty-first = { git = "https://github.com/dan-da/twenty-first.git", branch = "jfs/tip5_avx-v0.50.0", version = "0.50.0" }
+
+

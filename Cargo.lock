@@ -3527,8 +3527,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 [[package]]
 name = "twenty-first"
 version = "0.50.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71bd6472080a84aa3ef60522b4b8b0ccb18341fab059e7abb53938d61b900ba1"
+source = "git+https://github.com/dan-da/twenty-first.git?branch=jfs%2Ftip5_avx-v0.50.0#c364ddc046853545ad68bf14107ed07f63783dda"
 dependencies = [
  "arbitrary",
  "bfieldcodec_derive",
