@@ -3617,7 +3617,7 @@ impl RPC for NeptuneRPCServer {
         {
             let parent_ = parent.unwrap();
             let interval = current.timestamp.to_millis() - parent_.timestamp.to_millis();
-            let block_height: u64 = current.height.into();
+            let block_height: u64 = parent_.height.into();
             intervals.push((block_height, interval));
             current = parent_;
             parent = state
